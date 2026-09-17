@@ -16,6 +16,7 @@ from ultralytics import YOLO
 from rclpy.node import Node
 from sensor_msgs.msg import Image, CameraInfo
 from geometry_msgs.msg import PointStamped
+from std_msgs.msg import Bool
 from cv_bridge import CvBridge, CvBridgeError
 from tf2_geometry_msgs import do_transform_point
 from tf2_ros import Buffer, TransformException, TransformListener
@@ -37,8 +38,14 @@ class VisionManager(Node):
             'depth_topic', '/depth').value
         self.camera_info_topic = self.declare_parameter(
             'camera_info_topic', '/camera_info').value
+        self.trigger_topic = self.declare_parameter(
+            'trigger_topic', '/perception/detect_request').value
+        self.wait_for_trigger = bool(self.declare_parameter(
+            'wait_for_trigger', True).value)
+        self.camera_frame = self.declare_parameter(
+            'camera_frame', 'sim_camera').value
         self.target_frame = self.declare_parameter(
-            'target_frame', 'base_link').value
+            'target_frame', 'arm_base_link').value
         self.depth_registered = bool(self.declare_parameter(
             'depth_registered', True).value)
         self.depth_scale = float(self.declare_parameter(
@@ -56,6 +63,8 @@ class VisionManager(Node):
             'pre_insert_offset', 0.05).value)
         self.target_confidence = float(self.declare_parameter(
             'target_confidence', 1.0).value)
+        self.confidence_threshold = float(self.declare_parameter(
+            'confidence_threshold', 0.5).value)
 
         # book_dataset에서 학습된 YOLO 모델(.pt) 파일 경로입니다.
         # 다른 모델을 사용할 때만 실행 시 -p model_path:=... 로 덮어쓰세요.
@@ -64,7 +73,7 @@ class VisionManager(Node):
             '/home/rokey/book_dataset/runs/segment/runs/book/weights/best.pt',
         ).value
         self.target_topic = self.declare_parameter(
-            'target_topic', '/m0609/empty_shelf_position').value
+            'target_topic', '/perception/empty_shelf_position').value
         self.scan_radius = float(self.declare_parameter('scan_radius', 0.15).value)
         self.scan_pixel_u = int(self.declare_parameter('scan_pixel_u', -1).value)
         self.scan_pixel_v = int(self.declare_parameter('scan_pixel_v', -1).value)
@@ -84,6 +93,9 @@ class VisionManager(Node):
         self.target_pub = self.create_publisher(PointStamped, self.target_topic, 10)
         self.target_slot_pub = self.create_publisher(
             TargetSlot, self.target_slot_topic, 10)
+        self.trigger_sub = self.create_subscription(
+            Bool, self.trigger_topic, self.trigger_callback, 10)
+        self.pending_detection = not self.wait_for_trigger
 
         rgb_sub = message_filters.Subscriber(self, Image, self.rgb_topic)
         depth_sub = message_filters.Subscriber(self, Image, self.depth_topic)
@@ -96,11 +108,29 @@ class VisionManager(Node):
         self.get_logger().info(
             f'Subscribed to rgb={self.rgb_topic}, depth={self.depth_topic}, '
             f'camera_info={self.camera_info_topic}, '
-            f'target_frame={self.target_frame}')
+            f'target_frame={self.target_frame}, '
+            f'trigger={self.trigger_topic}')
+
+    def trigger_callback(self, msg):
+        """Arm one synchronized image processing cycle on a true request."""
+        if msg.data:
+            self.pending_detection = True
 
     def rgb_callback(self, rgb_msg, depth_msg, camera_info_msg):
+        if not self.pending_detection:
+            return
+
         if not rgb_msg.header.frame_id or not depth_msg.header.frame_id:
             self.get_logger().warning('RGB or depth frame_id is empty')
+            return
+        if (rgb_msg.header.frame_id != self.camera_frame
+                or depth_msg.header.frame_id != self.camera_frame
+                or camera_info_msg.header.frame_id != self.camera_frame):
+            self.get_logger().warning(
+                f'Expected camera optical frame {self.camera_frame}, got '
+                f'rgb={rgb_msg.header.frame_id}, '
+                f'depth={depth_msg.header.frame_id}, '
+                f'camera_info={camera_info_msg.header.frame_id}')
             return
         if (rgb_msg.header.frame_id != depth_msg.header.frame_id
                 and not self.depth_registered):
@@ -121,6 +151,7 @@ class VisionManager(Node):
             self.get_logger().warning('RGB and depth image sizes differ')
             return
 
+        self.pending_detection = False
         depth_scale = self._get_depth_scale(depth_msg.encoding, depth_image)
 
         info = camera_info_msg
@@ -235,6 +266,9 @@ class VisionManager(Node):
         results = self.model(rgb_image, verbose=False)
         for result in results:
             for box in result.boxes:
+                confidence = float(box.conf[0])
+                if confidence < self.confidence_threshold:
+                    continue
                 class_id = int(box.cls[0])
                 class_name = self.model.names[class_id]
                 if class_name != 'book':
