@@ -93,7 +93,7 @@ class Call(Primitive):
 class BookScene:
     """레벨 + 트레이 + 책 N권 + 북엔드. 로봇·IK·팔 제어기까지 준비한다"""
 
-    def __init__(self, app, usd, tray_usd, tray_center, n_books, place_dx, say):
+    def __init__(self, app, usd, tray_usd, tray_center, n_books, place_dx, say, before_reset=None):
         self.app, self.say = app, say
         open_stage(usd); app.update()
         while is_stage_loading():
@@ -166,6 +166,8 @@ class BookScene:
                 cube.CreateDisplayColorAttr([Gf.Vec3f(0.2, 0.2, 0.25)])
                 UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
 
+        if before_reset is not None:
+            before_reset(st)      # ROS 그래프 설정 보완 등 — 재생(초기화) 전에 해야 반영된다
         self.world.reset(); self.robot.initialize()
         r = self.robot
         self.idx_arm = [r.get_dof_index(j) for j in ARM_JOINTS]

@@ -28,6 +28,11 @@ ap.add_argument("--state-topic", default="/manipulation/sim/state")
 ap.add_argument("--gui", action="store_true")
 ap.add_argument("--camera", action="store_true",
                 help="손목 카메라 + /rgb /depth /camera_info /tf /clock 발행 (비전 연동 시험)")
+ap.add_argument("--sensor-policy", choices=["gated", "always"], default="gated",
+                help="gated: 파지 확인 뒤~작업 끝 카메라·라이다 끔 (부하 절감). always: 항상 켬")
+ap.add_argument("--camera-hz", type=float, default=10.0, help="카메라 발행 주기 (시뮬 60 Hz 기준)")
+ap.add_argument("--amr-test-overrides", action="store_true",
+                help="franka_camera.usd 라이다 fullScan·TF 네임스페이스를 시험 실행에서만 보완 (파일 미수정)")
 ap.add_argument("--camera-prim", default="",
                 help="레벨 로봇에 이미 있는 카메라 prim 경로. 카메라·이미지 그래프는 그대로 두고 TF(panda_link0→카메라)·/clock 만 보탠다")
 ap.add_argument("--max-seconds", type=float, default=0.0, help="0 이면 계속 실행")
@@ -58,7 +63,19 @@ def say(m):
     sys.stderr.write(f"### {m}\n"); sys.stderr.flush()
 
 
-scene = BookScene(app, args.usd, args.tray, args.tray_center, args.books, args.place_dx, say)
+def _before_reset(stage):
+    if (args.camera_prim or args.amr_test_overrides) and args.camera_hz < 60:
+        import ros_sensors  # noqa: E402
+        from book_scene import R  # noqa: E402
+        ros_sensors.SensorGate.preset_camera_hz(stage, R, args.camera_hz, say)
+    if args.amr_test_overrides:
+        import ros_sensors  # noqa: E402
+        from book_scene import R  # noqa: E402
+        ros_sensors.apply_amr_test_overrides(stage, R, say)
+
+
+scene = BookScene(app, args.usd, args.tray, args.tray_center, args.books, args.place_dx, say,
+                  before_reset=_before_reset)
 world, arm, robot = scene.world, scene.arm, scene.robot
 render = args.gui or args.camera or bool(args.camera_prim)
 if args.camera_prim:
@@ -111,6 +128,9 @@ def publish(state):
 
 
 def finish(status, **extra):
+    if gate is not None and args.sensor_policy == "gated":
+        gate.all(True, "— 작업 끝, 관측 대기")
+    extra = dict(extra, sim_steps=getattr(job, "steps", 0), render_steps=getattr(job, "render_steps", 0))
     job.state = dict(job.state, status=status, **extra)
     publish(job.state)
     say(f"작업 {job.job_id} {status} {extra} ({time.time() - job.started:.1f}s)")
@@ -158,6 +178,25 @@ def handle(text):
         finish(SIM_CANCELLED, message="취소 — 그 자리 정지 (그리퍼 유지)")
 
 
+gate = None
+if args.camera or args.camera_prim or args.amr_test_overrides:
+    import ros_sensors  # noqa: E402
+    from book_scene import R  # noqa: E402
+    gate = ros_sensors.SensorGate(scene.stage, R, say)
+    if args.camera_hz < 60:
+        gate.set_camera_hz(args.camera_hz)
+    say(f"센서 정책 {args.sensor_policy}: 카메라 노드 {len(gate.camera_nodes)}, 라이다 노드 {len(gate.lidar_nodes)}")
+
+
+def need_render(step):
+    if gate is None:
+        return render
+    if args.sensor_policy == "always":
+        return render or gate.lidar_on or gate.camera_on
+    return gate.need_render(step, gui=args.gui)
+
+
+render_steps = 0
 say("작업 실행기 시작 — 시작 홈 이동 중")
 t0 = time.time()
 last_pub = 0.0
@@ -168,7 +207,12 @@ while app.is_running():
         handle(inbox.pop(0))
 
     status = arm.update()
-    world.step(render=render)
+    r_now = need_render(step)
+    world.step(render=r_now)
+    render_steps += int(r_now)
+    if job is not None:
+        job.steps = getattr(job, "steps", 0) + 1
+        job.render_steps = getattr(job, "render_steps", 0) + int(r_now)
     step += 1
 
     q_now = robot.get_joint_positions()[scene.idx_arm]
@@ -190,6 +234,8 @@ while app.is_running():
             job.watch["rise"] = scene.center(book)[2] - job.watch["z0"]
             if job.watch["rise"] < 0.08:
                 arm.cancel(); finish(SIM_FAILED, error_code=405, message=f"들어 올린 뒤 책 상승 {job.watch['rise'] * 100:.1f}cm")
+            elif gate is not None and args.sensor_policy == "gated":
+                gate.all(False, f"— 파지 확인 (책 상승 {job.watch['rise'] * 100:.1f}cm), 작업 끝까지")
         if name in ("carry_rotate", "wedge") and "rel0" in job.watch and job.state["status"] == SIM_RUNNING:
             dev = float(np.linalg.norm(scene.book_in_hand(book) - job.watch["rel0"]))
             if dev > 0.03:
@@ -210,7 +256,7 @@ while app.is_running():
             say(f"준비 완료 (step {step}) — 명령 대기 {args.command_topic}")
         elif running:
             for _ in range(60):
-                world.step(render=render)
+                world.step(render=need_render(step))
             ok, checks, bb = scene.verify(job.plan)
             spine_arm = scene.to_arm([0, bb[1], 0])[1]
             extra = {"placement_verified": bool(ok), "checks": {k: bool(v) for k, v in checks.items()},
