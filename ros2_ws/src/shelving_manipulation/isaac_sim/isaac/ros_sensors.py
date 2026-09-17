@@ -84,3 +84,36 @@ def build_ros_graph(camera_path, robot_path, rgb="/rgb", depth="/depth", info="/
         },
     )
     return graph_path
+
+
+def build_supplement_graph(camera_path, robot_path, tf="/tf", clock="/clock", graph_path="/World/ArmTfClockGraph"):
+    """다른 담당자가 만든 카메라·ROS 그래프를 그대로 두고, 빠진 것만 보탠다 (franka_camera.usd, 2026-09-17).
+
+    - panda_link0 → <카메라 prim 이름> TF (Isaac 이 광학 규약으로 발행 → 이미지 frame_id 와는 정적 항등 TF 로 잇는다)
+    - /clock (sim time)
+    """
+    keys = og.Controller.Keys
+    og.Controller.edit(
+        {"graph_path": graph_path, "evaluator_name": "execution"},
+        {
+            keys.CREATE_NODES: [
+                ("Tick", "omni.graph.action.OnPlaybackTick"),
+                ("SimTime", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+                ("TF", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
+                ("Clock", "isaacsim.ros2.bridge.ROS2PublishClock"),
+            ],
+            keys.SET_VALUES: [
+                ("TF.inputs:topicName", tf),
+                ("TF.inputs:targetPrims", [usdrt.Sdf.Path(camera_path)]),
+                ("TF.inputs:parentPrim", [usdrt.Sdf.Path(f"{robot_path}/panda_link0")]),
+                ("Clock.inputs:topicName", clock),
+            ],
+            keys.CONNECT: [
+                ("Tick.outputs:tick", "TF.inputs:execIn"),
+                ("SimTime.outputs:simulationTime", "TF.inputs:timeStamp"),
+                ("Tick.outputs:tick", "Clock.inputs:execIn"),
+                ("SimTime.outputs:simulationTime", "Clock.inputs:timeStamp"),
+            ],
+        },
+    )
+    return graph_path

@@ -28,6 +28,8 @@ ap.add_argument("--state-topic", default="/manipulation/sim/state")
 ap.add_argument("--gui", action="store_true")
 ap.add_argument("--camera", action="store_true",
                 help="손목 카메라 + /rgb /depth /camera_info /tf /clock 발행 (비전 연동 시험)")
+ap.add_argument("--camera-prim", default="",
+                help="레벨 로봇에 이미 있는 카메라 prim 경로. 카메라·이미지 그래프는 그대로 두고 TF(panda_link0→카메라)·/clock 만 보탠다")
 ap.add_argument("--max-seconds", type=float, default=0.0, help="0 이면 계속 실행")
 args = ap.parse_args()
 
@@ -58,8 +60,16 @@ def say(m):
 
 scene = BookScene(app, args.usd, args.tray, args.tray_center, args.books, args.place_dx, say)
 world, arm, robot = scene.world, scene.arm, scene.robot
-render = args.gui or args.camera
-if args.camera:
+render = args.gui or args.camera or bool(args.camera_prim)
+if args.camera_prim:
+    import ros_sensors  # noqa: E402
+    from book_scene import R  # noqa: E402
+    if not scene.stage.GetPrimAtPath(args.camera_prim).IsValid():
+        say(f"카메라 prim 없음: {args.camera_prim}")
+    ros_sensors.build_supplement_graph(args.camera_prim, R)
+    world.play()
+    say(f"기존 카메라 사용 {args.camera_prim} → TF panda_link0→{args.camera_prim.split('/')[-1]}, /clock 추가")
+elif args.camera:
     import ros_sensors  # noqa: E402
     from book_scene import R  # noqa: E402
     cam_path = ros_sensors.add_wrist_camera(scene.stage, R)
