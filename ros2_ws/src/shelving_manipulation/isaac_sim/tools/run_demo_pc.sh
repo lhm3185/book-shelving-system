@@ -23,8 +23,11 @@ ros2 run tf2_ros static_transform_publisher --frame-id panda_link0 --child-frame
 # 카메라 prim TF(Isaac, 광학 규약) → 이미지 frame sim_camera (항등)
 ros2 run tf2_ros static_transform_publisher --frame-id "$CAMERA_PRIM_FRAME" --child-frame-id sim_camera \
     --ros-args -p use_sim_time:=true > "$LOG/tf_cam.log" 2>&1 & pids+=($!)
+# 비전 임계값: origin/vision fa11b0b 에서 코드 기본값이 0.5 → 0.75 로 바뀌었지만 perception.yaml 은 0.5 로 남아 있어
+# --params-file 로 실행하면 0.5 가 적용된다 (2026-09-17 확인). 변경 의도대로 0.75 를 명시한다. 바꾸려면 VISION_CONF=0.6 등
 ros2 run shelving_perception vision_manager --ros-args \
     --params-file "$WS/src/shelving_perception/config/perception.yaml" -p model_path:="$MODEL_PATH" \
+    -p confidence_threshold:="${VISION_CONF:-0.75}" \
     > "$LOG/vision.log" 2>&1 & pids+=($!)
 ros2 run shelving_manipulation manipulation_node --ros-args \
     --params-file "$WS/src/shelving_manipulation/config/manipulation.yaml" -p executor:=sim \

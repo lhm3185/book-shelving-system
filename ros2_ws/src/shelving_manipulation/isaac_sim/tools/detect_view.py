@@ -21,7 +21,7 @@ from ultralytics import YOLO
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--model", default=os.path.expanduser("~/ws_cobot_pjt/arm/models/book_best.pt"))
-ap.add_argument("--conf", type=float, default=0.5)
+ap.add_argument("--conf", type=float, default=0.75, help="vision_manager confidence_threshold 와 맞춘다")
 ap.add_argument("--save-dir", default="/tmp/b1_demo")
 args = ap.parse_args()
 os.makedirs(args.save_dir, exist_ok=True)
