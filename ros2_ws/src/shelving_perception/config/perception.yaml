@@ -13,15 +13,16 @@ vision_manager:
     sync_slop: 0.1
     model_path: /home/rokey/book_dataset/runs/segment/runs/book/weights/best.pt
     book_topic: /perception/books
-    target_topic: /perception/empty_shelf_position
-    target_slot_topic: /perception/target_slot
-    scan_radius: 0.15
-    scan_pixel_u: -1
-    scan_pixel_v: -1
-    slot_width: 0.3
-    slot_height: 0.3
-    insertion_depth: 0.25
-    pre_insert_offset: 0.05
-    target_confidence: 1.0
+    # Shelf targeting is disabled for the book-only validation stage.
+    # target_topic: /perception/empty_shelf_position
+    # target_slot_topic: /perception/target_slot
+    # scan_radius: 0.15
+    # scan_pixel_u: -1
+    # scan_pixel_v: -1
+    # slot_width: 0.3
+    # slot_height: 0.3
+    # insertion_depth: 0.25
+    # pre_insert_offset: 0.05
+    # target_confidence: 1.0
     confidence_threshold: 0.5
 

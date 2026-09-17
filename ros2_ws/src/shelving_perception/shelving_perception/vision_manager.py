@@ -9,7 +9,6 @@ Isaac Sim 카메라 데이터를 TargetDetector로 전달하는 ROS 2 노드.
 
 import rclpy
 import cv2
-import math
 import message_filters
 from ultralytics import YOLO
 
@@ -20,10 +19,9 @@ from std_msgs.msg import Bool
 from cv_bridge import CvBridge, CvBridgeError
 from tf2_geometry_msgs import do_transform_point
 from tf2_ros import Buffer, TransformException, TransformListener
-from shelving_interfaces.msg import TargetSlot
 
 from .book_detector import BookDetector
-from .target_detector import TargetDetector
+# from .target_detector import TargetDetector
 
 
 
@@ -53,18 +51,20 @@ class VisionManager(Node):
         self.sync_slop = float(self.declare_parameter('sync_slop', 0.1).value)
         self.book_topic = self.declare_parameter(
             'book_topic', '/perception/books').value
-        self.target_slot_topic = self.declare_parameter(
-            'target_slot_topic', '/perception/target_slot').value
-        self.slot_width = float(self.declare_parameter('slot_width', 0.3).value)
-        self.slot_height = float(self.declare_parameter('slot_height', 0.3).value)
-        self.insertion_depth = float(self.declare_parameter(
-            'insertion_depth', 0.25).value)
-        self.pre_insert_offset = float(self.declare_parameter(
-            'pre_insert_offset', 0.05).value)
-        self.target_confidence = float(self.declare_parameter(
-            'target_confidence', 1.0).value)
+        # Shelf targeting is disabled until the shelf model and slot contract
+        # are finalized.
+        # self.target_slot_topic = self.declare_parameter(
+        #     'target_slot_topic', '/perception/target_slot').value
+        # self.slot_width = float(self.declare_parameter('slot_width', 0.3).value)
+        # self.slot_height = float(self.declare_parameter('slot_height', 0.3).value)
+        # self.insertion_depth = float(self.declare_parameter(
+        #     'insertion_depth', 0.25).value)
+        # self.pre_insert_offset = float(self.declare_parameter(
+        #     'pre_insert_offset', 0.05).value)
+        # self.target_confidence = float(self.declare_parameter(
+        #     'target_confidence', 1.0).value)
         self.confidence_threshold = float(self.declare_parameter(
-            'confidence_threshold', 0.5).value)
+            'confidence_threshold', 0.75).value)
 
         # book_dataset에서 학습된 YOLO 모델(.pt) 파일 경로입니다.
         # 다른 모델을 사용할 때만 실행 시 -p model_path:=... 로 덮어쓰세요.
@@ -72,11 +72,11 @@ class VisionManager(Node):
             'model_path',
             '/home/rokey/book_dataset/runs/segment/runs/book/weights/best.pt',
         ).value
-        self.target_topic = self.declare_parameter(
-            'target_topic', '/perception/empty_shelf_position').value
-        self.scan_radius = float(self.declare_parameter('scan_radius', 0.15).value)
-        self.scan_pixel_u = int(self.declare_parameter('scan_pixel_u', -1).value)
-        self.scan_pixel_v = int(self.declare_parameter('scan_pixel_v', -1).value)
+        # self.target_topic = self.declare_parameter(
+        #     'target_topic', '/perception/empty_shelf_position').value
+        # self.scan_radius = float(self.declare_parameter('scan_radius', 0.15).value)
+        # self.scan_pixel_u = int(self.declare_parameter('scan_pixel_u', -1).value)
+        # self.scan_pixel_v = int(self.declare_parameter('scan_pixel_v', -1).value)
 
 
         if not self.model_path:
@@ -86,13 +86,13 @@ class VisionManager(Node):
 
         self.model = YOLO(self.model_path)
         self.book_detector = BookDetector()
-        self.target_detector = TargetDetector(self.scan_radius)
+        # self.target_detector = TargetDetector(self.scan_radius)
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.book_pub = self.create_publisher(PointStamped, self.book_topic, 10)
-        self.target_pub = self.create_publisher(PointStamped, self.target_topic, 10)
-        self.target_slot_pub = self.create_publisher(
-            TargetSlot, self.target_slot_topic, 10)
+        # self.target_pub = self.create_publisher(PointStamped, self.target_topic, 10)
+        # self.target_slot_pub = self.create_publisher(
+        #     TargetSlot, self.target_slot_topic, 10)
         self.trigger_sub = self.create_subscription(
             Bool, self.trigger_topic, self.trigger_callback, 10)
         self.pending_detection = not self.wait_for_trigger
@@ -191,31 +191,32 @@ class VisionManager(Node):
                 f"{book_point.point.y:.3f}, {book_point.point.z:.3f}), "
                 f"center={target['center']}")
 
-        scan_xyz = self._scan_position(
-            depth_image, fx, fy, cx, cy, depth_scale)
-        empty_position = self.target_detector.process(detected_targets, scan_xyz)
-        if empty_position is None:
-            self.get_logger().info('No placeable empty shelf position found')
-            return
-
-        target_point = self._transform_xyz(
-            empty_position['xyz'], rgb_msg.header.frame_id, rgb_msg.header.stamp)
-        if target_point is None:
-            return
-
-        self.target_pub.publish(target_point)
-        target_slot = TargetSlot()
-        target_slot.header = target_point.header
-        target_slot.pose.position.x = target_point.point.x
-        target_slot.pose.position.y = target_point.point.y
-        target_slot.pose.position.z = target_point.point.z
-        target_slot.pose.orientation.w = 1.0
-        target_slot.available_width = self.slot_width
-        target_slot.available_height = self.slot_height
-        target_slot.insertion_depth = self.insertion_depth
-        target_slot.pre_insert_offset = self.pre_insert_offset
-        target_slot.confidence = self.target_confidence
-        self.target_slot_pub.publish(target_slot)
+        # Shelf targeting is disabled for the book-only validation stage.
+        # scan_xyz = self._scan_position(
+        #     depth_image, fx, fy, cx, cy, depth_scale)
+        # empty_position = self.target_detector.process(detected_targets, scan_xyz)
+        # if empty_position is None:
+        #     self.get_logger().info('No placeable empty shelf position found')
+        #     return
+        #
+        # target_point = self._transform_xyz(
+        #     empty_position['xyz'], rgb_msg.header.frame_id, rgb_msg.header.stamp)
+        # if target_point is None:
+        #     return
+        #
+        # self.target_pub.publish(target_point)
+        # target_slot = TargetSlot()
+        # target_slot.header = target_point.header
+        # target_slot.pose.position.x = target_point.point.x
+        # target_slot.pose.position.y = target_point.point.y
+        # target_slot.pose.position.z = target_point.point.z
+        # target_slot.pose.orientation.w = 1.0
+        # target_slot.available_width = self.slot_width
+        # target_slot.available_height = self.slot_height
+        # target_slot.insertion_depth = self.insertion_depth
+        # target_slot.pre_insert_offset = self.pre_insert_offset
+        # target_slot.confidence = self.target_confidence
+        # self.target_slot_pub.publish(target_slot)
 
     def _transform_xyz(self, xyz, source_frame, stamp):
         point = PointStamped()
@@ -243,23 +244,23 @@ class VisionManager(Node):
             return 0.001
         return 1.0
 
-    def _scan_position(self, depth_image, fx, fy, cx, cy, depth_scale):
-        height, width = depth_image.shape[:2]
-        u = self.scan_pixel_u if self.scan_pixel_u >= 0 else width // 2
-        v = self.scan_pixel_v if self.scan_pixel_v >= 0 else height // 2
-        if not (0 <= u < width and 0 <= v < height):
-            self.get_logger().warning('Scan pixel is outside the depth image')
-            return None
-
-        depth = float(depth_image[v, u]) * depth_scale
-        if not math.isfinite(depth) or depth <= 0:
-            return None
-
-        return (
-            (u - cx) * depth / fx,
-            (v - cy) * depth / fy,
-            depth,
-        )
+    # def _scan_position(self, depth_image, fx, fy, cx, cy, depth_scale):
+    #     height, width = depth_image.shape[:2]
+    #     u = self.scan_pixel_u if self.scan_pixel_u >= 0 else width // 2
+    #     v = self.scan_pixel_v if self.scan_pixel_v >= 0 else height // 2
+    #     if not (0 <= u < width and 0 <= v < height):
+    #         self.get_logger().warning('Scan pixel is outside the depth image')
+    #         return None
+    #
+    #     depth = float(depth_image[v, u]) * depth_scale
+    #     if not math.isfinite(depth) or depth <= 0:
+    #         return None
+    #
+    #     return (
+    #         (u - cx) * depth / fx,
+    #         (v - cy) * depth / fy,
+    #         depth,
+    #     )
 
     def _detect_books(self, rgb_image):
         detections = []
