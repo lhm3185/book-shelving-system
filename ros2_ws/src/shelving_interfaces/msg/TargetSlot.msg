@@ -1,0 +1,7 @@
+std_msgs/Header header
+geometry_msgs/Pose pose
+float32 available_width
+float32 available_height
+float32 insertion_depth
+float32 pre_insert_offset
+float32 confidence

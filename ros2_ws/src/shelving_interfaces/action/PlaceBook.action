@@ -1,0 +1,16 @@
+string job_id
+string book_id
+shelving_interfaces/TargetSlot target_slot
+float32 book_width
+float32 book_height
+float32 book_thickness
+float32 insertion_speed
+---
+bool success
+string failed_phase
+bool placement_verified
+int32 error_code
+string message
+---
+string phase
+float32 progress

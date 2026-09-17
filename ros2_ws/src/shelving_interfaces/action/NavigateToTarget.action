@@ -1,0 +1,18 @@
+string job_id
+string target_type
+string target_id
+geometry_msgs/PoseStamped target_pose
+float32 position_tolerance
+float32 yaw_tolerance
+---
+bool success
+geometry_msgs/PoseStamped final_pose
+bool tolerance_satisfied
+int32 error_code
+string message
+---
+string phase
+float32 remaining_distance
+float32 position_error
+float32 yaw_error
+uint32 retry_count
