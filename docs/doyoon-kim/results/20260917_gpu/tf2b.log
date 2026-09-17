@@ -1,0 +1,5 @@
+[INFO] [1789635186.569520720] [static_transform_publisher_g2eZFs944Q85eCZm]: Spinning until stopped - publishing transform
+translation: ('0.000000', '0.000000', '0.000000')
+rotation: ('0.000000', '0.000000', '0.000000', '1.000000')
+from 'wrist_camera' to 'wrist_camera_optical_frame'
+[INFO] [1789635295.646162834] [rclcpp]: signal_handler(SIGINT/SIGTERM)

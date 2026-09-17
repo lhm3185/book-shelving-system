@@ -1,0 +1,20 @@
+Traceback (most recent call last):
+  File "/home/rokey/ws_cobot_pjt/book-shelving-system/ros2_ws/install/shelving_manipulation/lib/shelving_manipulation/sim_mock", line 33, in <module>
+    sys.exit(load_entry_point('shelving_manipulation==0.0.0', 'console_scripts', 'sim_mock')())
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/rokey/ws_cobot_pjt/book-shelving-system/ros2_ws/install/shelving_manipulation/lib/python3.12/site-packages/shelving_manipulation/manipulation_node.py", line 336, in sim_mock_main
+    rclpy.spin(node)
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/__init__.py", line 247, in spin
+    executor.spin_once()
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 926, in spin_once
+    self._spin_once_impl(timeout_sec)
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 907, in _spin_once_impl
+    handler, entity, node = self.wait_for_ready_callbacks(
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 877, in wait_for_ready_callbacks
+    return next(self._cb_iter)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 785, in _wait_for_ready_callbacks
+    raise ExternalShutdownException()
+rclpy.executors.ExternalShutdownException
+rclpy.executors.ExternalShutdownException
