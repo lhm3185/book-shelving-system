@@ -1,1 +1,10 @@
+vision_manager:
+  ros__parameters:
+    rgb_topic: /rgb
+    depth_topic: /depth
+    camera_info_topic: /camera_info
+    target_frame: base_link
+    depth_registered: true
+    depth_scale: 0.0
+    sync_slop: 0.1
 

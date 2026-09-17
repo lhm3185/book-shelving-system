@@ -1,1 +1,21 @@
+vision_manager:
+  ros__parameters:
+    rgb_topic: /rgb
+    depth_topic: /depth
+    camera_info_topic: /camera_info
+    target_frame: base_link
+    depth_registered: true
+    depth_scale: 0.0
+    sync_slop: 0.1
+    book_topic: /perception/books
+    target_topic: /m0609/empty_shelf_position
+    target_slot_topic: /perception/target_slot
+    scan_radius: 0.15
+    scan_pixel_u: -1
+    scan_pixel_v: -1
+    slot_width: 0.3
+    slot_height: 0.3
+    insertion_depth: 0.25
+    pre_insert_offset: 0.05
+    target_confidence: 1.0
 

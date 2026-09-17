@@ -28,6 +28,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'vision_manager = shelving_perception.vision_manager:main',
         ],
     },
 )
