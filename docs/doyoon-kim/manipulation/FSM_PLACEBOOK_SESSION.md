@@ -50,6 +50,16 @@ ros2 action send_goal --feedback /place_book shelving_interfaces/action/PlaceBoo
 | `book_width/height/thickness` | 0 이면 `book_profiles.yaml` 기본값. 일부만 0 이면 거절 | M410 |
 | `confidence`, `header.stamp` | 1차는 검사 안 함 (`min_confidence 0`, `max_target_age_s 0`) | — |
 
+**사전 확인 (2026-09-17 21:48, Isaac 없이 로봇팔 검증 코드로 확인)** — `origin/feature/system-fsm` `96c4c95` 는 비전 결과 `target_slot` 을 goal 에 그대로 넣는다. `mock_perception_server.py` 값으로는 거절된다.
+
+| goal 값 | 로봇팔 결과 |
+| --- | --- |
+| mock 그대로: 위치 (0.55, 0, 0.80), 쿼터니언 w=1 | **M410** 삽입 방향 yaw 0° (1차 90°±6°) |
+| 방향만 yaw 90° | **M410** 위치가 범위 밖 (x −0.56~−0.22, y 0.45~0.65, z 0.25~0.45) |
+| 방향 + 위 표의 1차 칸 위치 | **통과** |
+
+책 치수(0.18/0.24/0.035), 칸 폭·높이(0.08/0.30), 신뢰도 0.95, `arm_base_link` 는 통과. **mock 의 칸 위치·방향 두 가지만 1차 값으로 맞추면 된다.**
+
 - 트레이에서 집을 책은 **로봇팔이 정한다** (트레이 칸 고정 좌표). FSM 은 서가 칸만 준다
 - 작업 중 두 번째 goal 은 거절 (M411)
 - 피드백 `phase` 순서: PLANNING_GRASP → APPROACHING_BOOK → GRASPING → MOVING_TO_PRE_INSERT → INSERTING → RELEASING → INSERTING(책등 밀기, 다시 보고) → RETREATING → VERIFYING. progress 는 줄지 않는다
