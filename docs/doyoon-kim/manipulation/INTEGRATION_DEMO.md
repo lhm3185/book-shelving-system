@@ -22,7 +22,10 @@
 3. 이 PC:   ros2 topic list --no-daemon  →  /rgb /clock /tf /point_cloud /manipulation/sim/state 확인   ← 게이트
 4. 3에서 안 보이면 GPU PC 에서 ros2 topic hz /clock 한 번 실행 후 3 다시. 그래도 안 되면 1부터
 5. 통과하면 2절부터 시연
+6. 2절 실행 뒤: ros2 param get /vision_manager confidence_threshold  →  0.75 가 아니면 멈춘다   ← 임계값 확인
 ```
+
+6번: 비전 임계값은 코드 기본값과 `perception.yaml` 두 곳에 있다. 지금은 둘 다 0.75 지만 다시 어긋나면 리허설에서 잡는다 (단일 출처화는 2차 정리 항목).
 
 **시연 중에 발견하지 말고 시작 전에 발견한다.** 시연 30분 전 전체 리허설 1회.
 
