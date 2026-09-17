@@ -4,6 +4,8 @@
 
 이 저장소의 다섯 패키지는 ROS2 Jazzy의 ros2 pkg create로 생성했고, package.xml, setup.py, setup.cfg, resource marker와 공통 메시지·액션 생성 설정을 갖춘다. colcon build로 다섯 패키지와 여섯 인터페이스가 정상 생성되는 것을 확인했다. 다만 담당 기능의 Python 알고리즘, launch 내용, YAML 값과 실행 스크립트는 아직 빈 구현 골격이므로 실제 로봇 동작은 각 담당자가 개발해야 한다.
 
+브랜치 생성, commit, pull, push, 충돌 해결과 담당자별 빌드 명령은 [08_git_and_terminal_guide.md](08_git_and_terminal_guide.md)를 따른다.
+
 ## 2. 실행 구성
 
 | 실행 대상 | 패키지·기능 |
