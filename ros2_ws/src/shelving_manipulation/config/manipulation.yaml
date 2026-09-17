@@ -1,1 +1,44 @@
+# manipulation_node 파라미터. 실행: ros2 run shelving_manipulation manipulation_node --ros-args --params-file <이 파일>
+manipulation_node:
+  ros__parameters:
+    action_name: /place_book
+    status_topic: /robot/status
 
+    # mock: 노드 안에서 흉내 (Isaac 없이 FSM 연동)  /  sim: Isaac 작업 실행기와 JSON 명령·상태 교환
+    executor: mock
+    sim_command_topic: /manipulation/sim/command
+    sim_state_topic: /manipulation/sim/state
+
+    book_profiles_file: ""      # 비우면 패키지 config/book_profiles.yaml
+    book_profile: default
+
+    # 시간 (s)
+    heartbeat_timeout_s: 10.0   # 시뮬 상태가 이만큼 끊기면 M404 (한 번도 안 오면 M411). Isaac 경로 계획 중 수 초 멈춘다
+    goal_timeout_s: 180.0       # 작업 전체. 넘으면 취소 → 안전 정지 → M404. Isaac 1권 실측 33 s
+    cancel_timeout_s: 30.0      # 취소 후 안전 정지 보고를 기다리는 시간
+    status_rate_hz: 2.0
+    feedback_rate_hz: 10.0
+
+    # 목표 검사 (grasp_planner.DEFAULT_LIMITS 와 같은 이름)
+    frame_id: arm_base_link
+    finger_thickness: 0.0264
+    side_clearance: 0.005
+    height_clearance: 0.02
+    grip_clearance: 0.005
+    insertion_yaw: 1.5707963    # 1차 서가 삽입 방향 arm_base_link +Y
+    yaw_tolerance: 0.10
+    tilt_tolerance: 0.10
+    default_insertion_speed: 0.02
+    max_insertion_speed: 0.05
+    min_confidence: 0.0         # 1차 고정 칸. 비전 연결 시 올린다
+    max_target_age_s: 0.0       # 0 = 검사 안 함 (Isaac sim time 정합 후 켠다)
+    require_slot_dimensions: false
+    max_book_dimension: 0.5
+    place_region_min: [-0.56, 0.45, 0.25]
+    place_region_max: [-0.22, 0.65, 0.45]
+
+    # mock 실행기 (실패 입력 시험)
+    mock_step_s: 0.2
+    mock_fail_at: ""            # 예: lift, wedge, push
+    mock_fail_code: 0           # 예: 405, 407
+    mock_unverified: false      # true 면 끝까지 가서 409

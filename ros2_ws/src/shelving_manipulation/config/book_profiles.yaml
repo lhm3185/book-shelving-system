@@ -1,1 +1,30 @@
+# 로봇팔이 쓰는 책 치수와 1차 트레이 칸 좌표.
+# 좌표 계약: arm_base_link, REP-103, m, **AABB 중심** (에셋 원점 아님)
+#
+# 값 출처: Isaac Sim 5.1.0, 레벨 ing_library_env_v3 + tray_v1, 2026-09-17
+#          (~/arm/isaac/multi_book.py --plan-only 의 FRAME 출력. panda_link0 = arm_base_link, 회전 없음)
 
+profiles:
+  default:
+    thickness: 0.0353   # 책등 폭
+    height: 0.2374      # 책등 길이 (세웠을 때 높이)
+    width: 0.1631       # 책등 → 앞마구리 (서가에서의 깊이)
+    mass: 0.5           # kg (Isaac 책 질량)
+
+tray:
+  frame_id: arm_base_link
+  # 트레이에 책등이 위로 선 책의 AABB 중심. 칸 간격 0.075 m
+  slots:
+    - {index: 0, center: [-0.6623, 0.0788, 0.1119]}
+    - {index: 1, center: [-0.5873, 0.0788, 0.1118]}
+    - {index: 2, center: [-0.5123, 0.0788, 0.1118]}
+    - {index: 3, center: [-0.4373, 0.0788, 0.1117]}
+    - {index: 4, center: [-0.3623, 0.0788, 0.1116]}
+    - {index: 5, center: [-0.2873, 0.0788, 0.1116]}
+  # book_id → 칸 번호. 없는 book_id 는 아직 꺼내지 않은 첫 칸
+  assignments: {}
+
+# 참고: 검증된 꽂을 위치 (TargetSlot.position = 꽂힌 책 AABB 중심, 서가 1번 칸)
+#   [-0.5097, 0.5495, 0.3400]  [-0.4297, 0.5495, 0.3400]
+#   [-0.3497, 0.5495, 0.3399]  [-0.2697, 0.5495, 0.3398]
+#   트레이 6칸 × 4곳 전부 계획 통과. 삽입 방향 arm_base_link +Y (yaw +90°)
