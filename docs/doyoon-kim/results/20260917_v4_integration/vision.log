@@ -1,0 +1,84 @@
+[INFO] [1789639356.477864640] [vision_manager]: Subscribed to rgb=/rgb, depth=/depth, camera_info=/camera_info, target_frame=arm_base_link, trigger=/perception/detect_request
+[INFO] [1789639370.939019035] [vision_manager]: Book detected: xyz=(-0.332, 0.072, 0.104), center=(223, 289)
+[INFO] [1789639370.940061272] [vision_manager]: Book detected: xyz=(-1.031, 0.189, -0.275), center=(526, 346)
+[INFO] [1789639370.940944574] [vision_manager]: Book detected: xyz=(-0.817, 0.152, -0.124), center=(474, 335)
+[WARN] [1789639371.310840944] [vision_manager]: Could not transform sim_camera to arm_base_link: Lookup would require extrapolation into the future.  Requested time 88.666671 but the latest data is at time 87.416671, when looking up transform from frame [sim_camera] to frame [arm_base_link]
+[WARN] [1789639371.516094462] [vision_manager]: Could not transform sim_camera to arm_base_link: Lookup would require extrapolation into the future.  Requested time 88.666671 but the latest data is at time 87.416671, when looking up transform from frame [sim_camera] to frame [arm_base_link]
+[WARN] [1789639371.721911204] [vision_manager]: Could not transform sim_camera to arm_base_link: Lookup would require extrapolation into the future.  Requested time 88.666671 but the latest data is at time 87.416671, when looking up transform from frame [sim_camera] to frame [arm_base_link]
+[WARN] [1789639371.927304604] [vision_manager]: Could not transform sim_camera to arm_base_link: Lookup would require extrapolation into the future.  Requested time 88.666671 but the latest data is at time 87.416671, when looking up transform from frame [sim_camera] to frame [arm_base_link]
+[INFO] [1789639371.928951635] [vision_manager]: No placeable empty shelf position found
+[WARN] [1789639372.331086205] [vision_manager]: Could not transform sim_camera to arm_base_link: Lookup would require extrapolation into the future.  Requested time 89.216671 but the latest data is at time 87.750005, when looking up transform from frame [sim_camera] to frame [arm_base_link]
+[WARN] [1789639372.537742706] [vision_manager]: Could not transform sim_camera to arm_base_link: Lookup would require extrapolation into the future.  Requested time 89.216671 but the latest data is at time 87.750005, when looking up transform from frame [sim_camera] to frame [arm_base_link]
+[WARN] [1789639372.742546478] [vision_manager]: Could not transform sim_camera to arm_base_link: Lookup would require extrapolation into the future.  Requested time 89.216671 but the latest data is at time 87.750005, when looking up transform from frame [sim_camera] to frame [arm_base_link]
+[INFO] [1789639372.743635881] [vision_manager]: No placeable empty shelf position found
+[INFO] [1789639373.163842109] [vision_manager]: Book detected: xyz=(-0.222, 0.069, 0.087), center=(155, 288)
+[INFO] [1789639373.165065936] [vision_manager]: Book detected: xyz=(-1.028, 0.191, -0.275), center=(525, 347)
+[INFO] [1789639373.167194971] [vision_manager]: Book detected: xyz=(-0.367, 0.072, 0.118), center=(244, 288)
+[INFO] [1789639373.168800768] [vision_manager]: Book detected: xyz=(-0.820, 0.154, -0.130), center=(474, 336)
+[INFO] [1789639373.169513931] [vision_manager]: No placeable empty shelf position found
+[INFO] [1789639374.648412107] [vision_manager]: Book detected: xyz=(-0.221, 0.071, 0.085), center=(155, 289)
+[INFO] [1789639374.649482191] [vision_manager]: Book detected: xyz=(-0.364, 0.072, 0.119), center=(242, 288)
+[INFO] [1789639374.650474950] [vision_manager]: Book detected: xyz=(-1.031, 0.189, -0.275), center=(526, 346)
+[INFO] [1789639376.231562745] [vision_manager]: Book detected: xyz=(-0.388, 0.072, 0.110), center=(260, 288)
+[INFO] [1789639376.233183290] [vision_manager]: Book detected: xyz=(-1.031, 0.191, -0.275), center=(526, 347)
+[INFO] [1789639376.234565245] [vision_manager]: Book detected: xyz=(-0.223, 0.069, 0.084), center=(157, 288)
+[INFO] [1789639376.235954004] [vision_manager]: Book detected: xyz=(-0.824, 0.159, -0.137), center=(474, 338)
+[INFO] [1789639376.236796625] [vision_manager]: No placeable empty shelf position found
+[INFO] [1789639377.811355181] [vision_manager]: Book detected: xyz=(-0.389, 0.071, 0.109), center=(261, 288)
+[INFO] [1789639377.812521366] [vision_manager]: Book detected: xyz=(-1.028, 0.191, -0.275), center=(525, 347)
+[INFO] [1789639377.813613131] [vision_manager]: Book detected: xyz=(-0.256, 0.069, 0.087), center=(177, 288)
+[INFO] [1789639377.814702688] [vision_manager]: Book detected: xyz=(-0.827, 0.162, -0.144), center=(474, 339)
+[INFO] [1789639377.815401228] [vision_manager]: No placeable empty shelf position found
+[INFO] [1789639379.407414050] [vision_manager]: Book detected: xyz=(-0.398, 0.071, 0.105), center=(267, 288)
+[INFO] [1789639379.409291165] [vision_manager]: Book detected: xyz=(-1.028, 0.189, -0.275), center=(525, 346)
+[INFO] [1789639379.410957456] [vision_manager]: Book detected: xyz=(-0.256, 0.069, 0.087), center=(177, 288)
+[INFO] [1789639379.412523737] [vision_manager]: Book detected: xyz=(-0.824, 0.159, -0.137), center=(474, 338)
+[INFO] [1789639379.413246296] [vision_manager]: No placeable empty shelf position found
+[INFO] [1789639380.971558002] [vision_manager]: Book detected: xyz=(-0.400, 0.071, 0.103), center=(269, 288)
+[INFO] [1789639380.972968616] [vision_manager]: Book detected: xyz=(-1.026, 0.191, -0.275), center=(524, 347)
+[INFO] [1789639380.974330710] [vision_manager]: Book detected: xyz=(-0.831, 0.160, -0.147), center=(475, 338)
+[INFO] [1789639380.975376511] [vision_manager]: Book detected: xyz=(-0.254, 0.069, 0.087), center=(176, 288)
+[INFO] [1789639380.976033902] [vision_manager]: No placeable empty shelf position found
+[INFO] [1789639382.570129912] [vision_manager]: Book detected: xyz=(-0.395, 0.071, 0.106), center=(265, 288)
+[INFO] [1789639382.571484841] [vision_manager]: Book detected: xyz=(-1.034, 0.191, -0.275), center=(527, 347)
+[INFO] [1789639382.622238705] [vision_manager]: Book detected: xyz=(-0.253, 0.069, 0.087), center=(175, 288)
+[INFO] [1789639382.622780365] [vision_manager]: No placeable empty shelf position found
+[INFO] [1789639503.695362666] [vision_manager]: Book detected: xyz=(-0.951, 0.188, -0.276), center=(496, 346)
+[INFO] [1789639503.697754569] [vision_manager]: Book detected: xyz=(-0.194, 0.068, 0.075), center=(141, 288)
+[INFO] [1789639505.170850186] [vision_manager]: Book detected: xyz=(-0.954, 0.191, -0.276), center=(497, 347)
+[INFO] [1789639505.172144851] [vision_manager]: Book detected: xyz=(-0.192, 0.067, 0.075), center=(140, 287)
+[INFO] [1789639506.761015736] [vision_manager]: Book detected: xyz=(-0.948, 0.191, -0.276), center=(495, 347)
+[INFO] [1789639506.764834935] [vision_manager]: Book detected: xyz=(-0.191, 0.068, 0.074), center=(140, 288)
+[INFO] [1789639508.391138234] [vision_manager]: Book detected: xyz=(-0.948, 0.191, -0.276), center=(495, 347)
+[INFO] [1789639508.392718664] [vision_manager]: Book detected: xyz=(-0.192, 0.067, 0.076), center=(140, 287)
+[INFO] [1789639509.971804072] [vision_manager]: Book detected: xyz=(-0.951, 0.191, -0.276), center=(496, 347)
+[INFO] [1789639509.973260941] [vision_manager]: Book detected: xyz=(-0.192, 0.068, 0.074), center=(140, 288)
+[INFO] [1789639511.502477906] [vision_manager]: Book detected: xyz=(-0.946, 0.191, -0.276), center=(494, 347)
+[INFO] [1789639511.503419169] [vision_manager]: Book detected: xyz=(-0.192, 0.068, 0.074), center=(140, 288)
+[INFO] [1789639513.146979604] [vision_manager]: Book detected: xyz=(-0.192, 0.067, 0.076), center=(140, 287)
+[INFO] [1789639513.150205814] [vision_manager]: Book detected: xyz=(-0.948, 0.186, -0.276), center=(495, 345)
+[INFO] [1789639514.577461011] [vision_manager]: Book detected: xyz=(-0.192, 0.067, 0.075), center=(140, 287)
+[INFO] [1789639514.578834056] [vision_manager]: Book detected: xyz=(-0.954, 0.191, -0.276), center=(497, 347)
+[INFO] [1789639516.111701126] [vision_manager]: Book detected: xyz=(-0.192, 0.068, 0.074), center=(140, 288)
+[INFO] [1789639516.113237886] [vision_manager]: Book detected: xyz=(-0.954, 0.188, -0.276), center=(497, 346)
+[INFO] [1789639517.712591684] [vision_manager]: Book detected: xyz=(-0.951, 0.186, -0.276), center=(496, 345)
+[INFO] [1789639517.715390462] [vision_manager]: Book detected: xyz=(-0.192, 0.068, 0.074), center=(140, 288)
+Traceback (most recent call last):
+  File "/home/rokey/ws_cobot_pjt/book-shelving-system/ros2_ws/install/shelving_perception/lib/shelving_perception/vision_manager", line 33, in <module>
+    sys.exit(load_entry_point('shelving_perception==0.0.0', 'console_scripts', 'vision_manager')())
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/rokey/ws_cobot_pjt/book-shelving-system/ros2_ws/install/shelving_perception/lib/python3.12/site-packages/shelving_perception/vision_manager.py", line 288, in main
+    rclpy.spin(node)
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/__init__.py", line 247, in spin
+    executor.spin_once()
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 926, in spin_once
+    self._spin_once_impl(timeout_sec)
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 907, in _spin_once_impl
+    handler, entity, node = self.wait_for_ready_callbacks(
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 877, in wait_for_ready_callbacks
+    return next(self._cb_iter)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 785, in _wait_for_ready_callbacks
+    raise ExternalShutdownException()
+rclpy.executors.ExternalShutdownException
