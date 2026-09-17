@@ -1,1 +1,73 @@
+# 도서관 전체 좌표 기준
+schema_version: 1
+frame_id: map
 
+# 현재 좌표는 초기 개발용 임시값이다.
+# Isaac Sim 통합 후 실제 prim 위치를 기준으로 수정해야 한다.
+calibration_required: true
+
+locations:
+  home:
+    position:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+    orientation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+
+  return_station:
+    position:
+      x: 1.0
+      y: 0.0
+      z: 0.0
+    orientation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+
+shelves:
+  shelf_01:
+    name: "분류 000~499 서가"
+
+    classification_prefixes:
+      - "0"
+      - "1"
+      - "2"
+      - "3"
+      - "4"
+
+    observation_pose:
+      position:
+        x: 3.0
+        y: 1.0
+        z: 0.0
+      orientation:
+        x: 0.0
+        y: 0.0
+        z: 0.0
+        w: 1.0
+
+  shelf_02:
+    name: "분류 500~999 서가"
+
+    classification_prefixes:
+      - "5"
+      - "6"
+      - "7"
+      - "8"
+      - "9"
+
+    observation_pose:
+      position:
+        x: 5.0
+        y: 1.0
+        z: 0.0
+      orientation:
+        x: 0.0
+        y: 0.0
+        z: 1.0
+        w: 0.0
