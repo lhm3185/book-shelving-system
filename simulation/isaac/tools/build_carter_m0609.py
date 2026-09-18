@@ -25,11 +25,13 @@ ap.add_argument("--carter", default="", help="비우면 Isaac 에셋 루트의 n
 ap.add_argument("--arm", default=os.path.expanduser("~/Desktop/Collected_m0609_gripper.usd"))
 ap.add_argument("--arm-prim", default="/World/m0609", help="팔 USD 안에서 가져올 prim")
 ap.add_argument("--out", default=os.path.expanduser("~/Desktop/carter_m0609.usd"))
-ap.add_argument("--mount-xyz", type=float, nargs=3, default=[0.0, 0.0, 0.0],
-                help="팔을 올릴 위치 (비우면 carter 상판 중앙 자동)")
+ap.add_argument("--mount-xyz", type=float, nargs=3, default=[0.0, 0.0, 0.555],
+                help="팔을 올릴 위치. 기본값은 **카터 상판 앞쪽** — 상판 중앙(자동)에 놓으면 "
+                     "팔이 카터 구조물과 간섭해 joint_1 이 막힌다 (2026-09-18 실측)")
 ap.add_argument("--mount-yaw", type=float, default=0.0, help="팔 방향 (도)")
-ap.add_argument("--arm-stiffness", type=float, default=1.0e5)
-ap.add_argument("--arm-damping", type=float, default=1.0e4)
+# 위치 제어 게인: 1e5 면 어깨·팔꿈치가 중력에 처지고, 1e6 은 불안정했다. 1e7/1e5 에서 오차 0.002 rad (실측)
+ap.add_argument("--arm-stiffness", type=float, default=1.0e7)
+ap.add_argument("--arm-damping", type=float, default=1.0e5)
 ap.add_argument("--grip-stiffness", type=float, default=1.0e3)
 ap.add_argument("--grip-damping", type=float, default=1.0e2)
 ap.add_argument("--fix-base", choices=["on", "off"], default="off",
