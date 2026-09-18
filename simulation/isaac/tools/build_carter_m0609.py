@@ -23,13 +23,25 @@ import sys
 ap = argparse.ArgumentParser()
 ap.add_argument("--carter", default="", help="비우면 Isaac 에셋 루트의 nova_carter.usd")
 ap.add_argument("--arm", default=os.path.expanduser("~/Desktop/Collected_m0609_gripper.usd"))
-ap.add_argument("--arm-prim", default="/World/m0609", help="팔 USD 안에서 가져올 prim")
+ap.add_argument("--arm-prim", default="/World/m0609",
+                help="팔 USD 안에서 가져올 prim. 그리퍼가 /World 아래 **형제 prim** 으로 있는 파일이면 "
+                     "`/World` 를 주어야 그리퍼까지 들어온다 (실측: 안 주면 그리퍼 관절 0개)")
 ap.add_argument("--out", default=os.path.expanduser("~/Desktop/carter_m0609.usd"))
-ap.add_argument("--mount-xyz", type=float, nargs=3, default=[0.0, 0.0, 0.0],
-                help="팔을 올릴 위치 (비우면 carter 상판 중앙 자동)")
+ap.add_argument("--mount-xyz", type=float, nargs=3, default=[0.0, 0.0, 0.555],
+                help="팔을 올릴 위치. 기본값은 **카터 상판 앞쪽** — 상판 중앙(자동)에 놓으면 "
+                     "팔이 카터 구조물과 간섭해 joint_1 이 막힌다 (2026-09-18 실측)")
 ap.add_argument("--mount-yaw", type=float, default=0.0, help="팔 방향 (도)")
-ap.add_argument("--arm-stiffness", type=float, default=1.0e5)
-ap.add_argument("--arm-damping", type=float, default=1.0e4)
+ap.add_argument("--riser", choices=["on", "off"], default="on",
+                help="on(기본): 팔 받침판과 카터 상판 사이를 **어댑터 판**으로 채운다. "
+                     "카터 상판에는 평평한 20 cm 자리가 없어 실제로도 어댑터 없이는 못 얹는다")
+ap.add_argument("--riser-base", type=float, default=0.430,
+                help="어댑터가 서는 상판 높이 (m). 장착점 (0,0) 주변 실측값 0.430")
+ap.add_argument("--plate-offset", type=float, default=0.018,
+                help="팔 원점에서 **받침판 밑면**까지 (m). AABB 최저점(0.510)은 옆으로 빠지는 "
+                     "케이블 호스라 쓰면 안 된다 — 장착점 위로 광선을 쏴 잰 값 0.018")
+# 위치 제어 게인: 1e5 면 어깨·팔꿈치가 중력에 처지고, 1e6 은 불안정했다. 1e7/1e5 에서 오차 0.002 rad (실측)
+ap.add_argument("--arm-stiffness", type=float, default=1.0e7)
+ap.add_argument("--arm-damping", type=float, default=1.0e5)
 ap.add_argument("--grip-stiffness", type=float, default=1.0e3)
 ap.add_argument("--grip-damping", type=float, default=1.0e2)
 ap.add_argument("--fix-base", choices=["on", "off"], default="off",
@@ -87,6 +99,17 @@ arm_prim.GetReferences().AddReference(args.arm, args.arm_prim)
 app.update()
 while is_stage_loading():
     app.update()
+
+# 팔 USD 전체(/World)를 가져온 경우, 같이 딸려 온 바닥·그래프는 끈다
+DROP = {"GroundPlane", "ActionGraph", "Graph", "Environment", "Render", "OmniverseKit",
+        "defaultLight", "OmniverseGlobalRenderSettings", "Vars"}
+dropped = []
+for child in stage.GetPrimAtPath(ARM).GetChildren():
+    if child.GetName() in DROP:
+        child.SetActive(False)
+        dropped.append(child.GetName())
+if dropped:
+    say(f"딸려 온 prim 비활성화: {dropped}")
 
 cache = create_bbox_cache()
 
@@ -160,6 +183,41 @@ joint.CreateLocalRot0Attr().Set(Gf.Quatf(math.cos(math.radians(args.mount_yaw) /
 joint.CreateLocalPos1Attr().Set(Gf.Vec3f(0, 0, 0))
 joint.CreateLocalRot1Attr().Set(Gf.Quatf(1, Gf.Vec3f(0, 0, 0)))
 say(f"고정 조인트 생성: {chassis[0].split('/')[-1]} → {arm_base[0].split('/')[-1]}, 로컬 {np.round(local, 3).tolist()}")
+
+# 4b) 장착 어댑터(리서) — 팔이 공중에 떠 보이는 것을 없앤다
+#
+# 왜 낮추지 않고 받침대를 넣나 (2026-09-18 실측):
+#   - 장착점 (0,0) 바로 아래는 상판이 아니라 **front_RPLidar** 다 (윗면 0.436, 주변 상판 0.430).
+#     팔을 닿을 때까지 내리면 라이다를 깔고 앉는다. AMR 담당이 그 라이다로 주행 시험 중이다.
+#   - 뒤쪽 상판(0.464)은 평평하지만 그 위에 **XT_32 3D 라이다**(x -0.389~-0.180, 윗면 0.554)가 서 있다.
+#     팔 받침판이 20.6 cm 라 뒤로 옮기면 XT_32 와 겹친다. 예전에 joint_1 이 막힌 원인이 이것이다.
+#   - 즉 **평평한 20 cm 자리가 카터 상판에 없다.** 실제로도 어댑터 판 없이는 못 얹는다.
+# 그래서 팔 높이는 그대로 두고(= 기존 좌표·IK 작업이 그대로 살아 있다) 사이를 받침대로 채운다.
+# 시각 전용이다 — 팔은 지금까지처럼 고정 조인트가 잡는다. 충돌체를 넣으면 물리만 복잡해진다.
+if args.riser == "on":
+    plate_z = float(mount[2]) - args.plate_offset   # 팔 받침판 밑면 (실측 오프셋)
+    base_z = float(args.riser_base)                # 받침대가 서는 상판 높이 (실측 0.430)
+    chx = UsdGeom.Xformable(stage.GetPrimAtPath(chassis[0]))
+    w2l = chx.ComputeLocalToWorldTransform(Usd.TimeCode.Default()).GetInverse()
+    riser = UsdGeom.Xform.Define(stage, chassis[0] + "/arm_riser")
+    riser.AddTransformOp().Set(w2l)                # 월드 좌표로 그리되 chassis 를 따라 움직이게
+
+    def slab(name, cx, cy, cz, sx, sy, sz):
+        c = UsdGeom.Cube.Define(stage, chassis[0] + "/arm_riser/" + name)
+        c.CreateSizeAttr().Set(2.0)                # 기본 큐브는 -1~+1 → 스케일이 곧 반치수
+        x = UsdGeom.Xformable(c)
+        x.AddTranslateOp().Set(Gf.Vec3d(cx, cy, cz))
+        x.AddScaleOp().Set(Gf.Vec3f(sx / 2, sy / 2, sz / 2))
+
+    top_t = 0.008
+    slab("top_plate", float(mount[0]) - 0.012, float(mount[1]), plate_z - top_t / 2,
+         0.206, 0.180, top_t)
+    # 옆판은 라이다 시야(y ±0.039)를 피해 바깥쪽에 세운다
+    for sgn, nm in ((+1, "wall_left"), (-1, "wall_right")):
+        slab(nm, float(mount[0]) - 0.010, float(mount[1]) + sgn * 0.075,
+             (base_z + plate_z - top_t) / 2, 0.180, 0.012, plate_z - top_t - base_z)
+    say(f"장착 어댑터 생성: 상판 {base_z:.3f} → 받침판 {plate_z:.3f} "
+        f"(높이 {(plate_z - base_z) * 1000:.0f} mm, 시각 전용)")
 
 # 5) 팔 구동 게인 — URDF 임포트 값이 너무 낮아(강성 26~102) 위치 지령을 따라가지 못한다 (실측).
 #    위치 제어가 되도록 올린다. 그리퍼는 물체를 쥐는 힘이라 낮게 둔다.

@@ -22,6 +22,8 @@ ap.add_argument("--descriptor", default=os.path.expanduser(
 ap.add_argument("--urdf", default=os.path.expanduser(
     "~/Isaac_Sim_b-1/src_pra/M0609/doosan-robot2/urdf/m0609.urdf"))
 ap.add_argument("--ee", default="link_6", help="IK 를 풀 말단 링크 이름")
+ap.add_argument("--kp", type=float, default=1.0e5, help="팔 위치 게인")
+ap.add_argument("--kd", type=float, default=1.0e4, help="팔 감쇠 게인")
 args = ap.parse_args()
 
 from isaacsim import SimulationApp  # noqa: E402
@@ -72,13 +74,21 @@ ctrl = robot.get_articulation_controller()
 kp = np.zeros(len(names)); kd = np.zeros(len(names))
 for i, n in enumerate(names):
     if n in arm:
-        kp[i], kd[i] = 1.0e5, 1.0e4
+        kp[i], kd[i] = args.kp, args.kd
     elif n in grip:
         kp[i], kd[i] = 1.0e3, 1.0e2
     else:                      # 바퀴는 속도 구동
         kp[i], kd[i] = 0.0, 1.0e6
 ctrl.set_gains(kps=kp, kds=kd)
-say(f"구동 게인 적용 (팔 kp 1e5 / 그리퍼 1e3 / 바퀴 속도구동)")
+# **설정한 값이 실제로 들어갔는지 다시 읽어 확인한다.** articulation 준비 전에 설정하면 조용히 무시된다
+back = ctrl.get_gains()
+kp_back = np.asarray(back[0], float) if back and back[0] is not None else None
+if kp_back is None:
+    say("게인 되읽기 실패 — 확인 불가")
+else:
+    applied = [f"{names[i]}={kp_back[i]:.0f}" for i in [names.index(n) for n in arm[:3]]]
+    ok_gain = all(abs(kp_back[names.index(n)] - args.kp) < 1.0 for n in arm)
+    say(f"게인 설정 후 되읽기: {applied} → {'값이 들어갔다' if ok_gain else '**설정이 무시됐다**'}")
 
 for _ in range(60):
     world.step(render=False)
@@ -109,6 +119,13 @@ err = float(np.max(np.abs(end - target)))
 moved = float(np.max(np.abs(end - start)))
 say(f"팔 지령 추종: 이동 {moved:.3f} rad, 목표 오차 {err:.3f} rad "
     f"→ {'정상' if moved > 0.1 and err < 0.15 else '확인 필요'}")
+lower, upper = robot.dof_properties["lower"], robot.dof_properties["upper"]
+maxeff = robot.dof_properties["maxEffort"] if "maxEffort" in robot.dof_properties.dtype.names else None
+for k, n in enumerate(arm):
+    i = names.index(n)
+    say(f"  {n}: 시작 {start[k]:+.3f} → 목표 {target[k]:+.3f} / 실제 {end[k]:+.3f} "
+        f"(오차 {end[k] - target[k]:+.3f}, 한계 {lower[i]:+.2f}~{upper[i]:+.2f}"
+        + (f", 최대힘 {maxeff[i]:.0f}" if maxeff is not None else "") + ")")
 if idx_wheel:
     wheel_drift = float(np.max(np.abs(robot.get_joint_positions()[idx_wheel] - wheel_hold)))
     say(f"바퀴 고정: 편차 {wheel_drift:.4f} rad → {'정상' if wheel_drift < 0.05 else '확인 필요'}")
