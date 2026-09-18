@@ -171,8 +171,12 @@ class MockPerceptionServer(Node):
             self.get_parameter("target_frame").value
         )
 
-        # 로봇팔이 검증한 1차 서가 칸 (arm_base_link 기준, 꽂힌 책 AABB 중심)
-        target_slot.pose.position.x = -0.3497
+        # 로봇팔이 검증한 1차 서가 칸 4곳 (arm_base_link 기준, 꽂힌 책 AABB 중심).
+        # 호출될 때마다 다음 칸을 준다 — 같은 칸만 주면 여러 권이 같은 자리에 꽂힌다
+        slots_x = [-0.3497, -0.4297, -0.5097, -0.2697]
+        self._slot_index = getattr(self, "_slot_index", 0)
+        target_slot.pose.position.x = slots_x[self._slot_index % len(slots_x)]
+        self._slot_index += 1
         target_slot.pose.position.y = 0.5495
         target_slot.pose.position.z = 0.3399
 
