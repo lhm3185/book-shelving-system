@@ -20,12 +20,20 @@ ap.add_argument("--n", type=int, default=10)
 ap.add_argument("--period", type=float, default=1.5)
 ap.add_argument("--profiles", default=os.path.expanduser(
     "~/ws_cobot_pjt/book-shelving-system/ros2_ws/src/shelving_manipulation/config/book_profiles.yaml"))
+ap.add_argument("--slot-widths", default="",
+                help="여러 종류를 놓았을 때 칸별 책 폭(깊이) m, 쉼표로 구분. "
+                     "Isaac 실행기가 시작할 때 찍는 '깊이' 값을 그대로 넣으면 된다. 비우면 기본 프로파일 폭")
 args = ap.parse_args()
 
 cfg = yaml.safe_load(open(args.profiles))
 truth = np.array([s["center"] for s in cfg["tray"]["slots"]], float)
 width = float(cfg["profiles"]["default"]["width"])
-top = truth.copy(); top[:, 2] += width / 2
+widths = [float(v) for v in args.slot_widths.split(",") if v.strip()] or [width] * len(truth)
+if len(widths) < len(truth):
+    widths += [width] * (len(truth) - len(widths))
+top = truth.copy()
+for k in range(len(top)):
+    top[k, 2] += widths[k] / 2
 
 rclpy.init()
 n = Node("trigger_eval")

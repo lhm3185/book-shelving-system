@@ -1,0 +1,5 @@
+[INFO] [1789702363.891522694] [manipulation_node]: PlaceBook /place_book executor=sim profile=default tray_slots=6 status=/robot/status
+[INFO] [1789702438.254623934] [manipulation_node]: 작업 job_085de825ea20 book=book_001 트레이 칸 0 → (-0.3497, 0.5495, 0.3399) 삽입 속도 0.030 m/s
+[INFO] [1789702449.411080405] [manipulation_node]: PlaceBook 성공 job=job_085de825ea20 code=0(OK) phase= 배치 확인
+[INFO] [1789702514.690694762] [manipulation_node]: 작업 job_2a6d05ed7df8 book=book_001 트레이 칸 1 → (-0.3497, 0.5495, 0.3399) 삽입 속도 0.030 m/s
+[INFO] [1789702525.617740358] [manipulation_node]: PlaceBook 성공 job=job_2a6d05ed7df8 code=0(OK) phase= 배치 확인

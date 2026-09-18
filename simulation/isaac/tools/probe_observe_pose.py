@@ -19,6 +19,10 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--usd", default=os.path.expanduser("~/Desktop/ing_library_env_v3.usd"))
 ap.add_argument("--tray", default=os.path.expanduser("~/book_dataset/assets/tray/tray_v1.usdc"))
 ap.add_argument("--out", default="/tmp/observe")
+ap.add_argument("--camera-prim", default="",
+                help="레벨 로봇에 이미 달린 카메라 prim (있으면 가정 카메라 대신 이것의 실제 장착 위치·방향을 쓴다)")
+ap.add_argument("--hfov", type=float, default=90.5)
+ap.add_argument("--res", type=int, nargs=2, default=[640, 480])
 args = ap.parse_args()
 
 from isaacsim import SimulationApp  # noqa: E402
@@ -30,7 +34,7 @@ from pxr import Gf, UsdGeom, UsdPhysics  # noqa: E402
 from isaacsim.core.prims import SingleXFormPrim  # noqa: E402
 from isaacsim.sensors.camera import Camera  # noqa: E402
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "controllers"))
 from book_scene import BookScene, R, VEL_LIMIT  # noqa: E402
 from arm_primitives import MoveJoint, Wait  # noqa: E402
 from arm_geometry import R_from_quat  # noqa: E402
@@ -44,7 +48,7 @@ def say(m):
 
 
 PLACE_DX = [-0.51, -0.43, -0.35, -0.27]
-HFOV = math.radians(90.5); W_PX, H_PX = 640, 480
+HFOV = math.radians(args.hfov); W_PX, H_PX = args.res
 FX = (W_PX / 2) / math.tan(HFOV / 2)
 CAM_OFFSET = np.zeros(3)            # panda_hand 좌표계 기준 카메라 위치 (장착 확정 시 수정)
 
@@ -55,15 +59,35 @@ floor_z = 0.355 * 1.4
 targets = [np.array([link0[0] + dx, scene.shelf_front_y + 0.024 + scene.W / 2, floor_z + scene.L / 2]) for dx in PLACE_DX]
 slot_top = floor_z + 0.49          # 1번 칸 바닥~윗판 (선반 z×1.4)
 
-# 손목 카메라 (임시): panda_hand 아래, USD 카메라는 -Z 를 보므로 X 축 180° 돌려 +Z(접근축)를 보게 한다
-CAM = f"{R}/panda_hand/wrist_cam_probe"
-cam_prim = UsdGeom.Camera.Define(st, CAM)
-xf = UsdGeom.Xformable(cam_prim)
-xf.AddTranslateOp().Set(Gf.Vec3d(*CAM_OFFSET)); xf.AddRotateXYZOp().Set(Gf.Vec3f(180.0, 0.0, 0.0))
-cam_prim.CreateHorizontalApertureAttr(20.955)
-cam_prim.CreateVerticalApertureAttr(20.955 * H_PX / W_PX)
-cam_prim.CreateFocalLengthAttr(20.955 / (2 * math.tan(HFOV / 2)))
-cam_prim.CreateClippingRangeAttr(Gf.Vec2f(0.02, 50.0))
+# 카메라: 레벨에 실제 카메라가 있으면 그것을 쓰고(장착 위치·방향을 손 좌표계로 환산),
+# 없으면 예전처럼 panda_hand 원점에 가정 카메라를 만든다
+REAL_CAM = bool(args.camera_prim)
+if REAL_CAM:
+    CAM = args.camera_prim
+    if not st.GetPrimAtPath(CAM).IsValid():
+        say(f"카메라 prim 없음: {CAM}"); app.close(); sys.exit(1)
+else:
+    CAM = f"{R}/panda_hand/wrist_cam_probe"
+    cam_prim = UsdGeom.Camera.Define(st, CAM)
+    xf = UsdGeom.Xformable(cam_prim)
+    xf.AddTranslateOp().Set(Gf.Vec3d(*CAM_OFFSET)); xf.AddRotateXYZOp().Set(Gf.Vec3f(180.0, 0.0, 0.0))
+    cam_prim.CreateHorizontalApertureAttr(20.955)
+    cam_prim.CreateVerticalApertureAttr(20.955 * H_PX / W_PX)
+    cam_prim.CreateFocalLengthAttr(20.955 / (2 * math.tan(HFOV / 2)))
+    cam_prim.CreateClippingRangeAttr(Gf.Vec2f(0.02, 50.0))
+
+# 실제 카메라의 장착 위치·방향을 손 좌표계로 한 번 환산해 둔다 (이후 후보마다 FK 로 옮긴다)
+CAM_REL_P = CAM_OFFSET.copy()
+CAM_REL_R = np.eye(3)
+if REAL_CAM:
+    for _ in range(2):
+        world.step(render=True)
+    hp0, hq0 = SingleXFormPrim(f"{R}/panda_hand").get_world_pose()
+    cp0, cq0 = SingleXFormPrim(CAM).get_world_pose()
+    Rh0 = R_from_quat(np.asarray(hq0, float)); Rc0 = R_from_quat(np.asarray(cq0, float))
+    CAM_REL_P = Rh0.T @ (np.asarray(cp0, float) - np.asarray(hp0, float))
+    CAM_REL_R = Rh0.T @ Rc0
+    say(f"실제 카메라 {CAM.rsplit('/', 1)[1]}: 손 기준 위치 {np.round(CAM_REL_P, 4).tolist()}")
 
 links = [f"panda_link{i}" for i in range(1, 8)] + ["panda_hand", "panda_leftfinger", "panda_rightfinger"]
 colliders = []
@@ -133,9 +157,13 @@ for dist in (0.22, 0.26, 0.30, 0.34):                  # 서가 앞면 ~ 카메�
             c_w = ee_R @ scene._c_loc                      # 손 y(닫힘축)
             Rh = np.stack([np.cross(c_w, a_w), c_w, a_w], axis=1)   # 손 좌표축 (x, y, z=접근)
             hp = hand_p
-            cam_pos = hand_p + Rh @ CAM_OFFSET
-            z_cam = a_w; x_cam = np.array([1.0, 0, 0]) - np.dot([1.0, 0, 0], z_cam) * z_cam
-            x_cam /= np.linalg.norm(x_cam); y_cam = np.cross(z_cam, x_cam)
+            cam_pos = hand_p + Rh @ CAM_REL_P
+            if REAL_CAM:
+                Rc = Rh @ CAM_REL_R            # USD 카메라는 −Z 를 본다 → 광축 = −Rc[:,2], 화면 아래 = −Rc[:,1]
+                x_cam, y_cam, z_cam = Rc[:, 0], -Rc[:, 1], -Rc[:, 2]
+            else:
+                z_cam = a_w; x_cam = np.array([1.0, 0, 0]) - np.dot([1.0, 0, 0], z_cam) * z_cam
+                x_cam /= np.linalg.norm(x_cam); y_cam = np.cross(z_cam, x_cam)
             pts = []
             for tg in targets:
                 pts += [tg + [0, -scene.W / 2, -scene.L / 2], tg + [0, -scene.W / 2, scene.L / 2]]   # 책등 아래·위
