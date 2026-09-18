@@ -1,0 +1,25 @@
+장면 준비: 트레이 칸 6개, 책 6권, 원본 6종, 홈 IK True
+  book_0: 두께 0.035 세운높이 0.237 깊이 0.163
+  book_1: 두께 0.045 세운높이 0.230 깊이 0.155
+  book_2: 두께 0.032 세운높이 0.225 깊이 0.160
+  book_3: 두께 0.044 세운높이 0.228 깊이 0.174
+  book_4: 두께 0.038 세운높이 0.230 깊이 0.153
+  book_5: 두께 0.039 세운높이 0.237 깊이 0.163
+작업 실행기 시작 — 시작 홈 이동 중
+준비 완료 (step 740) — 명령 대기 /manipulation/sim/command
+작업 demo_095009_0: book_0 (칸 0, 0.0cm) → x 2.485 계획 OK 최대 인접변화 0.091 rad
+  [파지] book_0 중심 [2.173, -2.94, 0.388] 크기 [0.035, 0.237, 0.163]
+  [놓음] book_0 중심 [2.486, -2.555, 0.616] 크기 [0.037, 0.163, 0.237]
+작업 demo_095009_0 SUCCEEDED {'phase': 'verify', 'message': '배치 확인', 'placement_verified': True, 'checks': {'upright': True, 'depth': True, 'spine': True, 'x': True, 'floor': True}, 'book_aabb_center_arm': [-0.3489, 0.5495, 0.3405], 'joint_peak_ratio': 0.23, 'joint_over80_steps': 0, 'sim_steps': 1307, 'render_steps': 0} (8.3s)
+작업 demo_095018_1: book_1 (칸 1, 0.3cm) → x 2.405 계획 OK 최대 인접변화 0.095 rad
+  [파지] book_1 중심 [2.247, -2.94, 0.385] 크기 [0.045, 0.23, 0.155]
+  [놓음] book_1 중심 [2.407, -2.546, 0.613] 크기 [0.046, 0.156, 0.23]
+작업 demo_095018_1 SUCCEEDED {'phase': 'verify', 'message': '배치 확인', 'placement_verified': True, 'checks': {'upright': True, 'depth': True, 'spine': True, 'x': True, 'floor': True}, 'book_aabb_center_arm': [-0.4286, 0.5495, 0.3369], 'joint_peak_ratio': 0.23, 'joint_over80_steps': 0, 'sim_steps': 1205, 'render_steps': 0} (7.3s)
+작업 demo_095026_2: book_2 (칸 2, 0.1cm) → x 2.325 계획 OK 최대 인접변화 0.092 rad
+  [파지] book_2 중심 [2.316, -2.963, 0.388] 크기 [0.034, 0.225, 0.161]
+  [놓음] book_2 중심 [2.324, -2.553, 0.611] 크기 [0.034, 0.162, 0.226]
+작업 demo_095026_2 SUCCEEDED {'phase': 'verify', 'message': '배치 확인', 'placement_verified': True, 'checks': {'upright': True, 'depth': True, 'spine': True, 'x': True, 'floor': True}, 'book_aabb_center_arm': [-0.5118, 0.5498, 0.335], 'joint_peak_ratio': 0.349, 'joint_over80_steps': 0, 'sim_steps': 1184, 'render_steps': 0} (7.0s)
+작업 demo_095034_3: book_3 (칸 3, 0.5cm) → x 2.565 계획 OK 최대 인접변화 0.088 rad
+  [파지] book_3 중심 [2.397, -2.941, 0.393] 크기 [0.045, 0.228, 0.174]
+  [놓음] book_3 중심 [2.566, -2.566, 0.612] 크기 [0.045, 0.174, 0.228]
+작업 demo_095034_3 SUCCEEDED {'phase': 'verify', 'message': '배치 확인', 'placement_verified': True, 'checks': {'upright': True, 'depth': True, 'spine': True, 'x': True, 'floor': True}, 'book_aabb_center_arm': [-0.2698, 0.5495, 0.336], 'joint_peak_ratio': 0.23, 'joint_over80_steps': 0, 'sim_steps': 1384, 'render_steps': 0} (7.9s)
