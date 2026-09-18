@@ -34,7 +34,7 @@ from pxr import Gf, UsdGeom, UsdPhysics  # noqa: E402
 from isaacsim.core.prims import SingleXFormPrim  # noqa: E402
 from isaacsim.sensors.camera import Camera  # noqa: E402
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "controllers"))
 from book_scene import BookScene, R, VEL_LIMIT  # noqa: E402
 from arm_primitives import MoveJoint, Wait  # noqa: E402
 from arm_geometry import R_from_quat  # noqa: E402

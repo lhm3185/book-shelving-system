@@ -49,7 +49,7 @@ from isaacsim.robot_motion.motion_generation.lula.kinematics import LulaKinemati
 from isaacsim.robot_motion.motion_generation.articulation_kinematics_solver import ArticulationKinematicsSolver
 from isaacsim.sensors.camera import Camera
 
-sys.path.insert(0, os.path.expanduser("~/arm"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "controllers"))
 from arm_primitives import ArmController, Primitive, SetGripper, Sequence, Status, Wait  # noqa: E402
 
 os.makedirs(f"{args.out}/frames", exist_ok=True)
