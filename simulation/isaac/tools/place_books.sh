@@ -4,7 +4,8 @@
 set -u  # ROS setup.bash 는 미정의 변수를 써서 source 앞뒤로 +u/-u
 : "${ROS_DOMAIN_ID:?ROS_DOMAIN_ID 를 export 할 것}"
 N="${1:-4}"
-WS="${WS:-$HOME/ws_cobot_pjt/book-shelving-system/ros2_ws}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+WS="${WS:-$REPO_ROOT/ros2_ws}"
 export FASTRTPS_DEFAULT_PROFILES_FILE="${FASTRTPS_DEFAULT_PROFILES_FILE:-$HOME/.ros/fastdds_whitelist.xml}"
 set +u; source /opt/ros/jazzy/setup.bash; source "$WS/install/setup.bash"; set -u
 XS=(-0.3497 -0.4297 -0.5097 -0.2697)

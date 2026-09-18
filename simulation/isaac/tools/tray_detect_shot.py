@@ -5,6 +5,10 @@
 """
 import argparse
 import os
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent))
+import _paths  # noqa: E402
 
 import numpy as np
 import rclpy
@@ -12,7 +16,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import Image
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--model", default=os.path.expanduser("~/ws_cobot_pjt/arm/models/book_best.pt"))
+ap.add_argument("--model", default=_paths.default_model())
 ap.add_argument("--conf", type=float, default=0.75)
 ap.add_argument("--topic", default="/rgb")
 ap.add_argument("--out", default="/tmp/b1_demo/tray_detect.jpg")

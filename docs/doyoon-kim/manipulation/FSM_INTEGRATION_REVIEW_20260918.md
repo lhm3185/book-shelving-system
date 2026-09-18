@@ -4,7 +4,7 @@
 | --- | --- |
 | 작성 | 2026-09-18, D 김도윤 |
 | 대상 | `origin/feature/1st_combine_integration_test` (f88d2a4, 이현민이 system-fsm + vision + 우리 `robot_control`(e667673 까지) 을 합침) |
-| 결론 | **로봇팔 인터페이스는 FSM 구성과 맞는다.** 다만 **비전의 `/detect_target_slot` 액션 서버가 없어서** 지금 상태로는 FSM → 로봇팔까지 못 간다. 그리고 mock 값으로는 우리 노드가 M410 으로 거절한다 |
+| 결론 | **로봇팔 인터페이스는 FSM 구성과 맞는다.** 현재 비전·주행·칸 좌표는 **통신 시험용 mock** 이고, mock 칸 값만 1차 검증 좌표로 바꾸면 전 구간이 관통한다 (9/18 확인) |
 
 ## 1. FSM 시스템 구성 (읽은 대로)
 
@@ -41,16 +41,16 @@ task_manager_node (상태기계)
 
 **결론: 우리 쪽은 인터페이스 변경 없이 그대로 붙는다.**
 
-## 3. 지금 상태로 통합하면 막히는 곳 (2건)
+## 3. 통신 시험 구성에서 알아둘 것 (2건)
 
-### (1) 비전에 `/detect_target_slot` 액션 서버가 없다 — **1순위**
+### (1) 비전 쪽은 아직 mock 으로 돈다
 
 - `shelving_perception` 의 실행 파일은 `vision_manager` 하나뿐이고, `DetectTargetSlot` 을 쓰는 코드가 없다
 - `perception.yaml` 에서 **서가 목표 관련 설정이 전부 주석 처리**돼 있다 ("Shelf targeting is disabled for the book-only validation stage")
-- FSM 은 `DETECT_TARGET_SLOT` 상태에서 이 액션을 호출하므로 → `ERROR_PERCEPTION_SERVER(3001)` 로 끝난다
-- 지금 동작하는 것은 `shelving_system/mock_perception_server.py` 뿐
+- 따라서 FSM 의 `DETECT_TARGET_SLOT` 은 `mock_perception_server.py` 가 응답한다 (통신 시험용 구성)
+- 실제 비전으로 바꿀 때 지킬 규약은 아래 (2) 와 같다: `arm_base_link`, 꽂힌 뒤 책 AABB 중심, yaw +90°
 
-### (2) mock 이 주는 칸 값은 우리 노드가 거절한다 (9/17 확인, 그대로 남아 있음)
+### (2) mock 의 칸 값은 임의값이라 그대로는 로봇팔이 거절한다 (통신 시험용 값이므로 정상)
 
 | mock 값 | 우리 판정 |
 | --- | --- |
@@ -70,6 +70,38 @@ task_manager_node (상태기계)
 | 카메라 프레임 | `system.yaml frames.camera = camera_link` | 실제 발행은 `sim_camera` / `Camera_OmniVision_OV9782_Color` | **이름이 다르다.** FSM 이 이 값을 쓰기 시작하면 맞춰야 함 (현재는 사용처 없음) |
 | launch | `pc_a/pc_b/all` 비어 있음 | 우리 실행 스크립트로 대신 | 이현민이 채울 때 **우리 노드 실행 조건**(`executor:=sim`, 정적 TF `panda_link0→arm_base_link`)을 전달해야 함 |
 | 우리 최신 커밋 | e667673 까지만 합쳐짐 | 이후 6845d70 ~ bc158f0 (문서·여러 종류 책·학습 도구) | 다음 통합 때 다시 합쳐야 함 |
+
+## 4-1. 관통 시험 결과 (2026-09-18 12:33, **성공**)
+
+mock 칸 값 2개만 바꿔 전 구간을 돌렸다. 로컬 시험 브랜치 `test/fsm-arm-integration`(통합 브랜치 + 우리 최신 + mock 수정), **push 하지 않음**.
+
+| 바꾼 값 | 전 | 후 |
+| --- | --- | --- |
+| `mock_perception_server.py` 칸 위치 | (0.55, 0, 0.80) | **(−0.3497, 0.5495, 0.3399)** |
+| 칸 자세 | 단위 쿼터니언(yaw 0°) | **z=w=0.7071068 (yaw +90°)** |
+
+구성: 무인반납기(`return_machine_node`) → `task_manager_node` → mock 주행 · mock 인식 → **우리 `manipulation_node`(executor=sim)** → GPU PC Isaac(레벨 v5, 6종 책)
+
+```
+IDLE → PLANNING → NAV_TO_RETURN → RECEIVE_TRAY → SELECT_BOOK → NAV_TO_SHELF
+  → DETECT_TARGET_SLOT → PLACE_BOOK → UPDATE_DATA → NEXT_BOOK → RETURN_HOME → COMPLETED → IDLE
+```
+
+| 항목 | 결과 |
+| --- | --- |
+| goal 수락 | `Book-placement goal was accepted` (M410 없음) |
+| 로봇팔 | `PlaceBook 성공 code=0(OK)`, Isaac `placement_verified: True` (upright·depth·spine·x·floor 전부 통과) |
+| PLACE_BOOK 구간 | **11.16 s (벽시계)** — goal 발신 → 성공 수신 |
+| 작업 전체 | 트리거 → COMPLETED 약 21 s (mock 주행 2회 포함) |
+| 2회차 작업 | 같은 방식으로 성공 (book_1) |
+
+원자료: `results/20260918_fsm/{fsm.log, arm.log, isaac.log}`
+
+### 확인된 주의점
+
+- **mock 은 항상 같은 칸을 준다.** 2회차도 같은 x(2.485)에 꽂혔다. 여러 권 시연에서는 칸이 달라져야 하므로, 시연은 칸을 바꿔 주는 쪽(`place_books.sh`) 또는 mock 을 권마다 다른 칸으로 고치는 방식이 필요하다
+- `task_manager_node` 는 `--params-file system.yaml` 로 띄우면 죽는다 (`system.yaml` 은 ROS 파라미터 파일 형식이 아니다). **옵션 없이** 띄워야 한다
+- 책 프로파일 불일치(0.18 vs 0.163)는 칸 폭 검사가 꺼져 있어 지나갔다. **검사를 켜면 M410** 이 난다 — 세션에서 양쪽이 "꺼져 있음"을 확인할 것
 
 ## 5. 세션에서 할 순서 (제안)
 

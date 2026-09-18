@@ -10,18 +10,22 @@
     책마다 한 개의 상자가 나온다 (= 지금 문제인 "여러 권이 한 상자" 를 바로잡는 정답 라벨).
 
 실행 (GPU PC)
-    ~/arm/isaac/run_place_book_server.sh 와 같은 환경이 필요하다. 실행기 대신 이 파일을 쓴다:
-        ISAAC_ENTRY=~/arm/isaac/capture_spines.py ~/arm/isaac/run_capture.sh --views 60 --out ~/spine_ds
+    ISAAC_ENTRY=simulation/isaac/tools/capture_spines.py ./scripts/run_isaac_tool.sh \
+        --views 70 --rounds 8 --out ~/spine_ds
 """
 import argparse
 import json
 import os
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent))
+import _paths  # noqa: E402
 import random
 import sys
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--usd", default=os.path.expanduser("~/Desktop/ing_library_env_v5.usd"))
-ap.add_argument("--tray", default=os.path.expanduser("~/book_dataset/assets/tray/tray_v1.usdc"))
+ap.add_argument("--usd", default=_paths.default_usd())
+ap.add_argument("--tray", default=_paths.default_tray())
 ap.add_argument("--tray-center", type=float, nargs=2, default=[2.36, -2.94])
 ap.add_argument("--books", type=int, default=6)
 ap.add_argument("--out", default=os.path.expanduser("~/spine_ds"))
@@ -44,7 +48,7 @@ from pxr import Gf, UsdGeom, UsdLux  # noqa: E402
 from isaacsim.core.prims import SingleXFormPrim  # noqa: E402
 from isaacsim.core.utils.semantics import add_labels  # noqa: E402
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "controllers"))
 from book_scene import BookScene  # noqa: E402
 
 MIXED_BOOKS = [

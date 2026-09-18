@@ -15,11 +15,15 @@ import argparse
 import json
 import math
 import os
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent))
+import _paths  # noqa: E402
 import sys
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--usd", default=os.path.expanduser("~/Desktop/ing_library_env_v3.usd"))
-ap.add_argument("--tray", default=os.path.expanduser("~/book_dataset/assets/tray/tray_v1.usdc"))
+ap.add_argument("--usd", default=_paths.default_usd())
+ap.add_argument("--tray", default=_paths.default_tray())
 ap.add_argument("--tray-center", type=float, nargs=2, default=[2.36, -2.94])
 ap.add_argument("--books", type=int, default=3, help="트레이에 세울 책 수(칸 0 부터)")
 ap.add_argument("--jobs", type=int, default=None, help="실행할 작업 수 (기본: 책 수)")
@@ -49,7 +53,7 @@ from isaacsim.robot_motion.motion_generation.lula.kinematics import LulaKinemati
 from isaacsim.robot_motion.motion_generation.articulation_kinematics_solver import ArticulationKinematicsSolver
 from isaacsim.sensors.camera import Camera
 
-sys.path.insert(0, os.path.expanduser("~/arm"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "controllers"))
 from arm_primitives import ArmController, Primitive, SetGripper, Sequence, Status, Wait  # noqa: E402
 
 os.makedirs(f"{args.out}/frames", exist_ok=True)

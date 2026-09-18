@@ -7,7 +7,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+ISAAC_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ISAAC_ROOT / "controllers"))
 
 from arm_geometry import (R_from_quat, in_frame, orientation_from_axes,  # noqa: E402
                           quat_angle, quat_from_R, slerp)

@@ -27,7 +27,39 @@
 
 6번: 비전 임계값은 코드 기본값과 `perception.yaml` 두 곳에 있다. 지금은 둘 다 0.75 지만 다시 어긋나면 리허설에서 잡는다 (단일 출처화는 2차 정리 항목).
 
-**시연 중에 발견하지 말고 시작 전에 발견한다.** 시연 30분 전 전체 리허설 1회.
+**시연 중에 발견하지 말고 시작 전에 발견한다.**
+
+**시연 시각은 당일 추첨이라 미리 알 수 없다** (9/21 1차, 9/30 최종). 그래서 "30분 전 리허설"을 시각으로 잡지 않고 이렇게 한다.
+
+| 시점 | 할 일 |
+| --- | --- |
+| 시연 당일 아침 | **전체 리허설 1회** (2~5절 전부, 4권까지) |
+| 리허설 뒤 ~ 호출까지 | Isaac·노드를 **띄운 채로 유지**. 끄지 않는다 |
+| 호출 직후 | 위 게이트 1~4번만 다시 (약 1분). 재시작이 필요하면 Isaac 40~60초 + 노드 10초 |
+
+### 실측 (2026-09-18, GPU PC, 카메라 포함, 환경변수 없이)
+
+| 단계 | 시간 |
+| --- | --- |
+| Isaac 시작 → `준비 완료` | **23초** |
+| 이 PC 노드 기동 (`run_demo_pc.sh`: 정적 TF + 비전 + 로봇팔) | **23초** |
+| 게이트 확인 6단계 | 1분 이내 |
+| **책 2권 꽂기 (비전 켠 채)** | **26초** (1권당 13초) |
+
+**껐다 켜는 전체 복구 = 약 1분.** 4권이면 꽂는 데 약 52초이므로, 호출 뒤 재시작하더라도 2분 안에 시연을 시작할 수 있다.
+
+### 게이트 6단계 (이 순서대로, 2026-09-18 전 구간 통과 확인)
+
+```bash
+1. ros2 daemon stop                                   # 죽은 노드 정보 제거
+2. (GPU PC) ./scripts/run_isaac_sim.sh --gui          # "준비 완료" 확인. SIM_USD 없어도 자동 대체
+3. (이 PC) ./run_demo_pc.sh                           # 정적 TF + 비전 + 로봇팔
+4. ros2 topic list | grep -E "^/(rgb|depth|camera_info|clock|tf)$"   # 5개
+5. ros2 action info /place_book                       # Action servers: 1  ← 2면 중단
+6. ros2 topic hz /clock ; ros2 param get /vision_manager confidence_threshold   # 0.75
+```
+
+5번이 2 이상이면 어딘가에 `manipulation_node` 가 더 떠 있다. 그대로 두면 **결과가 뒤섞인다** (2026-09-18 실제 발생).
 
 ## 1. GPU PC — Isaac (레벨 v5 + 로봇팔 실행기)
 
@@ -62,6 +94,8 @@ ros2 topic list --no-daemon      # /rgb /depth /camera_info /tf /clock /point_cl
 ros2 action list                 # /place_book
 ros2 topic hz /rgb               # 약 60 Hz
 ```
+
+**같은 판을 여러 번 돌릴 때 M411(NOT_READY) 이 계속 나오면**: `ros2 daemon stop` 후 다시 시도한다. 데몬이 죽은 노드의 액션 서버 정보를 들고 있어 새 목표가 거절된다 (2026-09-18 실측). 노드를 새로 띄우는 것만으로는 풀리지 않는다.
 
 **토픽이 안 보이면** (PC 간 간헐 불통, 원인 미확정): GPU PC 에서 `source /opt/ros/jazzy/setup.bash; ros2 topic hz /clock` 을 한 번 실행한 뒤 이 PC 에서 다시 `ros2 topic list --no-daemon`. 오늘 두 번 모두 이 뒤에 보였다.
 

@@ -8,7 +8,7 @@ GPU PC:
 """
 import argparse, json, math, os, sys
 ap = argparse.ArgumentParser()
-ap.add_argument("--usd", default=os.path.expanduser("~/Desktop/ing_library_env_v3.usd"))
+ap.add_argument("--usd", default=_paths.default_usd())
 ap.add_argument("--tray", required=True)
 ap.add_argument("--out", default="/tmp/tray_fit")
 ap.add_argument("--center", type=float, nargs=2, default=[2.36, -2.94], help="트레이 중심 x y (월드)")

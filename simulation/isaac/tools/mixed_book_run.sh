@@ -6,7 +6,8 @@
 set -u
 : "${ROS_DOMAIN_ID:?ROS_DOMAIN_ID 를 export 할 것}"
 N="${1:-4}"
-WS="${WS:-$HOME/ws_cobot_pjt/book-shelving-system/ros2_ws}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+WS="${WS:-$REPO_ROOT/ros2_ws}"
 GPU="${GPU:-rokey@10.10.0.2}"
 KEY="${KEY:-$HOME/.ssh/id_ed25519_rocycle}"
 LEVEL="${LEVEL:-\$HOME/Desktop/ing_library_env_v5.usd}"
@@ -18,11 +19,15 @@ VARIANTS=(--book-variants mixed)
 echo "== GPU PC: Isaac 재시작 (${BOOKS:-mixed})"
 $SSH "$GPU" "pgrep -f 'place_book_serve[r].py' | xargs -r kill -9; sleep 2; rm -f /tmp/mixed_run.log; \
     export ROS_DOMAIN_ID=$ROS_DOMAIN_ID; \
-    nohup ~/arm/isaac/run_place_book_server.sh --usd $LEVEL ${VARIANTS[*]} > /tmp/mixed_run.log 2>&1 & echo 시작"
+    SIM_USD=$LEVEL nohup ~/book-shelving-system/scripts/run_isaac_sim.sh --headless ${VARIANTS[*]} > /tmp/mixed_run.log 2>&1 & echo 시작"
 
 echo "== 이 PC: 로봇팔 노드 재시작"
+# 판을 여러 번 돌리면 ros2 데몬이 죽은 노드의 액션 서버 정보를 들고 있어
+# 새 목표가 M411 로 거절된다 (2026-09-18 실측). 데몬을 먼저 내린다
 PAT="manipulation""_node"
 pgrep -f "$PAT" | xargs -r kill -9
+set +u; source /opt/ros/jazzy/setup.bash; set -u
+ros2 daemon stop > /dev/null 2>&1 || true
 sleep 1
 set +u; source /opt/ros/jazzy/setup.bash; source "$WS/install/setup.bash"; set -u
 export FASTRTPS_DEFAULT_PROFILES_FILE="${FASTRTPS_DEFAULT_PROFILES_FILE:-$HOME/.ros/fastdds_whitelist.xml}"
