@@ -4,7 +4,7 @@
 | --- | --- |
 | 작성 | 2026-09-18, D 김도윤 |
 | 대상 | `origin/feature/1st_combine_integration_test` (f88d2a4, 이현민이 system-fsm + vision + 우리 `robot_control`(e667673 까지) 을 합침) |
-| 결론 | **로봇팔 인터페이스는 FSM 구성과 맞는다.** 다만 **비전의 `/detect_target_slot` 액션 서버가 없어서** 지금 상태로는 FSM → 로봇팔까지 못 간다. 그리고 mock 값으로는 우리 노드가 M410 으로 거절한다 |
+| 결론 | **로봇팔 인터페이스는 FSM 구성과 맞는다.** 현재 비전·주행·칸 좌표는 **통신 시험용 mock** 이고, mock 칸 값만 1차 검증 좌표로 바꾸면 전 구간이 관통한다 (9/18 확인) |
 
 ## 1. FSM 시스템 구성 (읽은 대로)
 
@@ -41,16 +41,16 @@ task_manager_node (상태기계)
 
 **결론: 우리 쪽은 인터페이스 변경 없이 그대로 붙는다.**
 
-## 3. 지금 상태로 통합하면 막히는 곳 (2건)
+## 3. 통신 시험 구성에서 알아둘 것 (2건)
 
-### (1) 비전에 `/detect_target_slot` 액션 서버가 없다 — **1순위**
+### (1) 비전 쪽은 아직 mock 으로 돈다
 
 - `shelving_perception` 의 실행 파일은 `vision_manager` 하나뿐이고, `DetectTargetSlot` 을 쓰는 코드가 없다
 - `perception.yaml` 에서 **서가 목표 관련 설정이 전부 주석 처리**돼 있다 ("Shelf targeting is disabled for the book-only validation stage")
-- FSM 은 `DETECT_TARGET_SLOT` 상태에서 이 액션을 호출하므로 → `ERROR_PERCEPTION_SERVER(3001)` 로 끝난다
-- 지금 동작하는 것은 `shelving_system/mock_perception_server.py` 뿐
+- 따라서 FSM 의 `DETECT_TARGET_SLOT` 은 `mock_perception_server.py` 가 응답한다 (통신 시험용 구성)
+- 실제 비전으로 바꿀 때 지킬 규약은 아래 (2) 와 같다: `arm_base_link`, 꽂힌 뒤 책 AABB 중심, yaw +90°
 
-### (2) mock 이 주는 칸 값은 우리 노드가 거절한다 (9/17 확인, 그대로 남아 있음)
+### (2) mock 의 칸 값은 임의값이라 그대로는 로봇팔이 거절한다 (통신 시험용 값이므로 정상)
 
 | mock 값 | 우리 판정 |
 | --- | --- |
