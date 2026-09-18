@@ -5,6 +5,7 @@ vision_manager:
     depth_topic: /depth
     camera_info_topic: /camera_info
     trigger_topic: /perception/detect_request
+    perception_action: /detect_target_slot
     wait_for_trigger: true
     camera_frame: sim_camera
     target_frame: arm_base_link
@@ -15,4 +16,6 @@ vision_manager:
     gripper_roll: 0.0
     gripper_pitch: 0.0
     gripper_yaw_offset: 0.0
+    insertion_depth: 0.25
+    pre_insert_offset: 0.05
 
