@@ -1,0 +1,404 @@
+[INFO] [1789702409.712492550] [task_manager_node]: Task manager is ready. Listening on '/return_machine/tray_job'.
+[INFO] [1789702409.713471290] [task_manager_node]: Navigation action client configured for '/navigate_to_target'.
+[INFO] [1789702409.714387704] [task_manager_node]: Perception action client configured for '/detect_target_slot'.
+[INFO] [1789702409.715078284] [task_manager_node]: Manipulation action client configured for '/place_book'.
+[INFO] [1789702432.188255403] [task_manager_node]: Received TrayJob: job_id=job_085de825ea20, tray_id=tray_001, books=1
+[INFO] [1789702432.190006593] [task_manager_node]: Job plan created: job_id=job_085de825ea20, tray_id=tray_001, tasks=1
+[INFO] [1789702432.191185418] [task_manager_node]: Task 1: book_id=book_001, classification=005.7, target_shelf=shelf_01
+[INFO] [1789702432.192775361] [task_manager_node]: FSM transition completed: PLANNING -> NAV_TO_RETURN
+[INFO] [1789702432.193703390] [task_manager_node]: Waiting for navigation action server.
+[INFO] [1789702432.195610871] [task_manager_node]: Sending navigation goal: job_id=job_085de825ea20, target_type=return_station, target_id=return_station, x=1.00, y=0.00
+[INFO] [1789702432.207712222] [task_manager_node]: Navigation goal was accepted.
+[INFO] [1789702432.209845735] [task_manager_node]: Navigation feedback: target_id=return_station, phase=NAVIGATING, remaining_distance=1.00, position_error=1.00, yaw_error=0.00
+[INFO] [1789702432.711642839] [task_manager_node]: Navigation feedback: target_id=return_station, phase=NAVIGATING, remaining_distance=0.50, position_error=0.50, yaw_error=0.00
+[INFO] [1789702433.212837738] [task_manager_node]: Navigation feedback: target_id=return_station, phase=NAVIGATING, remaining_distance=0.10, position_error=0.10, yaw_error=0.00
+[INFO] [1789702433.714057295] [task_manager_node]: Navigation feedback: target_id=return_station, phase=NAVIGATING, remaining_distance=0.00, position_error=0.00, yaw_error=0.00
+[INFO] [1789702434.216235037] [task_manager_node]: Navigation succeeded: Reached target 'return_station'.
+[INFO] [1789702434.216754615] [task_manager_node]: FSM transition completed: NAV_TO_RETURN -> RECEIVE_TRAY
+[INFO] [1789702434.217221962] [task_manager_node]: FSM transition completed: RECEIVE_TRAY -> SELECT_BOOK
+[INFO] [1789702434.217655412] [task_manager_node]: Selected book task: book_id=book_001, task_number=1/1, target_shelf=shelf_01
+[INFO] [1789702434.218158023] [task_manager_node]: FSM transition completed: SELECT_BOOK -> NAV_TO_SHELF
+[INFO] [1789702434.218501510] [task_manager_node]: Waiting for navigation action server.
+[INFO] [1789702434.219141463] [task_manager_node]: Sending navigation goal: job_id=job_085de825ea20, target_type=shelf, target_id=shelf_01, x=3.00, y=1.00
+[INFO] [1789702434.221338618] [task_manager_node]: Navigation goal was accepted.
+[INFO] [1789702434.222427144] [task_manager_node]: Navigation feedback: target_id=shelf_01, phase=NAVIGATING, remaining_distance=1.00, position_error=1.00, yaw_error=0.00
+[INFO] [1789702434.723203819] [task_manager_node]: Navigation feedback: target_id=shelf_01, phase=NAVIGATING, remaining_distance=0.50, position_error=0.50, yaw_error=0.00
+[INFO] [1789702435.225991723] [task_manager_node]: Navigation feedback: target_id=shelf_01, phase=NAVIGATING, remaining_distance=0.10, position_error=0.10, yaw_error=0.00
+[INFO] [1789702435.727031930] [task_manager_node]: Navigation feedback: target_id=shelf_01, phase=NAVIGATING, remaining_distance=0.00, position_error=0.00, yaw_error=0.00
+[INFO] [1789702436.229748224] [task_manager_node]: Navigation succeeded: Reached target 'shelf_01'.
+[INFO] [1789702436.230442014] [task_manager_node]: FSM transition completed: NAV_TO_SHELF -> DETECT_TARGET_SLOT
+[INFO] [1789702436.230946586] [task_manager_node]: Waiting for perception action server.
+[INFO] [1789702436.231837706] [task_manager_node]: Sending empty-slot detection goal: job_id=job_085de825ea20, book_id=book_001, shelf_id=shelf_01, book_width=0.180, book_height=0.240, book_thickness=0.035
+[INFO] [1789702436.234704708] [task_manager_node]: Empty-slot detection goal was accepted.
+[INFO] [1789702436.235874160] [task_manager_node]: Perception feedback: phase=CAPTURING, candidate_count=0, best_confidence=0.00
+[INFO] [1789702436.638665044] [task_manager_node]: Perception feedback: phase=DETECTING_SHELF, candidate_count=1, best_confidence=0.70
+[INFO] [1789702437.041274047] [task_manager_node]: Perception feedback: phase=FINDING_EMPTY_SPACE, candidate_count=2, best_confidence=0.85
+[INFO] [1789702437.441736177] [task_manager_node]: Perception feedback: phase=CALCULATING_POSE, candidate_count=2, best_confidence=0.93
+[INFO] [1789702437.843898681] [task_manager_node]: Perception feedback: phase=TRANSFORMING_FRAME, candidate_count=2, best_confidence=0.95
+[INFO] [1789702438.247366733] [task_manager_node]: Empty slot detected: frame_id=arm_base_link, x=-0.350, y=0.549, z=0.340, confidence=0.95, candidate_count=2
+[INFO] [1789702438.248116254] [task_manager_node]: FSM transition completed: DETECT_TARGET_SLOT -> PLACE_BOOK
+[INFO] [1789702438.248584242] [task_manager_node]: Waiting for manipulation action server.
+[INFO] [1789702438.249311953] [task_manager_node]: Sending book-placement goal: job_id=job_085de825ea20, book_id=book_001, target_frame=arm_base_link, insertion_depth=0.250, insertion_speed=0.030
+[INFO] [1789702438.251922328] [task_manager_node]: Book-placement goal was accepted.
+[INFO] [1789702438.253302462] [task_manager_node]: Manipulation feedback: phase=DETECTING_BOOK, progress=0.00
+[INFO] [1789702438.271755690] [task_manager_node]: Manipulation feedback: phase=PLANNING_GRASP, progress=0.00
+[INFO] [1789702438.373553698] [task_manager_node]: Manipulation feedback: phase=PLANNING_GRASP, progress=0.00
+[INFO] [1789702438.419424809] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702438.541135980] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702438.548173470] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702438.592050522] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702438.735407585] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702438.739446708] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702438.797048835] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702438.900264612] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702438.926990179] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702439.020171700] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702439.156994690] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702439.300421954] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702439.301115602] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702439.332657987] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702439.436085630] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702439.491910791] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702439.638972084] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.18
+[INFO] [1789702439.680763367] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.18
+[INFO] [1789702439.764532792] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.18
+[INFO] [1789702439.866962370] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.18
+[INFO] [1789702439.879662443] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.18
+[INFO] [1789702440.016746098] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.18
+[INFO] [1789702440.152569072] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.18
+[INFO] [1789702440.185134853] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.18
+[INFO] [1789702440.290118483] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.18
+[INFO] [1789702440.330018971] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.23
+[INFO] [1789702440.429661219] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.23
+[INFO] [1789702440.573615001] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.23
+[INFO] [1789702440.574841622] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.23
+[INFO] [1789702440.705844171] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.23
+[INFO] [1789702440.750147377] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.29
+[INFO] [1789702440.893601950] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702441.038863905] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702441.061535350] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702441.165030826] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702441.210239671] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702441.311476575] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702441.313502389] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702441.392238409] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702441.494709052] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702441.572764039] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702441.607455277] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702441.710833367] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702441.767241249] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702441.868294759] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702441.983395960] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702442.047562534] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702442.208968319] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702442.210279905] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702442.253893717] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702442.356078132] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702442.361600388] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702442.533880158] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702442.597093673] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702442.730882651] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702442.778808386] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702442.882094220] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702442.925476413] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702443.015060735] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702443.138921721] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702443.194743856] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702443.298581707] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702443.419995788] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702443.463964880] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702443.464628940] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702443.507595028] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702443.610807231] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702443.655238814] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702443.745802662] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702443.856421031] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702444.001920892] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702444.003501961] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702444.032467561] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702444.137165788] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702444.177853484] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702444.286061968] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702444.289877397] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702444.385314456] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702444.494792098] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702444.498641549] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702444.558934046] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702444.662405143] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702444.703275693] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702444.796487750] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702444.934127962] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702444.945477413] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702444.978205125] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702445.081457374] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702445.122935659] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702445.230016192] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702445.352555019] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702445.397206185] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702445.500572137] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702445.541179419] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702445.656068923] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702445.656890261] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702445.709544066] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702445.814158005] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702445.846719972] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702445.972193469] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702446.026433746] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702446.129602282] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702446.159697439] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702446.262172003] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702446.265166957] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702446.401820056] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702446.533905713] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702446.540665509] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702446.541282556] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702446.551035632] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702446.656062598] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702446.697767517] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702446.761697024] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702446.864904578] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702446.908727730] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702447.002948831] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702447.138929643] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702447.141002830] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702447.180684091] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702447.284813585] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702447.327072986] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702447.454915764] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702447.533416192] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.47
+[INFO] [1789702447.656528474] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.47
+[INFO] [1789702447.658973810] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.47
+[INFO] [1789702447.709244426] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.47
+[INFO] [1789702447.811777135] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.47
+[INFO] [1789702447.855063720] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.47
+[INFO] [1789702447.983031106] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.47
+[INFO] [1789702448.024604669] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.47
+[INFO] [1789702448.127746944] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.47
+[INFO] [1789702448.166313249] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.47
+[INFO] [1789702448.292716715] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.47
+[INFO] [1789702448.334692754] [task_manager_node]: Manipulation feedback: phase=RELEASING, progress=0.65
+[INFO] [1789702448.494166155] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.71
+[INFO] [1789702448.555596968] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.76
+[INFO] [1789702448.639384804] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.76
+[INFO] [1789702448.765098387] [task_manager_node]: Manipulation feedback: phase=RETREATING, progress=0.82
+[INFO] [1789702448.842528620] [task_manager_node]: Manipulation feedback: phase=RETREATING, progress=0.82
+[INFO] [1789702449.003861075] [task_manager_node]: Manipulation feedback: phase=RETREATING, progress=0.88
+[INFO] [1789702449.043690114] [task_manager_node]: Manipulation feedback: phase=RETREATING, progress=0.88
+[INFO] [1789702449.186273973] [task_manager_node]: Manipulation feedback: phase=RETREATING, progress=0.88
+[INFO] [1789702449.190477300] [task_manager_node]: Manipulation feedback: phase=RETREATING, progress=0.88
+[INFO] [1789702449.263705312] [task_manager_node]: Manipulation feedback: phase=RETREATING, progress=0.88
+[INFO] [1789702449.365903960] [task_manager_node]: Manipulation feedback: phase=RETREATING, progress=0.88
+[INFO] [1789702449.388161358] [task_manager_node]: Manipulation feedback: phase=RETREATING, progress=0.88
+[INFO] [1789702449.410842764] [task_manager_node]: Manipulation feedback: phase=VERIFYING, progress=1.00
+[INFO] [1789702449.412830323] [task_manager_node]: Book placement succeeded: book_id=book_001, message=배치 확인
+[INFO] [1789702449.413548025] [task_manager_node]: FSM transition completed: PLACE_BOOK -> UPDATE_DATA
+[INFO] [1789702449.414098367] [task_manager_node]: Placement record updated: book_id=book_001, shelf_id=shelf_01, completed_books=1/1
+[INFO] [1789702449.414784519] [task_manager_node]: FSM transition completed: UPDATE_DATA -> NEXT_BOOK
+[INFO] [1789702449.415481457] [task_manager_node]: All books in the tray were processed.
+[INFO] [1789702449.416244631] [task_manager_node]: FSM transition completed: NEXT_BOOK -> RETURN_HOME
+[INFO] [1789702449.416693062] [task_manager_node]: Waiting for navigation action server.
+[INFO] [1789702449.417584607] [task_manager_node]: Sending navigation goal: job_id=job_085de825ea20, target_type=home, target_id=home, x=0.00, y=0.00
+[INFO] [1789702449.420054479] [task_manager_node]: Navigation goal was accepted.
+[INFO] [1789702449.421245497] [task_manager_node]: Navigation feedback: target_id=home, phase=NAVIGATING, remaining_distance=1.00, position_error=1.00, yaw_error=0.00
+[INFO] [1789702449.924655847] [task_manager_node]: Navigation feedback: target_id=home, phase=NAVIGATING, remaining_distance=0.50, position_error=0.50, yaw_error=0.00
+[INFO] [1789702450.428787582] [task_manager_node]: Navigation feedback: target_id=home, phase=NAVIGATING, remaining_distance=0.10, position_error=0.10, yaw_error=0.00
+[INFO] [1789702450.930595919] [task_manager_node]: Navigation feedback: target_id=home, phase=NAVIGATING, remaining_distance=0.00, position_error=0.00, yaw_error=0.00
+[INFO] [1789702451.432706239] [task_manager_node]: Navigation succeeded: Reached target 'home'.
+[INFO] [1789702451.433363419] [task_manager_node]: FSM transition completed: RETURN_HOME -> COMPLETED
+[INFO] [1789702451.433878262] [task_manager_node]: Job completed: job_id=job_085de825ea20, placed_books=1
+[INFO] [1789702451.434566769] [task_manager_node]: FSM transition completed: COMPLETED -> IDLE
+[INFO] [1789702508.563431624] [task_manager_node]: Received TrayJob: job_id=job_2a6d05ed7df8, tray_id=tray_001, books=1
+[INFO] [1789702508.567213402] [task_manager_node]: Job plan created: job_id=job_2a6d05ed7df8, tray_id=tray_001, tasks=1
+[INFO] [1789702508.569796994] [task_manager_node]: Task 1: book_id=book_001, classification=005.7, target_shelf=shelf_01
+[INFO] [1789702508.574504987] [task_manager_node]: FSM transition completed: PLANNING -> NAV_TO_RETURN
+[INFO] [1789702508.577239522] [task_manager_node]: Waiting for navigation action server.
+[INFO] [1789702508.580711687] [task_manager_node]: Sending navigation goal: job_id=job_2a6d05ed7df8, target_type=return_station, target_id=return_station, x=1.00, y=0.00
+[INFO] [1789702508.588669082] [task_manager_node]: Navigation goal was accepted.
+[INFO] [1789702508.591183568] [task_manager_node]: Navigation feedback: target_id=return_station, phase=NAVIGATING, remaining_distance=1.00, position_error=1.00, yaw_error=0.00
+[INFO] [1789702509.093628254] [task_manager_node]: Navigation feedback: target_id=return_station, phase=NAVIGATING, remaining_distance=0.50, position_error=0.50, yaw_error=0.00
+[INFO] [1789702509.593868408] [task_manager_node]: Navigation feedback: target_id=return_station, phase=NAVIGATING, remaining_distance=0.10, position_error=0.10, yaw_error=0.00
+[INFO] [1789702510.095741040] [task_manager_node]: Navigation feedback: target_id=return_station, phase=NAVIGATING, remaining_distance=0.00, position_error=0.00, yaw_error=0.00
+[INFO] [1789702510.598176889] [task_manager_node]: Navigation succeeded: Reached target 'return_station'.
+[INFO] [1789702510.598818035] [task_manager_node]: FSM transition completed: NAV_TO_RETURN -> RECEIVE_TRAY
+[INFO] [1789702510.599462393] [task_manager_node]: FSM transition completed: RECEIVE_TRAY -> SELECT_BOOK
+[INFO] [1789702510.600089285] [task_manager_node]: Selected book task: book_id=book_001, task_number=1/1, target_shelf=shelf_01
+[INFO] [1789702510.601144615] [task_manager_node]: FSM transition completed: SELECT_BOOK -> NAV_TO_SHELF
+[INFO] [1789702510.601649281] [task_manager_node]: Waiting for navigation action server.
+[INFO] [1789702510.602820432] [task_manager_node]: Sending navigation goal: job_id=job_2a6d05ed7df8, target_type=shelf, target_id=shelf_01, x=3.00, y=1.00
+[INFO] [1789702510.605771303] [task_manager_node]: Navigation goal was accepted.
+[INFO] [1789702510.607117075] [task_manager_node]: Navigation feedback: target_id=shelf_01, phase=NAVIGATING, remaining_distance=1.00, position_error=1.00, yaw_error=0.00
+[INFO] [1789702511.107513932] [task_manager_node]: Navigation feedback: target_id=shelf_01, phase=NAVIGATING, remaining_distance=0.50, position_error=0.50, yaw_error=0.00
+[INFO] [1789702511.611165469] [task_manager_node]: Navigation feedback: target_id=shelf_01, phase=NAVIGATING, remaining_distance=0.10, position_error=0.10, yaw_error=0.00
+[INFO] [1789702512.114688037] [task_manager_node]: Navigation feedback: target_id=shelf_01, phase=NAVIGATING, remaining_distance=0.00, position_error=0.00, yaw_error=0.00
+[INFO] [1789702512.618070245] [task_manager_node]: Navigation succeeded: Reached target 'shelf_01'.
+[INFO] [1789702512.618658017] [task_manager_node]: FSM transition completed: NAV_TO_SHELF -> DETECT_TARGET_SLOT
+[INFO] [1789702512.619086895] [task_manager_node]: Waiting for perception action server.
+[INFO] [1789702512.619716267] [task_manager_node]: Sending empty-slot detection goal: job_id=job_2a6d05ed7df8, book_id=book_001, shelf_id=shelf_01, book_width=0.180, book_height=0.240, book_thickness=0.035
+[INFO] [1789702512.621770703] [task_manager_node]: Empty-slot detection goal was accepted.
+[INFO] [1789702512.622719884] [task_manager_node]: Perception feedback: phase=CAPTURING, candidate_count=0, best_confidence=0.00
+[INFO] [1789702513.024573665] [task_manager_node]: Perception feedback: phase=DETECTING_SHELF, candidate_count=1, best_confidence=0.70
+[INFO] [1789702513.429248881] [task_manager_node]: Perception feedback: phase=FINDING_EMPTY_SPACE, candidate_count=2, best_confidence=0.85
+[INFO] [1789702513.829817193] [task_manager_node]: Perception feedback: phase=CALCULATING_POSE, candidate_count=2, best_confidence=0.93
+[INFO] [1789702514.231171613] [task_manager_node]: Perception feedback: phase=TRANSFORMING_FRAME, candidate_count=2, best_confidence=0.95
+[INFO] [1789702514.640646067] [task_manager_node]: Empty slot detected: frame_id=arm_base_link, x=-0.350, y=0.549, z=0.340, confidence=0.95, candidate_count=2
+[INFO] [1789702514.643229147] [task_manager_node]: FSM transition completed: DETECT_TARGET_SLOT -> PLACE_BOOK
+[INFO] [1789702514.644831147] [task_manager_node]: Waiting for manipulation action server.
+[INFO] [1789702514.647186029] [task_manager_node]: Sending book-placement goal: job_id=job_2a6d05ed7df8, book_id=book_001, target_frame=arm_base_link, insertion_depth=0.250, insertion_speed=0.030
+[INFO] [1789702514.688629608] [task_manager_node]: Book-placement goal was accepted.
+[INFO] [1789702514.689943798] [task_manager_node]: Manipulation feedback: phase=DETECTING_BOOK, progress=0.00
+[INFO] [1789702514.697517903] [task_manager_node]: Manipulation feedback: phase=PLANNING_GRASP, progress=0.00
+[INFO] [1789702514.733774795] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702514.874372433] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702514.875463810] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702514.972651447] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702515.100030276] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702515.123465302] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702515.147885571] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702515.250865980] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702515.302898311] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702515.390673304] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702515.517760660] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702515.611031324] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702515.738662659] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702515.780671162] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702515.883514452] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.12
+[INFO] [1789702515.922244677] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.18
+[INFO] [1789702516.052505150] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.18
+[INFO] [1789702516.096742121] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.18
+[INFO] [1789702516.198197941] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.18
+[INFO] [1789702516.203442108] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.18
+[INFO] [1789702516.307222096] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.18
+[INFO] [1789702516.346216482] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.18
+[INFO] [1789702516.418861425] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.18
+[INFO] [1789702516.560995088] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.18
+[INFO] [1789702516.621947253] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.18
+[INFO] [1789702516.725580604] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.18
+[INFO] [1789702516.732468999] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.18
+[INFO] [1789702516.833559168] [task_manager_node]: Manipulation feedback: phase=APPROACHING_BOOK, progress=0.18
+[INFO] [1789702516.874550733] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.23
+[INFO] [1789702516.977723381] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.23
+[INFO] [1789702517.080471213] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.23
+[INFO] [1789702517.218490450] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.29
+[INFO] [1789702517.323845984] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702517.437588443] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702517.443525462] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702517.497268209] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702517.601274719] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702517.636438826] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702517.751319584] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702517.830314911] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702517.984921995] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702518.042765823] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702518.150939012] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702518.161461510] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702518.274181494] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702518.381927748] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702518.383491003] [task_manager_node]: Manipulation feedback: phase=GRASPING, progress=0.35
+[INFO] [1789702518.444636606] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702518.548152849] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702518.556636432] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702518.658258516] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702518.664211207] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702518.817507639] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702518.824002837] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702518.903660094] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702519.033684821] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702519.080459013] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702519.182113194] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702519.226894228] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702519.322899274] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702519.434657558] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702519.485702764] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702519.502715507] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702519.606389639] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702519.661802136] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702519.718834772] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702519.861176716] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702519.973677435] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702519.974565306] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702520.031658967] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702520.136197840] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702520.154326840] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702520.297436514] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702520.361827345] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702520.456820025] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702520.596956757] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702520.662527193] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702520.766508938] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702520.773630078] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702520.886229070] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702520.993032920] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702521.117551684] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702521.121207248] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702521.244795214] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702521.245490675] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702521.296514318] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702521.399597184] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702521.448492801] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702521.507128745] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702521.609848334] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702521.651893880] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702521.752774526] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702521.874790526] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702521.929148585] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702522.032056695] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702522.064288536] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702522.143413186] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702522.245991461] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702522.271595431] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702522.408442895] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702522.457119148] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702522.560237586] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702522.605084516] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702522.704782345] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702522.809767487] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702522.920516503] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702522.924169443] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702523.023782260] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702523.124010001] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702523.251358921] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702523.327487832] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702523.461658082] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702523.536409687] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702523.672591121] [task_manager_node]: Manipulation feedback: phase=MOVING_TO_PRE_INSERT, progress=0.41
+[INFO] [1789702523.711983817] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.47
+[INFO] [1789702523.815021282] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.47
+[INFO] [1789702523.839276768] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.47
+[INFO] [1789702523.980126187] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.47
+[INFO] [1789702524.028490080] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.47
+[INFO] [1789702524.132773905] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.47
+[INFO] [1789702524.157091029] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.47
+[INFO] [1789702524.298997071] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.47
+[INFO] [1789702524.348089943] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.47
+[INFO] [1789702524.487558953] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.47
+[INFO] [1789702524.493295058] [task_manager_node]: Manipulation feedback: phase=RELEASING, progress=0.59
+[INFO] [1789702524.548490627] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.71
+[INFO] [1789702524.706923919] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.76
+[INFO] [1789702524.748016626] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.76
+[INFO] [1789702524.849912710] [task_manager_node]: Manipulation feedback: phase=INSERTING, progress=0.76
+[INFO] [1789702524.852101412] [task_manager_node]: Manipulation feedback: phase=RETREATING, progress=0.82
+[INFO] [1789702525.005806279] [task_manager_node]: Manipulation feedback: phase=RETREATING, progress=0.82
+[INFO] [1789702525.051689360] [task_manager_node]: Manipulation feedback: phase=RETREATING, progress=0.88
+[INFO] [1789702525.170490564] [task_manager_node]: Manipulation feedback: phase=RETREATING, progress=0.88
+[INFO] [1789702525.202362953] [task_manager_node]: Manipulation feedback: phase=RETREATING, progress=0.88
+[INFO] [1789702525.274191981] [task_manager_node]: Manipulation feedback: phase=RETREATING, progress=0.88
+[INFO] [1789702525.413170548] [task_manager_node]: Manipulation feedback: phase=RETREATING, progress=0.88
+[INFO] [1789702525.455409548] [task_manager_node]: Manipulation feedback: phase=RETREATING, progress=0.88
+[INFO] [1789702525.617603211] [task_manager_node]: Manipulation feedback: phase=VERIFYING, progress=1.00
+[INFO] [1789702525.619048503] [task_manager_node]: Book placement succeeded: book_id=book_001, message=배치 확인
+[INFO] [1789702525.619546882] [task_manager_node]: FSM transition completed: PLACE_BOOK -> UPDATE_DATA
+[INFO] [1789702525.619968662] [task_manager_node]: Placement record updated: book_id=book_001, shelf_id=shelf_01, completed_books=1/1
+[INFO] [1789702525.620419239] [task_manager_node]: FSM transition completed: UPDATE_DATA -> NEXT_BOOK
+[INFO] [1789702525.620830899] [task_manager_node]: All books in the tray were processed.
+[INFO] [1789702525.621316613] [task_manager_node]: FSM transition completed: NEXT_BOOK -> RETURN_HOME
+[INFO] [1789702525.621599700] [task_manager_node]: Waiting for navigation action server.
+[INFO] [1789702525.622177416] [task_manager_node]: Sending navigation goal: job_id=job_2a6d05ed7df8, target_type=home, target_id=home, x=0.00, y=0.00
+[INFO] [1789702525.624149763] [task_manager_node]: Navigation goal was accepted.
+[INFO] [1789702525.624852313] [task_manager_node]: Navigation feedback: target_id=home, phase=NAVIGATING, remaining_distance=1.00, position_error=1.00, yaw_error=0.00
+[INFO] [1789702526.125977001] [task_manager_node]: Navigation feedback: target_id=home, phase=NAVIGATING, remaining_distance=0.50, position_error=0.50, yaw_error=0.00
+[INFO] [1789702526.628085904] [task_manager_node]: Navigation feedback: target_id=home, phase=NAVIGATING, remaining_distance=0.10, position_error=0.10, yaw_error=0.00
+[INFO] [1789702527.133461053] [task_manager_node]: Navigation feedback: target_id=home, phase=NAVIGATING, remaining_distance=0.00, position_error=0.00, yaw_error=0.00
+[INFO] [1789702527.633933046] [task_manager_node]: Navigation succeeded: Reached target 'home'.
+[INFO] [1789702527.639290856] [task_manager_node]: FSM transition completed: RETURN_HOME -> COMPLETED
+[INFO] [1789702527.639857221] [task_manager_node]: Job completed: job_id=job_2a6d05ed7df8, placed_books=1
+[INFO] [1789702527.640576880] [task_manager_node]: FSM transition completed: COMPLETED -> IDLE

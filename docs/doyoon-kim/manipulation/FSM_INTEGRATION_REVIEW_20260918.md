@@ -71,6 +71,38 @@ task_manager_node (상태기계)
 | launch | `pc_a/pc_b/all` 비어 있음 | 우리 실행 스크립트로 대신 | 이현민이 채울 때 **우리 노드 실행 조건**(`executor:=sim`, 정적 TF `panda_link0→arm_base_link`)을 전달해야 함 |
 | 우리 최신 커밋 | e667673 까지만 합쳐짐 | 이후 6845d70 ~ bc158f0 (문서·여러 종류 책·학습 도구) | 다음 통합 때 다시 합쳐야 함 |
 
+## 4-1. 관통 시험 결과 (2026-09-18 12:33, **성공**)
+
+mock 칸 값 2개만 바꿔 전 구간을 돌렸다. 로컬 시험 브랜치 `test/fsm-arm-integration`(통합 브랜치 + 우리 최신 + mock 수정), **push 하지 않음**.
+
+| 바꾼 값 | 전 | 후 |
+| --- | --- | --- |
+| `mock_perception_server.py` 칸 위치 | (0.55, 0, 0.80) | **(−0.3497, 0.5495, 0.3399)** |
+| 칸 자세 | 단위 쿼터니언(yaw 0°) | **z=w=0.7071068 (yaw +90°)** |
+
+구성: 무인반납기(`return_machine_node`) → `task_manager_node` → mock 주행 · mock 인식 → **우리 `manipulation_node`(executor=sim)** → GPU PC Isaac(레벨 v5, 6종 책)
+
+```
+IDLE → PLANNING → NAV_TO_RETURN → RECEIVE_TRAY → SELECT_BOOK → NAV_TO_SHELF
+  → DETECT_TARGET_SLOT → PLACE_BOOK → UPDATE_DATA → NEXT_BOOK → RETURN_HOME → COMPLETED → IDLE
+```
+
+| 항목 | 결과 |
+| --- | --- |
+| goal 수락 | `Book-placement goal was accepted` (M410 없음) |
+| 로봇팔 | `PlaceBook 성공 code=0(OK)`, Isaac `placement_verified: True` (upright·depth·spine·x·floor 전부 통과) |
+| PLACE_BOOK 구간 | **11.16 s (벽시계)** — goal 발신 → 성공 수신 |
+| 작업 전체 | 트리거 → COMPLETED 약 21 s (mock 주행 2회 포함) |
+| 2회차 작업 | 같은 방식으로 성공 (book_1) |
+
+원자료: `results/20260918_fsm/{fsm.log, arm.log, isaac.log}`
+
+### 확인된 주의점
+
+- **mock 은 항상 같은 칸을 준다.** 2회차도 같은 x(2.485)에 꽂혔다. 여러 권 시연에서는 칸이 달라져야 하므로, 시연은 칸을 바꿔 주는 쪽(`place_books.sh`) 또는 mock 을 권마다 다른 칸으로 고치는 방식이 필요하다
+- `task_manager_node` 는 `--params-file system.yaml` 로 띄우면 죽는다 (`system.yaml` 은 ROS 파라미터 파일 형식이 아니다). **옵션 없이** 띄워야 한다
+- 책 프로파일 불일치(0.18 vs 0.163)는 칸 폭 검사가 꺼져 있어 지나갔다. **검사를 켜면 M410** 이 난다 — 세션에서 양쪽이 "꺼져 있음"을 확인할 것
+
 ## 5. 세션에서 할 순서 (제안)
 
 1. mock 칸 값 2개 수정 → FSM → 로봇팔 1권 관통 확인 (`FSM_PLACEBOOK_SESSION.md` 체크리스트)
