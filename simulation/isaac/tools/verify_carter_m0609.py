@@ -78,7 +78,15 @@ for i, n in enumerate(names):
     else:                      # 바퀴는 속도 구동
         kp[i], kd[i] = 0.0, 1.0e6
 ctrl.set_gains(kps=kp, kds=kd)
-say(f"구동 게인 적용 (팔 kp 1e5 / 그리퍼 1e3 / 바퀴 속도구동)")
+# **설정한 값이 실제로 들어갔는지 다시 읽어 확인한다.** articulation 준비 전에 설정하면 조용히 무시된다
+back = ctrl.get_gains()
+kp_back = np.asarray(back[0], float) if back and back[0] is not None else None
+if kp_back is None:
+    say("게인 되읽기 실패 — 확인 불가")
+else:
+    applied = [f"{names[i]}={kp_back[i]:.0f}" for i in [names.index(n) for n in arm[:3]]]
+    ok_gain = all(abs(kp_back[names.index(n)] - 1.0e5) < 1.0 for n in arm)
+    say(f"게인 설정 후 되읽기: {applied} → {'값이 들어갔다' if ok_gain else '**설정이 무시됐다**'}")
 
 for _ in range(60):
     world.step(render=False)
