@@ -20,7 +20,7 @@ class TargetDetector:
         # 책장 단의 개수입니다. 현재 학습 데이터는 5단 책장입니다.
         if row_count <= 0:
             # 0단 이하의 책장은 검사할 수 없으므로 오류를 발생시킵니다.
-            raise ValueError('row_count must be positive')
+            raise ValueError('row_count must be positive \n책장을 감지할 수 없음')
         # 외부 파라미터를 정수형 단 개수로 저장합니다.
         self.row_count = int(row_count)
 
