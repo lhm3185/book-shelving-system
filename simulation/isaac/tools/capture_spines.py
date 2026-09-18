@@ -16,12 +16,16 @@
 import argparse
 import json
 import os
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent))
+import _paths  # noqa: E402
 import random
 import sys
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--usd", default=os.path.expanduser("~/Desktop/ing_library_env_v5.usd"))
-ap.add_argument("--tray", default=os.path.expanduser("~/book_dataset/assets/tray/tray_v1.usdc"))
+ap.add_argument("--usd", default=_paths.default_usd())
+ap.add_argument("--tray", default=_paths.default_tray())
 ap.add_argument("--tray-center", type=float, nargs=2, default=[2.36, -2.94])
 ap.add_argument("--books", type=int, default=6)
 ap.add_argument("--out", default=os.path.expanduser("~/spine_ds"))

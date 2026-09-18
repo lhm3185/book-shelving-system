@@ -7,7 +7,8 @@ import numpy as np
 import pytest
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+ISAAC_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ISAAC_ROOT / "controllers"))
 
 from arm_mock import MockArmBackend, run                                  # noqa: E402
 from arm_primitives import (ArmController, MoveJoint, MoveLinear, Sequence,  # noqa: E402
@@ -16,7 +17,7 @@ from arm_primitives import (ArmController, MoveJoint, MoveLinear, Sequence,  # n
 
 @pytest.fixture
 def config():
-    path = Path(__file__).resolve().parents[1] / "arm_config.yaml"
+    path = ISAAC_ROOT / "config" / "arm.yaml"
     return yaml.safe_load(path.read_text())
 
 
@@ -33,7 +34,7 @@ SLOT = (np.array([0.60, -0.10, 0.90]), np.array([0.0, 1.0, 0.0, 0.0]))
 
 def test_config_has_required_keys(config):
     for key in ("poses", "speed", "gripper", "grasp", "insert", "tolerance", "timeout"):
-        assert key in config, f"arm_config.yaml 에 {key} 가 없다"
+        assert key in config, f"config/arm.yaml 에 {key} 가 없다"
     assert len(config["poses"]["home"]) == 7
     assert len(config["poses"]["stow"]) == 7
 

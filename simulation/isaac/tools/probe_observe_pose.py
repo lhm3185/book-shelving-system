@@ -13,11 +13,15 @@ import argparse
 import json
 import math
 import os
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent))
+import _paths  # noqa: E402
 import sys
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--usd", default=os.path.expanduser("~/Desktop/ing_library_env_v3.usd"))
-ap.add_argument("--tray", default=os.path.expanduser("~/book_dataset/assets/tray/tray_v1.usdc"))
+ap.add_argument("--usd", default=_paths.default_usd())
+ap.add_argument("--tray", default=_paths.default_tray())
 ap.add_argument("--out", default="/tmp/observe")
 ap.add_argument("--camera-prim", default="",
                 help="레벨 로봇에 이미 달린 카메라 prim (있으면 가정 카메라 대신 이것의 실제 장착 위치·방향을 쓴다)")

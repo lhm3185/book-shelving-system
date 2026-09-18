@@ -43,5 +43,10 @@ if [ "$GUI" = "1" ] && [ -z "${DISPLAY:-}" ]; then
     export XAUTHORITY="${XAUTHORITY:-/run/user/$(id -u)/gdm/Xauthority}"
 fi
 
+ENTRY="${ISAAC_ENTRY:?ISAAC_ENTRY 로 실행할 파일을 지정할 것 (예: simulation/isaac/tools/capture_spines.py)}"
+# Isaac 설치 폴더로 옮겨가서 실행하므로, 상대경로는 **저장소 기준**으로 바꿔 둔다
+[[ "$ENTRY" = /* ]] || ENTRY="$REPO_ROOT/$ENTRY"
+[ -f "$ENTRY" ] || { echo "실행할 파일이 없다: $ENTRY"; exit 1; }
+
 cd "$ISAAC_SIM_PATH"
-exec ./python.sh "${ISAAC_ENTRY:?ISAAC_ENTRY 로 실행할 파일을 지정할 것 (예: simulation/isaac/tools/capture_spines.py)}" "${ARGS[@]}"
+exec ./python.sh "$ENTRY" "${ARGS[@]}"

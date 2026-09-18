@@ -5,7 +5,8 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+ISAAC_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ISAAC_ROOT / "controllers"))
 
 from book_tasks import (BACKOFF_BEHIND_SPINE, FINGER_THICK, TIP_DOWN, BookBox,  # noqa: E402
                         ShelfSlot, finger_outer_half_width, grip_open_width,

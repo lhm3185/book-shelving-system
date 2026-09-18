@@ -4,8 +4,9 @@
 #   ROS_DOMAIN_ID=130 ./run_demo_pc.sh          Ctrl+C 로 전부 종료
 set -u  # ROS setup.bash 는 미정의 변수를 써서 source 앞뒤로 +u/-u
 : "${ROS_DOMAIN_ID:?ROS_DOMAIN_ID 를 GPU PC 와 같은 값으로 export 할 것}"
-WS="${WS:-$HOME/ws_cobot_pjt/book-shelving-system/ros2_ws}"
-MODEL_PATH="${MODEL_PATH:-$HOME/ws_cobot_pjt/arm/models/book_best.pt}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+WS="${WS:-$REPO_ROOT/ros2_ws}"
+MODEL_PATH="${MODEL_PATH:-${VISION_MODEL:-$HOME/ws_cobot_pjt/arm/models/book_best.pt}}"
 CAMERA_PRIM_FRAME="${CAMERA_PRIM_FRAME:-Camera_OmniVision_OV9782_Color}"
 LOG="${LOG:-/tmp/b1_demo}"; mkdir -p "$LOG"
 export FASTRTPS_DEFAULT_PROFILES_FILE="${FASTRTPS_DEFAULT_PROFILES_FILE:-$HOME/.ros/fastdds_whitelist.xml}"
