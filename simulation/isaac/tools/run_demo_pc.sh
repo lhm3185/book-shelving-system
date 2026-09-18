@@ -6,13 +6,17 @@ set -u  # ROS setup.bash 는 미정의 변수를 써서 source 앞뒤로 +u/-u
 : "${ROS_DOMAIN_ID:?ROS_DOMAIN_ID 를 GPU PC 와 같은 값으로 export 할 것}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 WS="${WS:-$REPO_ROOT/ros2_ws}"
-MODEL_PATH="${MODEL_PATH:-${VISION_MODEL:-$HOME/ws_cobot_pjt/arm/models/book_best.pt}}"
+MODEL_PATH="${MODEL_PATH:-${VISION_MODEL:-$HOME/ws_cobot_pjt/arm/models/book_tray_best.pt}}"
+# 책장 모델: 빈 칸 판정(새 방식)에 필요하다. perception.yaml 의 경로는 비전 담당 PC 기준이라
+# 이 PC 에는 없다 — 없으면 노드가 뜨자마자 죽어 "토픽이 안 나온다" 로만 보인다 (2026-09-18)
+SHELF_MODEL="${SHELF_MODEL:-$HOME/ws_cobot_pjt/arm/models/shelf_best.pt}"
 CAMERA_PRIM_FRAME="${CAMERA_PRIM_FRAME:-Camera_OmniVision_OV9782_Color}"
 LOG="${LOG:-/tmp/b1_demo}"; mkdir -p "$LOG"
 export FASTRTPS_DEFAULT_PROFILES_FILE="${FASTRTPS_DEFAULT_PROFILES_FILE:-$HOME/.ros/fastdds_whitelist.xml}"
 set +u; source /opt/ros/jazzy/setup.bash
 source "$WS/install/setup.bash"; set -u
-[ -f "$MODEL_PATH" ] || { echo "모델 없음: $MODEL_PATH"; exit 1; }
+[ -f "$MODEL_PATH" ] || { echo "책 모델 없음: $MODEL_PATH"; exit 1; }
+[ -f "$SHELF_MODEL" ] || { echo "책장 모델 없음: $SHELF_MODEL"; exit 1; }
 
 pids=()
 cleanup() { echo; echo "종료 중..."; kill "${pids[@]}" 2>/dev/null; wait 2>/dev/null; echo "종료"; }
@@ -28,6 +32,7 @@ ros2 run tf2_ros static_transform_publisher --frame-id "$CAMERA_PRIM_FRAME" --ch
 # --params-file 로 실행하면 0.5 가 적용된다 (2026-09-17 확인). 변경 의도대로 0.75 를 명시한다. 바꾸려면 VISION_CONF=0.6 등
 ros2 run shelving_perception vision_manager --ros-args \
     --params-file "$WS/src/shelving_perception/config/perception.yaml" -p model_path:="$MODEL_PATH" \
+    -p shelf_model_path:="$SHELF_MODEL" \
     -p confidence_threshold:="${VISION_CONF:-0.75}" \
     > "$LOG/vision.log" 2>&1 & pids+=($!)
 ros2 run shelving_manipulation manipulation_node --ros-args \
@@ -35,6 +40,8 @@ ros2 run shelving_manipulation manipulation_node --ros-args \
     > "$LOG/manipulation.log" 2>&1 & pids+=($!)
 
 echo "실행됨 (ROS_DOMAIN_ID=$ROS_DOMAIN_ID). 로그: $LOG"
+echo "  책 모델   $MODEL_PATH"
+echo "  책장 모델 $SHELF_MODEL"
 echo "  비전      tail -f $LOG/vision.log"
 echo "  로봇팔    tail -f $LOG/manipulation.log"
 wait
