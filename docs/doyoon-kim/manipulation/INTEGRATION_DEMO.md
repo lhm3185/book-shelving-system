@@ -37,7 +37,29 @@
 | 리허설 뒤 ~ 호출까지 | Isaac·노드를 **띄운 채로 유지**. 끄지 않는다 |
 | 호출 직후 | 위 게이트 1~4번만 다시 (약 1분). 재시작이 필요하면 Isaac 40~60초 + 노드 10초 |
 
-Isaac 을 껐다 켜야 하는 경우(책을 다 꽂았을 때)는 **1분 30초**면 다시 준비된다. 순서만 지키면 된다.
+### 실측 (2026-09-18, GPU PC, 카메라 포함, 환경변수 없이)
+
+| 단계 | 시간 |
+| --- | --- |
+| Isaac 시작 → `준비 완료` | **23초** |
+| 이 PC 노드 기동 (`run_demo_pc.sh`: 정적 TF + 비전 + 로봇팔) | **23초** |
+| 게이트 확인 6단계 | 1분 이내 |
+| **책 2권 꽂기 (비전 켠 채)** | **26초** (1권당 13초) |
+
+**껐다 켜는 전체 복구 = 약 1분.** 4권이면 꽂는 데 약 52초이므로, 호출 뒤 재시작하더라도 2분 안에 시연을 시작할 수 있다.
+
+### 게이트 6단계 (이 순서대로, 2026-09-18 전 구간 통과 확인)
+
+```bash
+1. ros2 daemon stop                                   # 죽은 노드 정보 제거
+2. (GPU PC) ./scripts/run_isaac_sim.sh --gui          # "준비 완료" 확인. SIM_USD 없어도 자동 대체
+3. (이 PC) ./run_demo_pc.sh                           # 정적 TF + 비전 + 로봇팔
+4. ros2 topic list | grep -E "^/(rgb|depth|camera_info|clock|tf)$"   # 5개
+5. ros2 action info /place_book                       # Action servers: 1  ← 2면 중단
+6. ros2 topic hz /clock ; ros2 param get /vision_manager confidence_threshold   # 0.75
+```
+
+5번이 2 이상이면 어딘가에 `manipulation_node` 가 더 떠 있다. 그대로 두면 **결과가 뒤섞인다** (2026-09-18 실제 발생).
 
 ## 1. GPU PC — Isaac (레벨 v5 + 로봇팔 실행기)
 
