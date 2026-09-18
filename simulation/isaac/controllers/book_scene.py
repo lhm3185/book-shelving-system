@@ -21,7 +21,8 @@ from isaacsim.robot_motion.motion_generation.lula.kinematics import LulaKinemati
 from isaacsim.robot_motion.motion_generation.articulation_kinematics_solver import ArticulationKinematicsSolver
 import yaml
 
-sys.path.insert(0, os.path.expanduser("~/arm"))
+# 저장소 코드를 그대로 쓴다 (~/arm 복사 없음): 같은 폴더의 팔 모듈들
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from arm_geometry import R_from_quat, quat_angle, quat_from_R, slerp  # noqa: E402
 from arm_planning import tucked_joint_moves  # noqa: E402
 from arm_primitives import ArmController, MoveJoint, Primitive, SetGripper, Sequence, Status, Wait  # noqa: E402
@@ -248,7 +249,8 @@ class BookScene:
         self.DOWN = self.orientation([0, 0, -1], [1, 0, 0])
         self.HORIZ = self.orientation([0, 1, 0], [1, 0, 0])
 
-        conf = yaml.safe_load(open(os.path.expanduser("~/arm/arm_config.yaml")))
+        conf = yaml.safe_load(open(os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "arm.yaml")))
         conf["gripper"]["tolerance_m"] = 0.006; conf["tolerance"]["position_m"] = 0.008; conf["tolerance"]["joint_rad"] = 0.03
         self.conf = conf
         self.arm = ArmController(_Backend(self), conf)
