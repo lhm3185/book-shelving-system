@@ -1,0 +1,24 @@
+카메라 발행 10 Hz (frameSkipCount 5)
+장면 준비: 트레이 칸 6개, 책 6권, 원본 6종, 홈 IK True
+  book_0: 두께 0.035 세운높이 0.237 깊이 0.163
+  book_1: 두께 0.045 세운높이 0.230 깊이 0.155
+  book_2: 두께 0.032 세운높이 0.225 깊이 0.160
+  book_3: 두께 0.044 세운높이 0.228 깊이 0.174
+  book_4: 두께 0.038 세운높이 0.230 깊이 0.153
+  book_5: 두께 0.039 세운높이 0.237 깊이 0.163
+기존 카메라 사용 /World/ridgeback_franka/panda_hand/rsd455/RSD455/Camera_OmniVision_OV9782_Color → TF panda_link0→Camera_OmniVision_OV9782_Color, /clock 추가
+센서 정책 gated: 카메라 노드 4, 라이다 노드 2
+작업 실행기 시작 — 시작 홈 이동 중
+준비 완료 (step 740) — 명령 대기 /manipulation/sim/command
+작업 job_085de825ea20: book_0 (칸 0, 0.0cm) → x 2.485 계획 OK 최대 인접변화 0.091 rad
+  [파지] book_0 중심 [2.173, -2.94, 0.388] 크기 [0.035, 0.237, 0.163]
+센서 끔 (카메라 False, 라이다 False) — 파지 확인 (책 상승 16.9cm), 작업 끝까지
+  [놓음] book_0 중심 [2.486, -2.555, 0.616] 크기 [0.037, 0.163, 0.237]
+센서 켬 (카메라 True, 라이다 True) — 작업 끝, 관측 대기
+작업 job_085de825ea20 SUCCEEDED {'phase': 'verify', 'message': '배치 확인', 'placement_verified': True, 'checks': {'upright': True, 'depth': True, 'spine': True, 'x': True, 'floor': True}, 'book_aabb_center_arm': [-0.3489, 0.5495, 0.3405], 'joint_peak_ratio': 0.23, 'joint_over80_steps': 0, 'sim_steps': 1307, 'render_steps': 286} (11.1s)
+작업 job_2a6d05ed7df8: book_1 (칸 1, 0.3cm) → x 2.485 계획 OK 최대 인접변화 0.095 rad
+  [파지] book_1 중심 [2.247, -2.94, 0.385] 크기 [0.045, 0.23, 0.155]
+센서 끔 (카메라 False, 라이다 False) — 파지 확인 (책 상승 16.6cm), 작업 끝까지
+  [놓음] book_1 중심 [2.485, -2.545, 0.613] 크기 [0.046, 0.156, 0.23]
+센서 켬 (카메라 True, 라이다 True) — 작업 끝, 관측 대기
+작업 job_2a6d05ed7df8 SUCCEEDED {'phase': 'verify', 'message': '배치 확인', 'placement_verified': True, 'checks': {'upright': True, 'depth': True, 'spine': True, 'x': True, 'floor': True}, 'book_aabb_center_arm': [-0.3502, 0.5495, 0.3368], 'joint_peak_ratio': 0.23, 'joint_over80_steps': 0, 'sim_steps': 1270, 'render_steps': 295} (10.9s)

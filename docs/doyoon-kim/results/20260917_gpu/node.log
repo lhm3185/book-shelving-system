@@ -1,0 +1,4 @@
+[INFO] [1789628563.643544559] [manipulation_node]: PlaceBook /place_book executor=sim profile=default tray_slots=6 status=/robot/status
+[INFO] [1789628573.293940777] [manipulation_node]: 작업 cli1 book=bookA 트레이 칸 0 → (-0.3497, 0.5495, 0.3399) 삽입 속도 0.020 m/s
+[INFO] [1789628575.077031224] [manipulation_node]: PlaceBook 성공 job=cli1 code=0(OK) phase= mock 배치 완료
+[WARN] [1789628576.557086447] [manipulation_node]: PlaceBook 실패 job=cli2 code=410(TARGET_INVALID) phase=PLANNING_GRASP 삽입 방향 yaw 0.0° — 1차 지원 90°±6°

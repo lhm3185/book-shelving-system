@@ -19,7 +19,8 @@ import pytest
 @pytest.mark.flake8
 @pytest.mark.linter
 def test_flake8():
-    rc, errors = main_with_errors(argv=[])
+    # isaac_sim/ 은 Isaac 내장 Python 스크립트라 ROS 패키지 lint 대상이 아니다 (isaac_sim/README.md)
+    rc, errors = main_with_errors(argv=['--exclude', 'isaac_sim'])
     assert rc == 0, \
         'Found %d code style errors / warnings:\n' % len(errors) + \
         '\n'.join(errors)

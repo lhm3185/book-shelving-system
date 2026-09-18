@@ -1,0 +1,11 @@
+[INFO] [1789631406.075153326] [manipulation_node]: PlaceBook /place_book executor=sim profile=default tray_slots=6 status=/robot/status
+[INFO] [1789631412.401239205] [manipulation_node]: 작업 isaac1 book=bookA 트레이 칸 0 → (-0.3497, 0.5495, 0.3399) 삽입 속도 0.020 m/s
+[INFO] [1789631419.972474224] [manipulation_node]: PlaceBook 성공 job=isaac1 code=0(OK) phase= 배치 확인
+[INFO] [1789631436.980239627] [manipulation_node]: 작업 isaac2 book=book_isaac2 트레이 칸 1 → (-0.5097, 0.5495, 0.3399) 삽입 속도 0.020 m/s
+[INFO] [1789631443.363981225] [manipulation_node]: PlaceBook 성공 job=isaac2 code=0(OK) phase= 배치 확인
+[INFO] [1789631444.496985594] [manipulation_node]: 작업 isaac3 book=book_isaac3 트레이 칸 2 → (-0.4297, 0.5495, 0.3399) 삽입 속도 0.020 m/s
+[INFO] [1789631450.997753123] [manipulation_node]: PlaceBook 성공 job=isaac3 code=0(OK) phase= 배치 확인
+[INFO] [1789631451.993241106] [manipulation_node]: 작업 isaac4 book=book_isaac4 트레이 칸 3 → (-0.2697, 0.5495, 0.3399) 삽입 속도 0.020 m/s
+[INFO] [1789631459.237881338] [manipulation_node]: PlaceBook 성공 job=isaac4 code=0(OK) phase= 배치 확인
+[INFO] [1789631481.578180232] [manipulation_node]: 작업 isaac_cancel book=bookC 트레이 칸 4 → (-0.3497, 0.5495, 0.3399) 삽입 속도 0.020 m/s
+[WARN] [1789631484.656563619] [manipulation_node]: PlaceBook 실패 job=isaac_cancel code=412(CANCELLED) phase=MOVING_TO_PRE_INSERT 취소 — 그 자리 정지 (그리퍼 유지)
