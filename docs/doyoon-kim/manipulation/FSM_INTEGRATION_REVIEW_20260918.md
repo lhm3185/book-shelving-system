@@ -97,6 +97,11 @@ IDLE → PLANNING → NAV_TO_RETURN → RECEIVE_TRAY → SELECT_BOOK → NAV_TO_
 
 원자료: `results/20260918_fsm/{fsm.log, arm.log, isaac.log}`
 
+### 통합 실행기(`simulation/isaac/run_simulation.py`)로 재확인 — 2026-09-18 밤
+
+구조 변경 뒤 같은 시험을 다시 했다. **4권 4/4, 141초** (mock 주행 8회 포함, 1권당 PLACE_BOOK 13~16초).
+mock 칸 순환 + 새 실행기 + 환경변수 없이 자동 레벨 대체 상태에서 전 구간이 돈다.
+
 ### 확인된 주의점
 
 - **mock 은 항상 같은 칸을 준다.** 2회차도 같은 x(2.485)에 꽂혔다. 여러 권 시연에서는 칸이 달라져야 하므로, 시연은 칸을 바꿔 주는 쪽(`place_books.sh`) 또는 mock 을 권마다 다른 칸으로 고치는 방식이 필요하다
