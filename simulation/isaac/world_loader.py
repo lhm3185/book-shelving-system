@@ -7,8 +7,8 @@ import os
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_USD = REPO_ROOT / "simulation" / "library_system.usd"
-DEFAULT_TRAY = REPO_ROOT / "simulation" / "assets" / "tray.usd"
+DEFAULT_USD = ( REPO_ROOT / "simulation" / "assets" / "level" / "ing_library_env_v5.usd" )
+DEFAULT_TRAY = ( REPO_ROOT / "simulation" / "assets" / "book_dataset" / "assets" / "tray" / "tray_v1.usdc" )
 
 # 통합 USD 에 있어야 하는 것들. 없으면 시작할 때 바로 알린다
 REQUIRED_PRIMS = {
