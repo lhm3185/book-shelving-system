@@ -8,6 +8,10 @@
 """
 import argparse
 import os
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent))
+import _paths  # noqa: E402
 import time
 
 import cv2
@@ -20,7 +24,7 @@ from std_msgs.msg import Bool
 from ultralytics import YOLO
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--model", default=os.path.expanduser("~/ws_cobot_pjt/arm/models/book_best.pt"))
+ap.add_argument("--model", default=_paths.default_model())
 ap.add_argument("--conf", type=float, default=0.75, help="vision_manager confidence_threshold 와 맞춘다")
 ap.add_argument("--save-dir", default="/tmp/b1_demo")
 args = ap.parse_args()

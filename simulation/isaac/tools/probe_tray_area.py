@@ -10,7 +10,9 @@ from pxr import Usd, UsdGeom  # noqa: E402
 from isaacsim.core.utils.bounds import compute_aabb, create_bbox_cache  # noqa: E402
 from isaacsim.core.utils.stage import get_current_stage, is_stage_loading, open_stage  # noqa: E402
 
-usd = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser("~/Desktop/ing_library_env_v5.usd")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _paths  # noqa: E402
+usd = sys.argv[1] if len(sys.argv) > 1 else _paths.default_usd()
 center = np.array([2.36, -2.94, 0.35])
 open_stage(usd); app.update()
 while is_stage_loading():
