@@ -23,6 +23,8 @@ ap.add_argument("--shelf", default="/World/bookshelves",
                 help="서가 묶음 prim. 아래 자식 하나를 골라 찍는다")
 ap.add_argument("--shelf-index", type=int, default=-1, help="-1 이면 로봇 앞 서가를 자동 선택")
 ap.add_argument("--views", type=int, default=6)
+ap.add_argument("--dist", type=float, nargs=2, default=[0.9, 1.15],
+                help="서가 앞면에서의 촬영 거리 범위 (m)")
 ap.add_argument("--out", default=os.path.expanduser("~/shelf_probe"))
 ap.add_argument("--res", type=int, default=640)
 ap.add_argument("--hfov", type=float, default=90.5)
@@ -134,7 +136,8 @@ say(f"카메라 초점거리 화소 {fx:.1f}, 서가 중심 {np.round(center, 3)
 
 saved = []
 for v in range(args.views):
-    dist = 0.9 + 0.25 * v / max(1, args.views - 1)      # 정면에서 0.9~1.15 m
+    d0, d1 = args.dist
+    dist = d0 + (d1 - d0) * v / max(1, args.views - 1)
     eye = np.array([center[0], front_y - dist, center[2] + (0.05 if v % 2 else -0.05)])
     look = center - eye
     look /= np.linalg.norm(look)
