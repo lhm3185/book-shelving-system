@@ -87,14 +87,7 @@ while is_stage_loading():
     app.update()
 
 arm_prim = stage.DefinePrim(ARM, "Xform")
-# 팔 USD 는 **출력 파일 기준 상대경로**로 참조한다. 절대경로로 넣으면 다른 PC 로 옮겼을 때
-# 팔이 조용히 사라진다 (실측: USB 로 복사하니 카터만 보임)
-arm_ref = os.path.relpath(os.path.abspath(os.path.expanduser(args.arm)),
-                          os.path.dirname(os.path.abspath(os.path.expanduser(args.out))))
-if not arm_ref.startswith("."):
-    arm_ref = "./" + arm_ref
-say(f"팔 참조 경로(출력 기준 상대): {arm_ref}")
-arm_prim.GetReferences().AddReference(arm_ref, args.arm_prim)
+arm_prim.GetReferences().AddReference(args.arm, args.arm_prim)
 app.update()
 while is_stage_loading():
     app.update()
