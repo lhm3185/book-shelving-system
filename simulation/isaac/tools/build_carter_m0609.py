@@ -32,8 +32,9 @@ ap.add_argument("--arm-stiffness", type=float, default=1.0e5)
 ap.add_argument("--arm-damping", type=float, default=1.0e4)
 ap.add_argument("--grip-stiffness", type=float, default=1.0e3)
 ap.add_argument("--grip-damping", type=float, default=1.0e2)
-ap.add_argument("--fix-base", choices=["on", "off"], default="on",
-                help="on: 베이스를 월드에 고정 (시연은 정지 상태라 기본값). off: 바퀴로 굴러다님")
+ap.add_argument("--fix-base", choices=["on", "off"], default="off",
+                help="off(기본): 주행 가능 — AMR 담당이 라이다·주행 시험을 이어서 할 수 있어야 한다. "
+                     "on: 베이스를 월드에 고정 (로봇팔 단독 시연용)")
 args = ap.parse_args()
 
 from isaacsim import SimulationApp  # noqa: E402

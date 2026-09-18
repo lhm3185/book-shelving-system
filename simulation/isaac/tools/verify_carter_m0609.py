@@ -67,6 +67,19 @@ if len(arm) != 6:
 idx_arm = [robot.get_dof_index(n) for n in arm]
 idx_wheel = [robot.get_dof_index(n) for n in wheels]
 
+# USD 에 적어 둔 구동 게인이 물리로 그대로 넘어오지 않는 경우가 있어, 실행 시점에 다시 넣는다
+ctrl = robot.get_articulation_controller()
+kp = np.zeros(len(names)); kd = np.zeros(len(names))
+for i, n in enumerate(names):
+    if n in arm:
+        kp[i], kd[i] = 1.0e5, 1.0e4
+    elif n in grip:
+        kp[i], kd[i] = 1.0e3, 1.0e2
+    else:                      # 바퀴는 속도 구동
+        kp[i], kd[i] = 0.0, 1.0e6
+ctrl.set_gains(kps=kp, kds=kd)
+say(f"구동 게인 적용 (팔 kp 1e5 / 그리퍼 1e3 / 바퀴 속도구동)")
+
 for _ in range(60):
     world.step(render=False)
 
@@ -137,5 +150,18 @@ if os.path.exists(args.descriptor) and os.path.exists(args.urdf):
         say(f"  Lula 설정 로드 실패: {str(e)[:160]}")
 else:
     say("  descriptor/urdf 경로를 찾지 못했다")
+
+app.close()
+
+# 센서 — AMR 담당이 이어서 라이다·주행 시험을 하려면 센서가 살아 있어야 한다
+from pxr import Usd as _Usd  # noqa: E402
+_st = robot.prim.GetStage()
+sensors = []
+for _p in _Usd.PrimRange(_st.GetPrimAtPath(args.robot)):
+    _t = str(_p.GetTypeName())
+    _n = _p.GetName().lower()
+    if "Lidar" in _t or "lidar" in _n or "Camera" in _t or "hawk" in _n or "imu" in _n:
+        sensors.append(f"{_p.GetName()}({_t or 'Xform'})")
+say(f"센서 prim {len(sensors)}개: {sensors[:10]}")
 
 app.close()
