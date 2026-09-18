@@ -22,6 +22,8 @@ ap.add_argument("--descriptor", default=os.path.expanduser(
 ap.add_argument("--urdf", default=os.path.expanduser(
     "~/Isaac_Sim_b-1/src_pra/M0609/doosan-robot2/urdf/m0609.urdf"))
 ap.add_argument("--ee", default="link_6", help="IK 를 풀 말단 링크 이름")
+ap.add_argument("--kp", type=float, default=1.0e5, help="팔 위치 게인")
+ap.add_argument("--kd", type=float, default=1.0e4, help="팔 감쇠 게인")
 args = ap.parse_args()
 
 from isaacsim import SimulationApp  # noqa: E402
@@ -72,7 +74,7 @@ ctrl = robot.get_articulation_controller()
 kp = np.zeros(len(names)); kd = np.zeros(len(names))
 for i, n in enumerate(names):
     if n in arm:
-        kp[i], kd[i] = 1.0e5, 1.0e4
+        kp[i], kd[i] = args.kp, args.kd
     elif n in grip:
         kp[i], kd[i] = 1.0e3, 1.0e2
     else:                      # 바퀴는 속도 구동
@@ -85,7 +87,7 @@ if kp_back is None:
     say("게인 되읽기 실패 — 확인 불가")
 else:
     applied = [f"{names[i]}={kp_back[i]:.0f}" for i in [names.index(n) for n in arm[:3]]]
-    ok_gain = all(abs(kp_back[names.index(n)] - 1.0e5) < 1.0 for n in arm)
+    ok_gain = all(abs(kp_back[names.index(n)] - args.kp) < 1.0 for n in arm)
     say(f"게인 설정 후 되읽기: {applied} → {'값이 들어갔다' if ok_gain else '**설정이 무시됐다**'}")
 
 for _ in range(60):
