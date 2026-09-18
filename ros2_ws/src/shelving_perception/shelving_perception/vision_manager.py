@@ -9,15 +9,17 @@ Isaac Sim 카메라 데이터를 TargetDetector로 전달하는 ROS 2 노드.
 
 import rclpy
 import cv2
+import math
 import message_filters
+import numpy as np
 from ultralytics import YOLO
 
 from rclpy.node import Node
 from sensor_msgs.msg import Image, CameraInfo
-from geometry_msgs.msg import PointStamped
+from geometry_msgs.msg import PointStamped, PoseStamped
 from std_msgs.msg import Bool
 from cv_bridge import CvBridge, CvBridgeError
-from tf2_geometry_msgs import do_transform_point
+from tf2_geometry_msgs import do_transform_point, do_transform_pose
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from .book_detector import BookDetector
@@ -51,6 +53,14 @@ class VisionManager(Node):
         self.sync_slop = float(self.declare_parameter('sync_slop', 0.1).value)
         self.book_topic = self.declare_parameter(
             'book_topic', '/perception/books').value
+        self.book_pose_topic = self.declare_parameter(
+            'book_pose_topic', '/perception/book_pose').value
+        self.gripper_roll = float(self.declare_parameter(
+            'gripper_roll', 0.0).value)
+        self.gripper_pitch = float(self.declare_parameter(
+            'gripper_pitch', 0.0).value)
+        self.gripper_yaw_offset = float(self.declare_parameter(
+            'gripper_yaw_offset', 0.0).value)
         # Shelf targeting is disabled until the shelf model and slot contract
         # are finalized.
         # self.target_slot_topic = self.declare_parameter(
@@ -90,6 +100,8 @@ class VisionManager(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.book_pub = self.create_publisher(PointStamped, self.book_topic, 10)
+        self.book_pose_pub = self.create_publisher(
+            PoseStamped, self.book_pose_topic, 10)
         # self.target_pub = self.create_publisher(PointStamped, self.target_topic, 10)
         # self.target_slot_pub = self.create_publisher(
         #     TargetSlot, self.target_slot_topic, 10)
@@ -186,10 +198,19 @@ class VisionManager(Node):
             book_msg.header = book_point.header
             book_msg.point = book_point.point
             self.book_pub.publish(book_msg)
+            book_pose = self._make_book_pose(
+                target['xyz'],
+                rgb_msg.header.frame_id,
+                rgb_msg.header.stamp,
+                target['image_angle'],
+            )
+            if book_pose is not None:
+                self.book_pose_pub.publish(book_pose)
             self.get_logger().info(
                 f"Book detected: xyz=({book_point.point.x:.3f}, "
                 f"{book_point.point.y:.3f}, {book_point.point.z:.3f}), "
-                f"center={target['center']}")
+                f"center={target['center']}, "
+                f"yaw={target['image_angle']:.3f} rad")
 
         # Shelf targeting is disabled for the book-only validation stage.
         # scan_xyz = self._scan_position(
@@ -237,6 +258,46 @@ class VisionManager(Node):
                 f'{self.target_frame}: {error}')
             return None
 
+    def _make_book_pose(self, xyz, source_frame, stamp, image_angle):
+        yaw = image_angle + self.gripper_yaw_offset
+        pose = PoseStamped()
+        pose.header.frame_id = source_frame
+        pose.header.stamp = stamp
+        pose.pose.position.x, pose.pose.position.y, pose.pose.position.z = xyz
+        quaternion = self._quaternion_from_rpy(
+            self.gripper_roll, self.gripper_pitch, yaw)
+        pose.pose.orientation.x = quaternion[0]
+        pose.pose.orientation.y = quaternion[1]
+        pose.pose.orientation.z = quaternion[2]
+        pose.pose.orientation.w = quaternion[3]
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                self.target_frame,
+                source_frame,
+                rclpy.time.Time.from_msg(stamp),
+                timeout=rclpy.duration.Duration(seconds=0.2),
+            )
+            return do_transform_pose(pose, transform)
+        except TransformException as error:
+            self.get_logger().warning(
+                f'Could not transform book pose from {source_frame} to '
+                f'{self.target_frame}: {error}')
+            return None
+
+    def _quaternion_from_rpy(self, roll, pitch, yaw):
+        half_roll = roll * 0.5
+        half_pitch = pitch * 0.5
+        half_yaw = yaw * 0.5
+        cr, sr = math.cos(half_roll), math.sin(half_roll)
+        cp, sp = math.cos(half_pitch), math.sin(half_pitch)
+        cy, sy = math.cos(half_yaw), math.sin(half_yaw)
+        return (
+            sr * cp * cy - cr * sp * sy,
+            cr * sp * cy + sr * cp * sy,
+            cr * cp * sy - sr * sp * cy,
+            cr * cp * cy + sr * sp * sy,
+        )
+
     def _get_depth_scale(self, encoding, depth_image):
         if self.depth_scale > 0:
             return self.depth_scale
@@ -266,7 +327,8 @@ class VisionManager(Node):
         detections = []
         results = self.model(rgb_image, verbose=False)
         for result in results:
-            for box in result.boxes:
+            masks = result.masks.data if result.masks is not None else None
+            for index, box in enumerate(result.boxes):
                 confidence = float(box.conf[0])
                 if confidence < self.confidence_threshold:
                     continue
@@ -274,7 +336,20 @@ class VisionManager(Node):
                 class_name = self.model.names[class_id]
                 if class_name != 'book':
                     continue
-                detections.append(tuple(map(int, box.xyxy[0])))
+                mask = None
+                if masks is not None and index < len(masks):
+                    mask = masks[index].cpu().numpy() > 0.5
+                    if mask.shape != rgb_image.shape[:2]:
+                        mask = cv2.resize(
+                            mask.astype(np.uint8),
+                            (rgb_image.shape[1], rgb_image.shape[0]),
+                            interpolation=cv2.INTER_NEAREST,
+                        ).astype(bool)
+                detections.append({
+                    'box': tuple(map(int, box.xyxy[0])),
+                    'mask': mask,
+                    'confidence': confidence,
+                })
         return detections
 
 

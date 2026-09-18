@@ -13,6 +13,10 @@ vision_manager:
     sync_slop: 0.1
     model_path: /home/rokey/book_dataset/runs/segment/runs/book/weights/best.pt
     book_topic: /perception/books
+    book_pose_topic: /perception/book_pose
+    gripper_roll: 0.0
+    gripper_pitch: 0.0
+    gripper_yaw_offset: 0.0
     # Shelf targeting is disabled for the book-only validation stage.
     # target_topic: /perception/empty_shelf_position
     # target_slot_topic: /perception/target_slot

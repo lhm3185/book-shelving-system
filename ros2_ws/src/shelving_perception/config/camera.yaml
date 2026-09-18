@@ -11,4 +11,8 @@ vision_manager:
     depth_registered: true
     depth_scale: 0.0
     sync_slop: 0.1
+    book_pose_topic: /perception/book_pose
+    gripper_roll: 0.0
+    gripper_pitch: 0.0
+    gripper_yaw_offset: 0.0
 

@@ -23,7 +23,15 @@ class BookDetector:
         detected_targets = []
 
         for detection in detections:
-            x1, y1, x2, y2 = map(int, detection)
+            if isinstance(detection, dict):
+                box = detection['box']
+                confidence = float(detection.get('confidence', 1.0))
+                mask = detection.get('mask')
+            else:
+                box = detection
+                confidence = 1.0
+                mask = None
+            x1, y1, x2, y2 = map(int, box)
             u = int((x1 + x2) / 2)
             v = int((y1 + y2) / 2)
 
@@ -31,7 +39,7 @@ class BookDetector:
                 continue
 
             z = self._depth_in_meters(
-                self._sample_depth(depth_image, x1, y1, x2, y2),
+                self._center_depth(depth_image, u, v),
                 depth_scale,
             )
             if z is None:
@@ -43,9 +51,26 @@ class BookDetector:
                 'xyz': (x, y, z),
                 'box': (x1, y1, x2, y2),
                 'center': (u, v),
+                'confidence': confidence,
+                'image_angle': self._mask_angle(mask),
             })
 
         return detected_targets
+
+    def _mask_angle(self, mask):
+        """Return the major-axis angle of a segmentation mask in radians."""
+        if mask is None:
+            return 0.0
+
+        points = np.column_stack(np.nonzero(mask))
+        if len(points) < 2:
+            return 0.0
+
+        centered = points - points.mean(axis=0)
+        covariance = np.cov(centered, rowvar=False)
+        eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+        axis = eigenvectors[:, int(np.argmax(eigenvalues))]
+        return float(np.arctan2(axis[0], axis[1]))
 
     def _sample_depth(self, depth_image, x1, y1, x2, y2):
         """Return the median valid depth inside the detection box."""
@@ -58,6 +83,23 @@ class BookDetector:
             return None
 
         values = depth_image[y1:y2, x1:x2].reshape(-1)
+        valid_values = values[np.isfinite(values) & (values > 0)]
+        if valid_values.size == 0:
+            return None
+        return np.median(valid_values)
+
+    def _center_depth(self, depth_image, u, v, radius=2):
+        """Return center-pixel depth, with a small fallback neighborhood."""
+        height, width = depth_image.shape[:2]
+        center_value = depth_image[v, u]
+        if np.isfinite(center_value) and center_value > 0:
+            return center_value
+
+        x0 = max(0, u - radius)
+        x1 = min(width, u + radius + 1)
+        y0 = max(0, v - radius)
+        y1 = min(height, v + radius + 1)
+        values = depth_image[y0:y1, x0:x1].reshape(-1)
         valid_values = values[np.isfinite(values) & (values > 0)]
         if valid_values.size == 0:
             return None
