@@ -76,7 +76,8 @@ for p in Usd.PrimRange(stage.GetPrimAtPath(args.robot + "/carter")):
     if size.min() <= 0:
         continue
     rows.append((float(b[5]), p.GetName(), b, size))
-rows.sort(reverse=True)
+# 튜플에 numpy 배열이 있어 그냥 정렬하면 비교가 모호해진다 → 키를 지정한다
+rows.sort(key=lambda r: r[0], reverse=True)
 say("카터 하위 prim (윗면 높은 순):")
 for top, name, b, size in rows[:12]:
     say(f"  {name:26s} 윗면 z {top:+.3f}  크기 {np.round(size, 3).tolist()}")
