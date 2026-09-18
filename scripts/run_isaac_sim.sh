@@ -16,6 +16,27 @@ ISAAC_SIM_PATH="${ISAAC_SIM_PATH:-$HOME/isaacsim}"
 }
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-130}"
 
+# PC 마다 다른 경로(레벨 USD 등)는 이 파일에 둔다. git 에 올리지 않는다.
+[ -f "$REPO_ROOT/simulation/isaac/config/sim_local.env" ] && . "$REPO_ROOT/simulation/isaac/config/sim_local.env"
+
+# 통합 USD 가 아직 자리 파일이면, 이 PC 에 있는 시험 레벨로 자동 대체한다.
+# (시연 당일 다른 터미널에서 SIM_USD 를 빠뜨려 실행이 막히는 것을 막기 위함 — 2026-09-18)
+if [ -z "${SIM_USD:-}" ]; then
+    REPO_USD="$REPO_ROOT/simulation/library_system.usd"
+    if [ ! -s "$REPO_USD" ] || [ "$(stat -c%s "$REPO_USD" 2>/dev/null || echo 0)" -lt 4096 ]; then
+        for cand in "$HOME/Desktop/ing_library_env_v5.usd" "$HOME/b1_assets/level/ing_library_env_v5.usd"; do
+            if [ -f "$cand" ]; then
+                export SIM_USD="$cand"
+                echo "### 통합 USD 가 아직 비어 있어 시험 레벨을 쓴다: $SIM_USD" >&2
+                break
+            fi
+        done
+    fi
+fi
+if [ -z "${SIM_TRAY:-}" ] && [ -f "$HOME/book_dataset/assets/tray/tray_v1.usdc" ]; then
+    export SIM_TRAY="$HOME/book_dataset/assets/tray/tray_v1.usdc"
+fi
+
 # 터미널에 시스템 ROS(Python 3.12)가 source 돼 있으면 Isaac(3.11)이 그 rclpy 를 먼저 import 하다 죽는다
 # (2026-09-17 시연 준비 중 실제 발생). 시스템 ROS 경로를 걷어내고 Isaac 내장 jazzy 만 쓴다
 strip_ros() { printf '%s' "$1" | tr ':' '\n' | grep -v -e '^/opt/ros/' -e '/ros2_ws/install' -e '^$' | paste -sd: -; }
