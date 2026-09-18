@@ -5,14 +5,23 @@ vision_manager:
     depth_topic: /depth
     camera_info_topic: /camera_info
     trigger_topic: /perception/detect_request
+    perception_action: /detect_target_slot
     wait_for_trigger: true
     camera_frame: sim_camera
     target_frame: arm_base_link
     depth_registered: true
     depth_scale: 0.0
     sync_slop: 0.1
-    model_path: /home/rokey/book_dataset/runs/segment/runs/book/weights/best.pt
+    model_path: /home/rokey/도서관/260918_bag_vision/model/book_tray_best.pt
     book_topic: /perception/books
+    book_pose_topic: /perception/book_pose
+    debug_image_topic: /perception/debug_image
+    show_debug_window: true
+    gripper_roll: 0.0
+    gripper_pitch: 0.0
+    gripper_yaw_offset: 0.0
+    insertion_depth: 0.25
+    pre_insert_offset: 0.05
     # Shelf targeting is disabled for the book-only validation stage.
     # target_topic: /perception/empty_shelf_position
     # target_slot_topic: /perception/target_slot
@@ -25,4 +34,3 @@ vision_manager:
     # pre_insert_offset: 0.05
     # target_confidence: 1.0
     confidence_threshold: 0.75
-
