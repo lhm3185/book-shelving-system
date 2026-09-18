@@ -171,14 +171,16 @@ class MockPerceptionServer(Node):
             self.get_parameter("target_frame").value
         )
 
-        target_slot.pose.position.x = 0.55
-        target_slot.pose.position.y = 0.0
-        target_slot.pose.position.z = 0.80
+        # 로봇팔이 검증한 1차 서가 칸 (arm_base_link 기준, 꽂힌 책 AABB 중심)
+        target_slot.pose.position.x = -0.3497
+        target_slot.pose.position.y = 0.5495
+        target_slot.pose.position.z = 0.3399
 
+        # 삽입 방향 yaw +90° (arm_base_link +Y). 단위 쿼터니언은 yaw 0° 라 로봇팔이 M410 으로 거절한다
         target_slot.pose.orientation.x = 0.0
         target_slot.pose.orientation.y = 0.0
-        target_slot.pose.orientation.z = 0.0
-        target_slot.pose.orientation.w = 1.0
+        target_slot.pose.orientation.z = 0.7071068
+        target_slot.pose.orientation.w = 0.7071068
 
         target_slot.available_width = max(
             0.08,
