@@ -25,6 +25,20 @@ vision_manager:
     shelf_row_count: 5
     # 책 표면과 빈 공간의 깊이 차이 기준(m)입니다.
     shelf_depth_margin: 0.05
+    # 삽입 후보 좌표가 정의된 기준 frame입니다.
+    slot_position_frame: arm_base_link
+    # 검증된 4개 삽입 후보의 x,y,z 좌표를 평탄화해 기록합니다.
+    slot_positions: [-0.3497, 0.5495, 0.3399, -0.4297, 0.5495, 0.3399, -0.5097, 0.5495, 0.3399, -0.2697, 0.5495, 0.3399]
+    # 후보 중심 주변에서 깊이를 읽을 픽셀 반경입니다.
+    slot_sample_radius_px: 10
+    # 예상 삽입점보다 먼 값이 빈 칸으로 판정되는 거리(m)입니다.
+    slot_empty_depth_margin: 0.04
+    # 예상 삽입점보다 가까운 값이 점유로 판정되는 거리(m)입니다.
+    slot_occupied_depth_margin: 0.03
+    # 샘플 중 먼 깊이값이 차지해야 하는 최소 비율입니다.
+    slot_min_far_ratio: 0.50
+    # 샘플 중 가까운 물체 깊이가 허용되는 최대 비율입니다.
+    slot_max_near_ratio: 0.25
     gripper_roll: 0.0
     gripper_pitch: 0.0
     gripper_yaw_offset: 0.0

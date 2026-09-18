@@ -16,6 +16,11 @@ class TargetDetector:
         depth_margin=0.05,
         inner_width_ratio=0.70,
         inner_height_ratio=0.60,
+        sample_radius_px=10,
+        empty_depth_margin=0.04,
+        occupied_depth_margin=0.03,
+        min_far_ratio=0.50,
+        max_near_ratio=0.25,
     ):
         # 책장 단의 개수입니다. 현재 학습 데이터는 5단 책장입니다.
         if row_count <= 0:
@@ -30,6 +35,17 @@ class TargetDetector:
             raise ValueError('depth_margin must be non-negative')
         # 깊이 차이 기준을 실수형으로 저장합니다.
         self.depth_margin = float(depth_margin)
+
+        # 각 삽입 후보 주변에서 깊이를 샘플링할 픽셀 반경입니다.
+        self.sample_radius_px = int(sample_radius_px)
+        # 예상 삽입점보다 이 거리 이상 먼 값이 많으면 빈 칸으로 판정합니다.
+        self.empty_depth_margin = float(empty_depth_margin)
+        # 예상 삽입점보다 이 거리 이상 가까운 값이 많으면 책이 있는 칸으로 판정합니다.
+        self.occupied_depth_margin = float(occupied_depth_margin)
+        # 빈 칸으로 인정할 먼 깊이값의 최소 비율입니다.
+        self.min_far_ratio = float(min_far_ratio)
+        # 빈 칸으로 인정할 가까운 깊이값의 최대 비율입니다.
+        self.max_near_ratio = float(max_near_ratio)
 
         # 책장 bbox 안에서 좌우 가장자리와 프레임을 제외할 비율입니다.
         # 책이 들어가는 내부 가로 영역의 비율을 저장합니다.
@@ -170,4 +186,92 @@ class TargetDetector:
             })
 
         # 위쪽 단부터 아래쪽 단 순서로 반환합니다.
+        return empty_slots
+
+    def find_empty_slots_at_positions(
+        self,
+        depth_image,
+        candidate_slots,
+        fx,
+        fy,
+        cx,
+        cy,
+        depth_scale=1.0,
+    ):
+        """로봇 좌표로 정해진 삽입 후보들을 Depth로 개별 판정합니다.
+
+        ``candidate_slots``의 각 항목은 ``slot_id``와 카메라 기준
+        ``camera_xyz``를 가져야 합니다. 빈 칸은 후보 중심 주변에서
+        예상 삽입점보다 먼 깊이값이 충분히 많고 가까운 값이 적은 경우입니다.
+        """
+        # 입력 영상이나 후보가 없으면 빈 결과를 반환합니다.
+        if depth_image is None or not candidate_slots:
+            return []
+
+        # 깊이 영상의 높이와 너비를 가져옵니다.
+        height, width = depth_image.shape[:2]
+        # 최종적으로 빈 칸으로 판정된 후보를 저장합니다.
+        empty_slots = []
+
+        # 등록된 각 삽입 후보를 순회합니다.
+        for candidate in candidate_slots:
+            # 후보의 카메라 기준 xyz를 읽습니다.
+            camera_x, camera_y, camera_z = map(
+                float,
+                candidate['camera_xyz'],
+            )
+            # 카메라 뒤쪽이거나 깊이가 없으면 화면에 투영할 수 없습니다.
+            if not math.isfinite(camera_z) or camera_z <= 0:
+                continue
+
+            # 핀홀 카메라 모델로 후보의 화면 픽셀 위치를 계산합니다.
+            u = int(round(fx * camera_x / camera_z + cx))
+            v = int(round(fy * camera_y / camera_z + cy))
+            # 화면 밖 후보는 깊이를 읽을 수 없으므로 건너뜁니다.
+            if not (0 <= u < width and 0 <= v < height):
+                continue
+
+            # 후보 중심 주변의 작은 정사각형 범위를 계산합니다.
+            radius = max(1, self.sample_radius_px)
+            x1 = max(0, u - radius)
+            x2 = min(width, u + radius + 1)
+            y1 = max(0, v - radius)
+            y2 = min(height, v + radius + 1)
+            # 후보 주변 깊이값을 1차원으로 펼칩니다.
+            values = depth_image[y1:y2, x1:x2].reshape(-1)
+            # 유효한 양수 깊이값만 남깁니다.
+            valid_values = values[np.isfinite(values) & (values > 0)]
+            # 유효한 깊이가 없으면 이 후보의 상태를 알 수 없습니다.
+            if valid_values.size == 0:
+                continue
+
+            # 센서 깊이 단위를 미터로 변환합니다.
+            depths_m = valid_values.astype(float) * float(depth_scale)
+            # 예상 삽입점보다 먼 배경 깊이값의 비율을 계산합니다.
+            far_ratio = float(np.mean(
+                depths_m >= camera_z + self.empty_depth_margin))
+            # 예상 삽입점보다 가까운 책/팔 깊이값의 비율을 계산합니다.
+            near_ratio = float(np.mean(
+                depths_m <= camera_z - self.occupied_depth_margin))
+
+            # 먼 값이 충분하고 가까운 물체가 적을 때만 빈 칸으로 판정합니다.
+            if (
+                far_ratio < self.min_far_ratio
+                or near_ratio > self.max_near_ratio
+            ):
+                continue
+
+            # 빈 후보의 좌표·픽셀·깊이 통계를 결과에 저장합니다.
+            empty_slots.append({
+                'slot_id': candidate['slot_id'],
+                'pixel': (u, v),
+                'camera_xyz': (camera_x, camera_y, camera_z),
+                'target_xyz': candidate['target_xyz'],
+                'observed_depth': float(np.median(depths_m)),
+                'far_ratio': far_ratio,
+                'near_ratio': near_ratio,
+                'type': 'empty_shelf_position',
+            })
+
+        # 설정된 후보 순서를 유지한 채 빈 칸만 반환합니다.
         return empty_slots

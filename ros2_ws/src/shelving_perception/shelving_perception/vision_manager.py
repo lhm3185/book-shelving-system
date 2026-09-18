@@ -127,6 +127,32 @@ class VisionManager(Node):
         # 책 표면과 빈 칸의 배경 깊이를 구분할 최소 차이(m)입니다.
         self.shelf_depth_margin = float(self.declare_parameter(
             'shelf_depth_margin', 0.05).value)
+        # 삽입 후보를 화면에 투영해 깊이를 읽을 때 사용할 로봇 기준 frame입니다.
+        self.slot_position_frame = self.declare_parameter(
+            'slot_position_frame', 'arm_base_link').value
+        # x,y,z가 반복되는 평탄화된 삽입 후보 좌표 목록입니다.
+        self.slot_positions = list(self.declare_parameter(
+            'slot_positions', [
+                -0.3497, 0.5495, 0.3399,
+                -0.4297, 0.5495, 0.3399,
+                -0.5097, 0.5495, 0.3399,
+                -0.2697, 0.5495, 0.3399,
+            ]).value)
+        # 후보 중심 주변에서 깊이를 샘플링할 픽셀 반경입니다.
+        self.slot_sample_radius_px = int(self.declare_parameter(
+            'slot_sample_radius_px', 10).value)
+        # 예상 삽입점보다 먼 값이 빈 칸임을 나타내는 거리 기준입니다.
+        self.slot_empty_depth_margin = float(self.declare_parameter(
+            'slot_empty_depth_margin', 0.04).value)
+        # 예상 삽입점보다 가까운 값이 점유를 나타내는 거리 기준입니다.
+        self.slot_occupied_depth_margin = float(self.declare_parameter(
+            'slot_occupied_depth_margin', 0.03).value)
+        # 샘플 중 먼 깊이값이 차지해야 하는 최소 비율입니다.
+        self.slot_min_far_ratio = float(self.declare_parameter(
+            'slot_min_far_ratio', 0.50).value)
+        # 샘플 중 가까운 물체 깊이가 허용되는 최대 비율입니다.
+        self.slot_max_near_ratio = float(self.declare_parameter(
+            'slot_max_near_ratio', 0.25).value)
         # 결과 pose에 적용할 gripper roll 보정값입니다.
         self.gripper_roll = float(self.declare_parameter(
             'gripper_roll', 0.0).value)
@@ -177,6 +203,10 @@ class VisionManager(Node):
             raise ValueError(
                 'model_path parameter is required, for example '
                 '-p model_path:=/path/to/book_best.pt')
+        # 삽입 후보는 x,y,z 세 값이 한 묶음이어야 하므로 길이를 검증합니다.
+        if len(self.slot_positions) % 3 != 0:
+            raise ValueError(
+                'slot_positions must contain x,y,z triples')
 
         # 학습된 YOLO 모델을 메모리에 로드합니다.
         self.model = YOLO(self.model_path)
@@ -188,6 +218,11 @@ class VisionManager(Node):
         self.target_detector = TargetDetector(
             row_count=self.shelf_row_count,
             depth_margin=self.shelf_depth_margin,
+            sample_radius_px=self.slot_sample_radius_px,
+            empty_depth_margin=self.slot_empty_depth_margin,
+            occupied_depth_margin=self.slot_occupied_depth_margin,
+            min_far_ratio=self.slot_min_far_ratio,
+            max_near_ratio=self.slot_max_near_ratio,
         )
         # TF 변환을 조회할 버퍼와 listener를 생성합니다.
         self.tf_buffer = Buffer()
@@ -441,19 +476,21 @@ class VisionManager(Node):
             )
             # 책장 전체의 bbox와 클래스를 책장 YOLO 모델로 검출합니다.
             shelf_detection = self._detect_shelf(rgb_image)
-            # 책장 bbox 내부의 각 단을 Depth로 검사해 빈 단을 계산합니다.
-            empty_slots = []
-            if shelf_detection is not None:
-                empty_slots = self.target_detector.find_empty_slots(
-                    depth_image,
-                    shelf_detection['box'],
-                    fx,
-                    fy,
-                    cx,
-                    cy,
-                    depth_scale,
-                    shelf_detection['class_name'],
-                )
+            # 로봇 기준의 삽입 후보들을 현재 카메라 기준 좌표로 변환합니다.
+            candidate_slots = self._candidate_slots_in_camera(
+                rgb_msg.header.frame_id,
+                rgb_msg.header.stamp,
+            )
+            # 각 후보 주변의 Depth를 비교해 빈 칸만 선택합니다.
+            empty_slots = self.target_detector.find_empty_slots_at_positions(
+                depth_image,
+                candidate_slots,
+                fx,
+                fy,
+                cx,
+                cy,
+                depth_scale,
+            )
             # 책과 책장 검출 결과를 화면과 debug image 토픽에 표시합니다.
             self._publish_debug_image(
                 rgb_image,
@@ -520,9 +557,10 @@ class VisionManager(Node):
         # 찾은 빈 단들을 하나씩 target_frame으로 변환하고 토픽으로 발행합니다.
         transformed_empty_slots = []
         for empty_slot in empty_slots:
+            # 후보가 정의된 로봇 frame의 좌표를 최종 target frame으로 변환합니다.
             empty_point = self._transform_xyz(
-                empty_slot['xyz'],
-                rgb_msg.header.frame_id,
+                empty_slot['target_xyz'],
+                self.slot_position_frame,
                 rgb_msg.header.stamp,
             )
             if empty_point is None:
@@ -581,6 +619,57 @@ class VisionManager(Node):
             return None
         # 가장 신뢰도가 높은 책장 하나를 선택합니다.
         return max(candidates, key=lambda candidate: candidate['confidence'])
+
+    def _candidate_slots_in_camera(self, camera_frame, stamp):
+        """로봇 기준 삽입 후보 좌표를 현재 카메라 기준으로 변환합니다."""
+        # 카메라 시각에 맞는 TF를 한 번만 조회합니다.
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                camera_frame,
+                self.slot_position_frame,
+                rclpy.time.Time.from_msg(stamp),
+                timeout=rclpy.duration.Duration(seconds=0.2),
+            )
+        except TransformException as error:
+            # 카메라와 슬롯 frame의 TF가 없으면 모든 후보를 건너뜁니다.
+            self.get_logger().warning(
+                f'Could not transform slot frame '
+                f'{self.slot_position_frame} to {camera_frame}: {error}')
+            return []
+
+        # 변환된 후보를 저장할 목록입니다.
+        candidates = []
+        # 평탄화된 좌표 목록을 x,y,z 세 값씩 나눠 처리합니다.
+        for index in range(0, len(self.slot_positions), 3):
+            # 후보의 고유 번호를 생성합니다.
+            slot_id = index // 3
+            # 로봇 기준 삽입 후보 좌표를 읽습니다.
+            target_xyz = tuple(
+                float(value) for value in self.slot_positions[index:index + 3]
+            )
+            # TF 변환을 적용할 PointStamped를 생성합니다.
+            point = PointStamped()
+            # 점의 원래 frame을 후보 좌표 frame으로 설정합니다.
+            point.header.frame_id = self.slot_position_frame
+            # 센서 timestamp를 사용해 같은 시각의 TF를 적용합니다.
+            point.header.stamp = stamp
+            # 후보 좌표를 메시지에 기록합니다.
+            point.point.x, point.point.y, point.point.z = target_xyz
+            # 후보를 카메라 frame으로 변환합니다.
+            camera_point = do_transform_point(point, transform)
+            # 깊이 판정기가 사용할 정보를 저장합니다.
+            candidates.append({
+                'slot_id': slot_id,
+                'target_xyz': target_xyz,
+                'camera_xyz': (
+                    camera_point.point.x,
+                    camera_point.point.y,
+                    camera_point.point.z,
+                ),
+            })
+
+        # 카메라 기준으로 변환된 후보 목록을 반환합니다.
+        return candidates
 
     def _transform_xyz(self, xyz, source_frame, stamp):
         """카메라 기준 점을 target_frame 기준 점으로 변환합니다."""
@@ -763,8 +852,11 @@ class VisionManager(Node):
         slot.pose.position.x = point.point.x
         slot.pose.position.y = point.point.y
         slot.pose.position.z = point.point.z
-        # 책장 칸 중심에서 사용할 기본 방향은 회전 없는 자세입니다.
-        slot.pose.orientation.w = 1.0
+        # 로봇팔 삽입 규약인 yaw +90도 회전을 quaternion으로 설정합니다.
+        slot.pose.orientation.x = 0.0
+        slot.pose.orientation.y = 0.0
+        slot.pose.orientation.z = math.sqrt(0.5)
+        slot.pose.orientation.w = math.sqrt(0.5)
 
         # goal의 책 크기를 이용해 삽입 가능한 폭과 높이를 계산합니다.
         goal = goal_handle.request
