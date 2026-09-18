@@ -23,7 +23,9 @@ import sys
 ap = argparse.ArgumentParser()
 ap.add_argument("--carter", default="", help="비우면 Isaac 에셋 루트의 nova_carter.usd")
 ap.add_argument("--arm", default=os.path.expanduser("~/Desktop/Collected_m0609_gripper.usd"))
-ap.add_argument("--arm-prim", default="/World/m0609", help="팔 USD 안에서 가져올 prim")
+ap.add_argument("--arm-prim", default="/World/m0609",
+                help="팔 USD 안에서 가져올 prim. 그리퍼가 /World 아래 **형제 prim** 으로 있는 파일이면 "
+                     "`/World` 를 주어야 그리퍼까지 들어온다 (실측: 안 주면 그리퍼 관절 0개)")
 ap.add_argument("--out", default=os.path.expanduser("~/Desktop/carter_m0609.usd"))
 ap.add_argument("--mount-xyz", type=float, nargs=3, default=[0.0, 0.0, 0.555],
                 help="팔을 올릴 위치. 기본값은 **카터 상판 앞쪽** — 상판 중앙(자동)에 놓으면 "
@@ -89,6 +91,17 @@ arm_prim.GetReferences().AddReference(args.arm, args.arm_prim)
 app.update()
 while is_stage_loading():
     app.update()
+
+# 팔 USD 전체(/World)를 가져온 경우, 같이 딸려 온 바닥·그래프는 끈다
+DROP = {"GroundPlane", "ActionGraph", "Graph", "Environment", "Render", "OmniverseKit",
+        "defaultLight", "OmniverseGlobalRenderSettings", "Vars"}
+dropped = []
+for child in stage.GetPrimAtPath(ARM).GetChildren():
+    if child.GetName() in DROP:
+        child.SetActive(False)
+        dropped.append(child.GetName())
+if dropped:
+    say(f"딸려 온 prim 비활성화: {dropped}")
 
 cache = create_bbox_cache()
 
