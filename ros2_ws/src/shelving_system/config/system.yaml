@@ -1,1 +1,41 @@
+schema_version: 1
 
+system:
+  name: book_shelving_system
+  mode: simulation
+
+timeouts:
+  navigation: 120.0
+  perception: 10.0
+  manipulation: 60.0
+
+retry_limits:
+  navigation: 2
+  perception: 1
+  manipulation: 1
+
+topics:
+  tray_job: /return_machine/tray_job
+  robot_status: /robot/status
+  system_state: /system/state
+
+actions:
+  navigate_to_target: /navigate_to_target
+  detect_target_slot: /detect_target_slot
+  place_book: /place_book
+
+frames:
+  map: map
+  odom: odom
+  robot_base: base_link
+  arm_base: arm_base_link
+  camera: camera_link
+  tray: tray_frame
+
+behavior:
+  return_home_after_job: true
+  stop_on_unknown_classification: true
+  stop_on_low_confidence: true
+
+  minimum_slot_confidence: 0.70
+  maximum_books_per_tray: 5
