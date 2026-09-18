@@ -36,9 +36,26 @@ Requested time 262.450014 but the earliest data is at time 270.000014
 **요청 시각이 하나로 고정돼 있다는 것이 결정적입니다.** 노드가 특정 프레임 하나를 붙잡고 계속 재시도하고 있으며,
 그 프레임은 TF 버퍼에 남아 있지 않을 만큼 오래된 것입니다. 서가 모델 유무와는 무관합니다.
 
+### bag 으로도 시험했다 — 이번엔 반대 방향으로 어긋난다 (3차)
+
+GPU PC 를 FSM 담당이 쓰고 있어, 전달드린 `260918_bag_vision/bags/tray_full_6books` 로 돌렸습니다.
+
+```
+Could not transform sim_camera to arm_base_link: Lookup would require extrapolation into the future.
+Requested time 173.983342 but the latest data is at time 68.066670
+```
+
+| 상황 | 요청 프레임 | TF 데이터 | 차이 |
+| --- | --- | --- | --- |
+| Isaac 실시간 | 262.45 (과거) | 270.00 이후만 있음 | **7.6초 과거** |
+| bag 재생 | 173.98 (미래) | 68.07 까지만 있음 | **106초 미래** |
+
+**두 경우 모두 "노드가 처리하는 프레임과 TF 시각이 맞지 않는다"** 는 같은 문제입니다.
+실시간에서는 너무 오래된 프레임을, bag 에서는 TF 보다 앞선 프레임을 처리합니다.
+
 ## 3. 제안
 
-1. 트리거를 받으면 **그 시점의 최신 프레임**으로 처리하고, 오래된 프레임(예: 1초 이상)은 버립니다
+1. 트리거를 받으면 **그 시점의 최신 프레임**으로 처리하고, 프레임 시각과 TF 시각의 차이가 크면(예: 1초 이상) 버립니다
 2. 변환 실패 시 경고 한 번만 남기고 **다음 프레임으로 넘어갑니다** (같은 프레임 재시도 금지)
 3. 필요하면 `buffer.lookup_transform(..., timeout=Duration(seconds=0.2))` 로 잠깐 기다립니다
 
