@@ -36,6 +36,20 @@ ap.add_argument("--amr-test-overrides", action="store_true",
 ap.add_argument("--camera-prim", default="",
                 help="레벨 로봇에 이미 있는 카메라 prim 경로. 카메라·이미지 그래프는 그대로 두고 TF(panda_link0→카메라)·/clock 만 보탠다")
 ap.add_argument("--max-seconds", type=float, default=0.0, help="0 이면 계속 실행")
+# 색·크기가 다른 6종. 앞 4칸이 먼저 꽂히므로 가장 두꺼운 책·가장 얇은 책을 앞에 둔다
+MIXED_BOOKS = [
+    "book_encyclopedia_set_01_2k__book_encyclopedia_set_01_book15",   # 두께 0.035 폭 0.163 높이 0.237
+    "decorative_book_set_01_2k__book_hardcover_01_cover02",           # 0.045 / 0.155 / 0.230  가장 두꺼움
+    "decorative_book_set_01_2k__book_softcover_01_cover14",           # 0.032 / 0.160 / 0.225  소프트커버
+    "decorative_book_set_01_2k__book_hardcover_01_cover08",           # 0.044 / 0.174 / 0.228  표지가 가장 넓음
+    "oldbook__OldBook001",                                            # 0.038 / 0.153 / 0.230  낡은 표지
+    "book_encyclopedia_set_01_2k__book_encyclopedia_set_01_book01",   # 0.039 / 0.163 / 0.237  다른 권(색 다름)
+]
+# 트레이에 칸막이가 없어 (두께 ÷ 세운 깊이) 가 5 보다 얇고 높은 책은 그냥 넘어진다 — 실측.
+# 0.027/0.189(books__C_book003_low), 0.011 도록, 0.022 소프트커버는 그래서 뺐다.
+ap.add_argument("--book-variants", default="",
+                help="트레이에 놓을 책 종류 (레벨 /World/books 의 prim 이름, 쉼표로 구분). "
+                     "'mixed' 면 색·크기가 다른 기본 6종. 비우면 한 종류")
 args = ap.parse_args()
 
 from isaacsim import SimulationApp  # noqa: E402
@@ -74,8 +88,10 @@ def _before_reset(stage):
         ros_sensors.apply_amr_test_overrides(stage, R, say)
 
 
+variants = (MIXED_BOOKS if args.book_variants.strip() == "mixed"
+            else [v.strip() for v in args.book_variants.split(",") if v.strip()] or None)
 scene = BookScene(app, args.usd, args.tray, args.tray_center, args.books, args.place_dx, say,
-                  before_reset=_before_reset)
+                  before_reset=_before_reset, book_variants=variants)
 world, arm, robot = scene.world, scene.arm, scene.robot
 render = args.gui or args.camera or bool(args.camera_prim)
 if args.camera_prim:

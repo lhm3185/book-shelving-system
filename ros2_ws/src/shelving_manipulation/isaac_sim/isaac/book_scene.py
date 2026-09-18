@@ -93,7 +93,8 @@ class Call(Primitive):
 class BookScene:
     """레벨 + 트레이 + 책 N권 + 북엔드. 로봇·IK·팔 제어기까지 준비한다"""
 
-    def __init__(self, app, usd, tray_usd, tray_center, n_books, place_dx, say, before_reset=None):
+    def __init__(self, app, usd, tray_usd, tray_center, n_books, place_dx, say, before_reset=None,
+                 book_variants=None):
         self.app, self.say = app, say
         open_stage(usd); app.update()
         while is_stage_loading():
@@ -101,16 +102,30 @@ class BookScene:
         st = self.stage = get_current_stage()
         self._cache = create_bbox_cache()
 
-        src = st.GetPrimAtPath(BOOK_SRC)
-        book_ref = None
-        for spec in src.GetPrimStack():
-            for r in list(spec.referenceList.GetAddedOrExplicitItems()) + list(spec.payloadList.GetAddedOrExplicitItems()):
-                book_ref = r.assetPath
-        book_ref = os.path.normpath(os.path.join(os.path.dirname(st.GetRootLayer().realPath), book_ref))
-        src_q = SingleXFormPrim(BOOK_SRC).get_world_pose()[1]
+        # 책 원본: 기본은 한 종류, --book-variants 를 주면 레벨 /World/books 의 여러 종류를 돌려 쓴다
+        sources = []
+        for name in (book_variants or [BOOK_SRC]):
+            path = name if name.startswith("/") else "/World/books/" + name
+            prim = st.GetPrimAtPath(path)
+            if not prim.IsValid():
+                say(f"책 원본 없음, 건너뜀: {path}")
+                continue
+            ref = None
+            for spec in prim.GetPrimStack():
+                for r in (list(spec.referenceList.GetAddedOrExplicitItems())
+                          + list(spec.payloadList.GetAddedOrExplicitItems())):
+                    ref = r.assetPath
+            if ref is None:
+                say(f"책 원본에 참조 없음, 건너뜀: {path}")
+                continue
+            ref = os.path.normpath(os.path.join(os.path.dirname(st.GetRootLayer().realPath), ref))
+            sources.append((path, ref, SingleXFormPrim(path).get_world_pose()[1]))
+        if not sources:
+            raise RuntimeError("쓸 수 있는 책 원본이 없다")
         shelf = self.aabb(SHELF)
-        for p in [BOOK_SRC] + ([str(c.GetPath()) for c in st.GetPrimAtPath("/World/fixtures").GetChildren()]
-                               if st.GetPrimAtPath("/World/fixtures").IsValid() else []):
+        for p in ([s[0] for s in sources]
+                  + ([str(c.GetPath()) for c in st.GetPrimAtPath("/World/fixtures").GetChildren()]
+                     if st.GetPrimAtPath("/World/fixtures").IsValid() else [])):
             st.GetPrimAtPath(p).SetActive(False)
 
         # 트레이
@@ -130,41 +145,76 @@ class BookScene:
 
         # 책
         self.books = []
+        self.dims = {}          # 책마다 치수가 다르다 (두께 T, 세운 높이 L, 깊이 W)
+        self.grasp_local = {}   # 책 좌표계의 (중심, 위 방향, 반높이)
+        self.upright_q = {}     # 트레이에서 세운 자세
         for i in range(min(n_books, nslots)):
             path = f"/World/bs_books/book_{i}"
+            src_path, book_ref, src_q = sources[i % len(sources)]
             add_reference_to_stage(book_ref, path)
             prim = st.GetPrimAtPath(path)
             UsdPhysics.RigidBodyAPI.Apply(prim); UsdPhysics.MassAPI.Apply(prim).CreateMassAttr().Set(0.5)
             for p in Usd.PrimRange(prim):
                 if p.IsA(UsdGeom.Mesh):
-                    UsdPhysics.CollisionAPI.Apply(p); UsdPhysics.MeshCollisionAPI.Apply(p).CreateApproximationAttr().Set("convexHull")
+                    UsdPhysics.CollisionAPI.Apply(p)
+                    # 표지가 둥근 책은 convexHull 이면 흔들려 넘어진다 (종류를 섞으면 특히).
+                    # 책은 상자에 가까우므로 boundingCube 로 두면 트레이에 그대로 서 있는다.
+                    UsdPhysics.MeshCollisionAPI.Apply(p).CreateApproximationAttr().Set("boundingCube")
             xf = SingleXFormPrim(path); xf.set_world_pose(np.array([0.0, 0.0, 5.0 + i]), src_q)
+            # 에셋마다 원본이 놓인 방향이 달라서(눕힌 것도 있다) 트레이 기준으로 세운다:
+            # x = 두께(가장 작은 변), y = 세운 높이(가장 큰 변), z = 깊이(중간)
+            q_up = self.upright_quat(path, np.asarray(src_q, float), np.array([0.0, 0.0, 5.0 + i]))
+            xf.set_world_pose(np.array([0.0, 0.0, 5.0 + i]), q_up)
             b = self.aabb(path); c = (b[:3] + b[3:]) / 2
             target = np.array([slot_x[i], tray_center[1], DECK_Z + floor_top + (b[5] - b[2]) / 2 + 0.002])
             pos, q = xf.get_world_pose(); xf.set_world_pose(np.array(pos) + (target - c), q)
             self.books.append(path)
+            # 파지점을 책 자신의 좌표로 저장한다. 트레이에서 몇 도만 기울어도
+            # AABB 중심은 실제 책 중심과 어긋나 손가락이 책을 밀어낸다 (실측 M406).
+            b = self.aabb(path); c = (b[:3] + b[3:]) / 2
+            pos_w, q_w = xf.get_world_pose()
+            Rw = R_from_quat(np.asarray(q_w, float))
+            self.upright_q[path] = np.asarray(q_w, float).copy()
+            self.grasp_local[path] = (Rw.T @ (c - np.asarray(pos_w, float)),
+                                      Rw.T @ np.array([0.0, 0.0, 1.0]),
+                                      (b[5] - b[2]) / 2)
+            d = (b[3] - b[0], b[4] - b[1], b[5] - b[2])
+            if min(d) < 0.005:
+                raise RuntimeError(f"책 {src_path} 의 치수가 비었다 {d} — 참조 파일 확인: {book_ref}")
+            self.dims[path] = d
 
+        # 트레이 칸막이는 두지 않는다: 칸 간격 0.075 m 안에서는 손가락이 지나갈 폭이 남지 않아
+        # 칸막이를 세우면 파지 경로를 막는다 (실측: down 단계 시간 초과). 대신 책 충돌을 상자로 근사해 세워 둔다.
         self.world = World(stage_units_in_meters=1.0, physics_dt=1 / 60, rendering_dt=1 / 60)
         self.robot = SingleArticulation(prim_path=R, name="rf")
         link0_x = float(SingleXFormPrim(R + "/panda_link0").get_world_pose()[0][0])
-        b0 = self.aabb(self.books[0])
-        self.T, self.L, self.W = b0[3] - b0[0], b0[4] - b0[1], b0[5] - b0[2]   # 두께, 길이(세운 높이), 폭(깊이)
+        self.T, self.L, self.W = self.dims[self.books[0]]   # 기본값 (홈 자세·여러 종류일 때의 대표값)
+        self.T_max = max(d[0] for d in self.dims.values())
+        self.W_max = max(d[2] for d in self.dims.values())
         self.shelf_front_y = float(shelf[1])
 
         # 북엔드: 1차 고정 칸마다 한 쌍 (세운 책이 스스로 넘어지는 것 방지 — 칸막이 교훈)
-        floor_z = 0.355 * 1.4
+        floor_z = self.shelf_floor_z = 0.355 * 1.4
         spine_final = self.shelf_front_y + SPINE_INSET
         UsdGeom.Scope.Define(st, "/World/bs_bookends")
+        self.bookends = {}      # place_x → (왼쪽 translate op, 오른쪽 translate op, y, z)
         for k, dx in enumerate(place_dx):
             px = link0_x + dx
-            y0, y1 = spine_final + 0.02, spine_final + self.W
-            for side, cx in (("L", px - self.T / 2 - DIV_GAP - DIV_T / 2), ("R", px + self.T / 2 + DIV_GAP + DIV_T / 2)):
-                cube = UsdGeom.Cube.Define(st, f"/World/bs_bookends/b{k}_{side}")
+            y0, y1 = spine_final + 0.02, spine_final + self.W_max
+            paths = {}
+            for side, sgn in (("L", -1), ("R", +1)):
+                p = f"/World/bs_bookends/b{k}_{side}"
+                cube = UsdGeom.Cube.Define(st, p)
                 cube.CreateSizeAttr(1.0)
-                cube.AddTranslateOp().Set(Gf.Vec3d(cx, (y0 + y1) / 2, floor_z + DIV_H / 2))
+                cube.AddTranslateOp().Set(
+                    Gf.Vec3d(px + sgn * (self.T_max / 2 + DIV_GAP + DIV_T / 2), (y0 + y1) / 2, floor_z + DIV_H / 2))
                 cube.AddScaleOp().Set(Gf.Vec3f(DIV_T, y1 - y0, DIV_H))
                 cube.CreateDisplayColorAttr([Gf.Vec3f(0.2, 0.2, 0.25)])
                 UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
+                # 책 두께에 맞춰 꽂기 직전에 옮긴다 → 정적 콜라이더로 두면 물리에 반영되지 않아 kinematic 강체로
+                UsdPhysics.RigidBodyAPI.Apply(cube.GetPrim()).CreateKinematicEnabledAttr().Set(True)
+                paths[side] = p
+            self.bookends[round(px, 4)] = (paths["L"], paths["R"], (y0 + y1) / 2, floor_z + DIV_H / 2)
 
         if before_reset is not None:
             before_reset(st)      # ROS 그래프 설정 보완 등 — 재생(초기화) 전에 해야 반영된다
@@ -197,15 +247,55 @@ class BookScene:
         self.conf = conf
         self.arm = ArmController(_Backend(self), conf)
 
-        tray_top = DECK_Z + floor_top + self.W
+        tray_top = DECK_Z + floor_top + self.W_max
         self.home_tip = np.array([tray_center[0], tray_center[1], tray_top + 0.30])
         seed = r.get_joint_positions()[self.idx_arm].copy()
         seed[0] = math.atan2(tray_center[1] - l0p[1], tray_center[0] - l0p[0])
         self.q_home, ok = self.ik_joints(self.home_tip, self.DOWN, seed)
-        self.open_tray = self.T / 2 + GRIP_CLEAR
-        say(f"장면 준비: 트레이 칸 {nslots}개, 책 {len(self.books)}권, 치수 두께 {self.T:.3f} 길이 {self.L:.3f} 폭 {self.W:.3f}, 홈 IK {ok}")
+        self.open_tray = self.T_max / 2 + GRIP_CLEAR
+        say(f"장면 준비: 트레이 칸 {nslots}개, 책 {len(self.books)}권, 원본 {len(sources)}종, 홈 IK {ok}")
+        for b in self.books:
+            t, ln, w = self.dims[b]
+            say(f"  {b.rsplit('/', 1)[1]}: 두께 {t:.3f} 세운높이 {ln:.3f} 깊이 {w:.3f}")
 
     # ---------------------------------------------------------------- 도구
+    def upright_quat(self, path, q0, pos):
+        """책을 트레이 기준 자세로 돌리는 쿼터니언을 찾는다.
+
+        에셋마다 원본 자세가 다르므로 90° 회전 조합(24가지)을 시험해
+        x 가 가장 얇고 y 가 가장 긴 자세를 고른다. 물리 시작 전이라 자세만 바꿔 본다.
+        """
+        def mul(a, b):
+            w1, x1, y1, z1 = a; w2, x2, y2, z2 = b
+            return np.array([w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+                             w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+                             w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+                             w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2], float)
+        s = math.sqrt(0.5)
+        step = {"x": np.array([s, s, 0, 0]), "y": np.array([s, 0, s, 0]), "z": np.array([s, 0, 0, s])}
+        cands = []
+        for i in range(4):
+            for j in range(4):
+                for k in range(4):
+                    q = q0
+                    for _ in range(i): q = mul(step["x"], q)
+                    for _ in range(j): q = mul(step["y"], q)
+                    for _ in range(k): q = mul(step["z"], q)
+                    cands.append(q)
+        xf = SingleXFormPrim(path)
+        best, best_score = q0, None
+        for q in cands:
+            xf.set_world_pose(pos, q)
+            b = self.aabb(path)
+            e = np.array([b[3] - b[0], b[4] - b[1], b[5] - b[2]])
+            # 원하는 순서: x 최소, y 최대 → 점수가 낮을수록 좋다
+            score = (e[0] - e.min()) + (e.max() - e[1])
+            if best_score is None or score < best_score:
+                best, best_score = q, score
+            if score < 1e-4:
+                break
+        return best
+
     def aabb(self, p):
         self._cache.Clear()
         return np.array(compute_aabb(self._cache, p, include_children=True), float)
@@ -261,12 +351,23 @@ class BookScene:
     def plan_job(self, book, place_center_world):
         """책 하나를 집어, 꽂힌 뒤 AABB 중심이 place_center_world 가 되도록 꽂는 경로. 홈 → 홈"""
         bb = self.aabb(book); bc = (bb[:3] + bb[3:]) / 2
-        T, Lb, W, DOWN, HORIZ = self.T, self.L, self.W, self.DOWN, self.HORIZ
+        T, Lb, W = self.dims.get(book, (self.T, self.L, self.W))
+        DOWN, HORIZ = self.DOWN, self.HORIZ
+        self.fit_bookends(float(place_center_world[0]), T)
         place_x = float(place_center_world[0])
         y_front = float(place_center_world[1]) - W / 2 - MEASURED_INSET       # 꽂힌 책 중심 → 서가 앞면
-        floor_z = float(place_center_world[2]) - Lb / 2                        # 꽂힌 책 중심 → 칸 바닥
+        # 꽂힌 책 중심 → 칸 바닥. 목표 z 는 표준 책 높이를 가정하고 오므로, 책 높이가 다르면
+        # 그대로 쓰면 책이 칸 바닥에서 뜨거나 파묻힌다. 같은 칸으로 볼 수 있으면 실제 칸 바닥에 맞춘다.
+        floor_z = float(place_center_world[2]) - Lb / 2
+        if abs(floor_z - self.shelf_floor_z) < 0.07:
+            floor_z = self.shelf_floor_z
         spine_final = y_front + SPINE_INSET
         grasp = np.array([bc[0], bc[1], bb[5] - TIP_DOWN])
+        if book in self.grasp_local:
+            c_loc, up_loc, hz = self.grasp_local[book]
+            p_w, q_w = SingleXFormPrim(book).get_world_pose()
+            top = np.asarray(p_w, float) + R_from_quat(np.asarray(q_w, float)) @ (c_loc + up_loc * hz)
+            grasp = np.array([top[0], top[1], top[2] - TIP_DOWN])   # 책 자신의 윗면 중심에서 내려간다
         pre = grasp + np.array([0, 0, 0.13]); lift = grasp + np.array([0, 0, 0.17])
         grip_z = floor_z + Lb / 2 + 0.004
         y_pre = y_front - (W - TIP_DOWN) - 0.03
@@ -292,7 +393,18 @@ class BookScene:
                 return None, 402, f"{name}: 인접점 관절변화 {worst:.3f} rad"
             segs[name] = qs; q = qs[-1]; worst_all = max(worst_all, worst)
         return {"segs": segs, "worst": worst_all, "spine_final": spine_final, "place_x": place_x,
-                "floor_z": floor_z, "book": book}, 0, ""
+                "floor_z": floor_z, "book": book, "dims": (T, Lb, W)}, 0, ""
+
+    def fit_bookends(self, place_x, thickness):
+        """북엔드 한 쌍을 이 책 두께에 맞춘다 (책마다 두께가 달라서 — 꽂기 전에만 옮긴다)"""
+        key = min(self.bookends, key=lambda k: abs(k - place_x)) if self.bookends else None
+        if key is None or abs(key - place_x) > 0.03:
+            return
+        pL, pR, y, z = self.bookends[key]
+        half = thickness / 2 + DIV_GAP + DIV_T / 2
+        q = np.array([1.0, 0.0, 0.0, 0.0])
+        SingleXFormPrim(pL).set_world_pose(np.array([key - half, y, z]), q)
+        SingleXFormPrim(pR).set_world_pose(np.array([key + half, y, z]), q)
 
     # ---------------------------------------------------------------- 실행 조립
     def home_moves(self):
@@ -301,23 +413,39 @@ class BookScene:
                 for q in tucked_joint_moves(q_now, self.q_home, self.conf["poses"]["stow"])]
 
     def job_sequence(self, name, plan):
-        s = plan["segs"]; book = plan["book"]; o = self.open_tray
+        s = plan["segs"]; book = plan["book"]
+        T = plan.get("dims", (self.T, self.L, self.W))[0]
+        o = T / 2 + GRIP_CLEAR
         return Sequence(name, [
             named(SetGripper(o), "approach"), JointPath("approach", s["approach"][1:], 0.5),
             JointPath("down", s["down"][1:], 0.25),
-            named(SetGripper(max(0.0, self.T / 2 - 0.004), settle_s=0.6), "grip"),
+            # 얇은 책은 4 mm 를 그대로 조이면 손가락이 책을 밀어낸다 → 두께에 비례해 줄인다
+            named(SetGripper(max(0.0, T / 2 - min(0.004, 0.15 * T)), settle_s=0.6), "grip"),
             Call("attach", lambda: self.attach(book)),
+            Call("attach", lambda: self.trace(book, "파지")),
             JointPath("lift", s["lift"][1:], 0.25),
             JointPath("carry_rotate", s["carry_rotate"][1:], 0.35), JointPath("wedge", s["wedge"][1:], 0.35),
             Call("detach", self.detach), named(SetGripper(o, settle_s=0.4), "release"), named(Wait(0.4), "release"),
+            Call("release", lambda: self.trace(book, "놓음")),
             JointPath("back", s["back"][1:], 0.3), named(SetGripper(0.0, settle_s=0.4), "touch"),
             JointPath("touch", s["touch"][1:], 0.3), JointPath("push", s["push"][1:], 0.12), named(Wait(0.3), "push"),
             JointPath("retreat", s["retreat"][1:], 0.35), named(SetGripper(o, settle_s=0.3), "retreat"),
             JointPath("return", s["return"][1:], 0.5),
         ])
 
+    def trace(self, book, tag):
+        """문제를 찾을 때 책 위치를 단계별로 남긴다 (책 종류가 섞이면 실패 지점이 달라진다)"""
+        b = self.aabb(book); c = (b[:3] + b[3:]) / 2
+        self.say(f"  [{tag}] {book.rsplit('/', 1)[1]} 중심 {np.round(c, 3).tolist()} "
+                 f"크기 {np.round([b[3] - b[0], b[4] - b[1], b[5] - b[2]], 3).tolist()}")
+
     def attach(self, book):
         """파지 순간 손과 책을 고정 조인트로 붙인다 (지침 허용 방식, 마찰 파지는 손목 회전에서 실패 확인)"""
+        # 트레이에서 몇 도 기운 채로 잡으면 그 기울기가 그대로 서가까지 간다 (꽂힘 판정 실패).
+        # 고정 조인트로 붙이기 직전에 세운 자세로 맞춘다 (자세만, 위치는 그대로).
+        if book in self.upright_q:
+            p_now = SingleXFormPrim(book).get_world_pose()[0]
+            SingleXFormPrim(book).set_world_pose(np.asarray(p_now, float), self.upright_q[book])
         hp, hq = SingleXFormPrim(R + "/panda_hand").get_world_pose(); bp, bq = SingleXFormPrim(book).get_world_pose()
         Rh = R_from_quat(hq); rel_p = Rh.T @ (np.asarray(bp) - np.asarray(hp)); rel_q = quat_from_R(Rh.T @ R_from_quat(bq))
         j = UsdPhysics.FixedJoint.Define(self.stage, GRASP_JOINT)
@@ -341,9 +469,10 @@ class BookScene:
     def verify(self, plan):
         """꽂힌 책 판정 (multi_book 과 같은 기준)"""
         bb = self.aabb(plan["book"])
+        _, Lb, W = plan.get("dims", (self.T, self.L, self.W))
         checks = {
-            "upright": abs((bb[5] - bb[2]) - self.L) < 0.02,
-            "depth": abs((bb[4] - bb[1]) - self.W) < 0.02,
+            "upright": abs((bb[5] - bb[2]) - Lb) < 0.02,
+            "depth": abs((bb[4] - bb[1]) - W) < 0.02,
             "spine": abs(bb[1] - plan["spine_final"]) < 0.015,
             "x": abs((bb[0] + bb[3]) / 2 - plan["place_x"]) < 0.015,
             "floor": abs(bb[2] - plan["floor_z"]) < 0.03,
