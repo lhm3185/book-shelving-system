@@ -61,34 +61,16 @@ class TaskManagerNode(Node):
         """Initialize the task manager."""
         super().__init__("task_manager_node")
 
-        package_share = Path(
-            get_package_share_directory(
-                "shelving_system"
-            )
-        )
+        package_share = Path(get_package_share_directory("shelving_system"))
         default_config_dir = package_share / "config"
 
-        self.declare_parameter(
-            "tray_job_topic",
-            "/return_machine/tray_job",
-        )
-        self.declare_parameter(
-            "status_topic",
-            "/system/state",
-        )
-        self.declare_parameter(
-            "navigation_action",
-            "/navigate_to_target",
-        )
+        self.declare_parameter("tray_job_topic", "/return_machine/tray_job") 
+        self.declare_parameter("status_topic", "/system/state")
 
-        self.declare_parameter(
-            'perception_action',
-            '/detect_target_slot',
-        )
-        self.declare_parameter(
-            'minimum_slot_confidence',
-            0.70,
-        )
+        self.declare_parameter("navigation_action", "/navigate_to_target")
+
+        self.declare_parameter('perception_action', '/detect_target_slot')
+        self.declare_parameter('minimum_slot_confidence', 0.70)
 
         self.declare_parameter('manipulation_action', '/place_book')
         self.declare_parameter('insertion_speed',0.03)
