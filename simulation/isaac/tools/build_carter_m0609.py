@@ -28,6 +28,8 @@ ap.add_argument("--out", default=os.path.expanduser("~/Desktop/carter_m0609.usd"
 ap.add_argument("--mount-xyz", type=float, nargs=3, default=[0.0, 0.0, 0.0],
                 help="팔을 올릴 위치 (비우면 carter 상판 중앙 자동)")
 ap.add_argument("--mount-yaw", type=float, default=0.0, help="팔 방향 (도)")
+ap.add_argument("--fix-base", choices=["on", "off"], default="on",
+                help="on: 베이스를 월드에 고정 (시연은 정지 상태라 기본값). off: 바퀴로 굴러다님")
 args = ap.parse_args()
 
 from isaacsim import SimulationApp  # noqa: E402
@@ -153,6 +155,12 @@ joint.CreateLocalRot0Attr().Set(Gf.Quatf(math.cos(math.radians(args.mount_yaw) /
 joint.CreateLocalPos1Attr().Set(Gf.Vec3f(0, 0, 0))
 joint.CreateLocalRot1Attr().Set(Gf.Quatf(1, Gf.Vec3f(0, 0, 0)))
 say(f"고정 조인트 생성: {chassis[0].split('/')[-1]} → {arm_base[0].split('/')[-1]}, 로컬 {np.round(local, 3).tolist()}")
+
+# 5) 시연은 로봇 정지 상태다. 바퀴를 속도 0 으로 눌러도 미끄러지므로(실측 4.1 rad) 월드에 고정한다
+if args.fix_base == "on":
+    fix = UsdPhysics.FixedJoint.Define(stage, ROOT + "/base_fix")
+    fix.CreateBody1Rel().SetTargets([chassis[0]])     # body0 없음 = 월드
+    say("베이스를 월드에 고정 (--fix-base off 로 끄면 주행 가능)")
 
 joints = [(p.GetName(), p.GetTypeName()) for p in Usd.PrimRange(stage.GetPrimAtPath(ROOT)) if p.IsA(UsdPhysics.Joint)]
 rev = [n for n, t in joints if "Revolute" in str(t)]

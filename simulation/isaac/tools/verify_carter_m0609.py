@@ -53,7 +53,9 @@ names = list(robot.dof_names)
 say(f"articulation 1개 인식, DOF {len(names)}개")
 say(f"  관절: {names}")
 
-arm = [n for n in names if n.startswith("joint_") and n.split("_")[-1].isdigit() and int(n.split("_")[-1]) <= 6]
+# DOF 순서는 USD 순서라 joint_1~6 이 섞여 나온다. 번호로 정렬해야 지령이 엉키지 않는다 (실측)
+arm = sorted([n for n in names if n.startswith("joint_") and n.split("_")[-1].isdigit()
+              and int(n.split("_")[-1]) <= 6], key=lambda n: int(n.split("_")[-1]))
 wheels = [n for n in names if "wheel" in n or "caster" in n or "swing" in n]
 grip = [n for n in names if "finger" in n or "knuckle" in n]
 say(f"  팔 {len(arm)}개 {arm} / 바퀴·캐스터 {len(wheels)}개 / 그리퍼 {len(grip)}개 {grip}")
