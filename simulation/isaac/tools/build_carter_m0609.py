@@ -28,6 +28,10 @@ ap.add_argument("--out", default=os.path.expanduser("~/Desktop/carter_m0609.usd"
 ap.add_argument("--mount-xyz", type=float, nargs=3, default=[0.0, 0.0, 0.0],
                 help="팔을 올릴 위치 (비우면 carter 상판 중앙 자동)")
 ap.add_argument("--mount-yaw", type=float, default=0.0, help="팔 방향 (도)")
+ap.add_argument("--arm-stiffness", type=float, default=1.0e5)
+ap.add_argument("--arm-damping", type=float, default=1.0e4)
+ap.add_argument("--grip-stiffness", type=float, default=1.0e3)
+ap.add_argument("--grip-damping", type=float, default=1.0e2)
 ap.add_argument("--fix-base", choices=["on", "off"], default="on",
                 help="on: 베이스를 월드에 고정 (시연은 정지 상태라 기본값). off: 바퀴로 굴러다님")
 args = ap.parse_args()
@@ -156,7 +160,26 @@ joint.CreateLocalPos1Attr().Set(Gf.Vec3f(0, 0, 0))
 joint.CreateLocalRot1Attr().Set(Gf.Quatf(1, Gf.Vec3f(0, 0, 0)))
 say(f"고정 조인트 생성: {chassis[0].split('/')[-1]} → {arm_base[0].split('/')[-1]}, 로컬 {np.round(local, 3).tolist()}")
 
-# 5) 시연은 로봇 정지 상태다. 바퀴를 속도 0 으로 눌러도 미끄러지므로(실측 4.1 rad) 월드에 고정한다
+# 5) 팔 구동 게인 — URDF 임포트 값이 너무 낮아(강성 26~102) 위치 지령을 따라가지 못한다 (실측).
+#    위치 제어가 되도록 올린다. 그리퍼는 물체를 쥐는 힘이라 낮게 둔다.
+ARM_JOINTS = {f"joint_{i}" for i in range(1, 7)}
+GRIP_JOINTS = {"finger_joint", "left_inner_knuckle_joint", "left_outer_knuckle_joint",
+               "right_inner_knuckle_joint", "right_inner_finger_joint", "left_inner_finger_joint"}
+tuned = []
+for p in Usd.PrimRange(stage.GetPrimAtPath(ARM)):
+    name = p.GetName()
+    if name not in ARM_JOINTS and name not in GRIP_JOINTS:
+        continue
+    drive = UsdPhysics.DriveAPI.Get(p, "angular") or UsdPhysics.DriveAPI.Apply(p, "angular")
+    k, c = ((args.arm_stiffness, args.arm_damping) if name in ARM_JOINTS
+            else (args.grip_stiffness, args.grip_damping))
+    drive.CreateTypeAttr().Set("force")
+    drive.CreateStiffnessAttr().Set(float(k))
+    drive.CreateDampingAttr().Set(float(c))
+    tuned.append(name)
+say(f"구동 게인 조정 {len(tuned)}개 (팔 강성 {args.arm_stiffness:.0e}, 그리퍼 {args.grip_stiffness:.0e})")
+
+# 6) 시연은 로봇 정지 상태다. 바퀴를 속도 0 으로 눌러도 미끄러지므로(실측 4.1 rad) 월드에 고정한다
 if args.fix_base == "on":
     fix = UsdPhysics.FixedJoint.Define(stage, ROOT + "/base_fix")
     fix.CreateBody1Rel().SetTargets([chassis[0]])     # body0 없음 = 월드
