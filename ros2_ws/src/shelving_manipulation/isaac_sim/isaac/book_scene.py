@@ -148,6 +148,7 @@ class BookScene:
         self.dims = {}          # 책마다 치수가 다르다 (두께 T, 세운 높이 L, 깊이 W)
         self.grasp_local = {}   # 책 좌표계의 (중심, 위 방향, 반높이)
         self.upright_q = {}     # 트레이에서 세운 자세
+        self.slot_pose = {}     # 트레이 칸에 놓았을 때의 (위치, 자세) — 데이터 촬영에서 재배치에 쓴다
         for i in range(min(n_books, nslots)):
             path = f"/World/bs_books/book_{i}"
             src_path, book_ref, src_q = sources[i % len(sources)]
@@ -169,12 +170,14 @@ class BookScene:
             target = np.array([slot_x[i], tray_center[1], DECK_Z + floor_top + (b[5] - b[2]) / 2 + 0.002])
             pos, q = xf.get_world_pose(); xf.set_world_pose(np.array(pos) + (target - c), q)
             self.books.append(path)
+            self.slot_pose[path] = (target.copy(), None)   # 트레이 칸 자세 (자세는 아래에서 채운다)
             # 파지점을 책 자신의 좌표로 저장한다. 트레이에서 몇 도만 기울어도
             # AABB 중심은 실제 책 중심과 어긋나 손가락이 책을 밀어낸다 (실측 M406).
             b = self.aabb(path); c = (b[:3] + b[3:]) / 2
             pos_w, q_w = xf.get_world_pose()
             Rw = R_from_quat(np.asarray(q_w, float))
             self.upright_q[path] = np.asarray(q_w, float).copy()
+            self.slot_pose[path] = (np.asarray(pos_w, float).copy(), np.asarray(q_w, float).copy())
             self.grasp_local[path] = (Rw.T @ (c - np.asarray(pos_w, float)),
                                       Rw.T @ np.array([0.0, 0.0, 1.0]),
                                       (b[5] - b[2]) / 2)
@@ -188,6 +191,9 @@ class BookScene:
         self.world = World(stage_units_in_meters=1.0, physics_dt=1 / 60, rendering_dt=1 / 60)
         self.robot = SingleArticulation(prim_path=R, name="rf")
         link0_x = float(SingleXFormPrim(R + "/panda_link0").get_world_pose()[0][0])
+        self.tray_floor_z = DECK_Z + floor_top
+        self.slot_x = slot_x
+        self.tray_y = float(tray_center[1])
         self.T, self.L, self.W = self.dims[self.books[0]]   # 기본값 (홈 자세·여러 종류일 때의 대표값)
         self.T_max = max(d[0] for d in self.dims.values())
         self.W_max = max(d[2] for d in self.dims.values())
