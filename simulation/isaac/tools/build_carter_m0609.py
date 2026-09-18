@@ -44,6 +44,9 @@ ap.add_argument("--arm-stiffness", type=float, default=1.0e7)
 ap.add_argument("--arm-damping", type=float, default=1.0e5)
 ap.add_argument("--grip-stiffness", type=float, default=1.0e3)
 ap.add_argument("--grip-damping", type=float, default=1.0e2)
+ap.add_argument("--zero-arm-targets", choices=["on", "off"], default="on",
+                help="on(기본): 팔 드라이브 목표를 시작 자세(0°)에 맞춘다. off 로 두면 "
+                     "재생하는 순간 팔이 90° 로 튀며 로봇이 넘어진다 (2026-09-18 실측)")
 ap.add_argument("--fix-base", choices=["on", "off"], default="off",
                 help="off(기본): 주행 가능 — AMR 담당이 라이다·주행 시험을 이어서 할 수 있어야 한다. "
                      "on: 베이스를 월드에 고정 (로봇팔 단독 시연용)")
@@ -174,15 +177,22 @@ if not chassis or not arm_base:
 joint = UsdPhysics.FixedJoint.Define(stage, ROOT + "/arm_mount")
 joint.CreateBody0Rel().SetTargets([chassis[0]])
 joint.CreateBody1Rel().SetTargets([arm_base[0]])
-ch = aabb(chassis[0])
-ch_mid = (ch[:3] + ch[3:]) / 2
-local = mount - ch_mid
+# 조인트의 로컬 위치는 **각 바디의 프레임 원점 기준**이다. 예전에는 chassis 의 AABB 중심을
+# 기준으로 계산했는데, chassis_link 의 프레임 원점은 (0,0,0) 이고 AABB 중심은 (-0.234,0,0.315)
+# 이라 **39 cm 어긋났다.** 재생하는 순간 물리가 팔을 그만큼 끌어당겨 로봇이 넘어지고,
+# 스케일을 키우면 그 힘이 커져 날아갔다 (2026-09-18 실측). 실제 상대 변환에서 직접 뽑는다.
+ch_w = UsdGeom.Xformable(stage.GetPrimAtPath(chassis[0])).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+ab_w = UsdGeom.Xformable(stage.GetPrimAtPath(arm_base[0])).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+rel = ab_w * ch_w.GetInverse()
+local = np.array(rel.ExtractTranslation(), float)
+qrel = rel.ExtractRotationQuat()
 joint.CreateLocalPos0Attr().Set(Gf.Vec3f(*[float(v) for v in local]))
-joint.CreateLocalRot0Attr().Set(Gf.Quatf(math.cos(math.radians(args.mount_yaw) / 2), 0, 0,
-                                         math.sin(math.radians(args.mount_yaw) / 2)))
+joint.CreateLocalRot0Attr().Set(Gf.Quatf(float(qrel.GetReal()),
+                                         Gf.Vec3f(*[float(v) for v in qrel.GetImaginary()])))
 joint.CreateLocalPos1Attr().Set(Gf.Vec3f(0, 0, 0))
 joint.CreateLocalRot1Attr().Set(Gf.Quatf(1, Gf.Vec3f(0, 0, 0)))
-say(f"고정 조인트 생성: {chassis[0].split('/')[-1]} → {arm_base[0].split('/')[-1]}, 로컬 {np.round(local, 3).tolist()}")
+say(f"고정 조인트 생성: {chassis[0].split('/')[-1]} → {arm_base[0].split('/')[-1]}, "
+    f"로컬 {np.round(local, 4).tolist()} (프레임 원점 기준)")
 
 # 4b) 장착 어댑터(리서) — 팔이 공중에 떠 보이는 것을 없앤다
 #
@@ -225,6 +235,7 @@ ARM_JOINTS = {f"joint_{i}" for i in range(1, 7)}
 GRIP_JOINTS = {"finger_joint", "left_inner_knuckle_joint", "left_outer_knuckle_joint",
                "right_inner_knuckle_joint", "right_inner_finger_joint", "left_inner_finger_joint"}
 tuned = []
+retargeted = []
 for p in Usd.PrimRange(stage.GetPrimAtPath(ARM)):
     name = p.GetName()
     if name not in ARM_JOINTS and name not in GRIP_JOINTS:
@@ -235,8 +246,20 @@ for p in Usd.PrimRange(stage.GetPrimAtPath(ARM)):
     drive.CreateTypeAttr().Set("force")
     drive.CreateStiffnessAttr().Set(float(k))
     drive.CreateDampingAttr().Set(float(c))
+    # 드라이브 목표를 **재생 시작 자세(0°)에 맞춘다**.
+    # URDF 임포트가 joint_3·joint_5 의 목표를 90° 로 써 두었는데 실제 시작 자세는 0° 다.
+    # 그대로 두면 강성 1e7 이 재생 순간 팔을 85° 확 끌어당겨 로봇이 통째로 넘어진다
+    # (2026-09-18 실측). 무게중심 문제가 아니었다.
+    # 반대로 시작 자세를 90° 로 바꾸는 방법(JointStateAPI)은 로봇 전체를 90° 눕혀 버려서 못 쓴다.
+    if name in ARM_JOINTS and args.zero_arm_targets == "on":
+        before = drive.GetTargetPositionAttr().Get()
+        drive.CreateTargetPositionAttr().Set(0.0)
+        if before not in (None, 0.0):
+            retargeted.append(f"{name} {before}°→0°")
     tuned.append(name)
 say(f"구동 게인 조정 {len(tuned)}개 (팔 강성 {args.arm_stiffness:.0e}, 그리퍼 {args.grip_stiffness:.0e})")
+if retargeted:
+    say(f"드라이브 목표를 시작 자세에 맞춤: {retargeted}")
 
 # 6) 시연은 로봇 정지 상태다. 바퀴를 속도 0 으로 눌러도 미끄러지므로(실측 4.1 rad) 월드에 고정한다
 if args.fix_base == "on":
