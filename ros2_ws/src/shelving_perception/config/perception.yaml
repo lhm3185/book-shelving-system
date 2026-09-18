@@ -15,6 +15,8 @@ vision_manager:
     model_path: /home/rokey/도서관/260918_bag_vision/model/book_tray_best.pt
     book_topic: /perception/books
     book_pose_topic: /perception/book_pose
+    debug_image_topic: /perception/debug_image
+    show_debug_window: true
     gripper_roll: 0.0
     gripper_pitch: 0.0
     gripper_yaw_offset: 0.0
@@ -32,4 +34,3 @@ vision_manager:
     # pre_insert_offset: 0.05
     # target_confidence: 1.0
     confidence_threshold: 0.75
-

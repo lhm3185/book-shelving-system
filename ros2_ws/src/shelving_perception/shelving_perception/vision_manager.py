@@ -103,6 +103,12 @@ class VisionManager(Node):
         # 책의 위치·자세를 발행할 토픽입니다.
         self.book_pose_topic = self.declare_parameter(
             'book_pose_topic', '/perception/book_pose').value
+        # 검출 상자와 confidence를 그린 디버그 영상을 발행할 토픽입니다.
+        self.debug_image_topic = self.declare_parameter(
+            'debug_image_topic', '/perception/debug_image').value
+        # True이면 vision_manager가 실행 중인 PC에 OpenCV 검출 창을 표시합니다.
+        self.show_debug_window = bool(self.declare_parameter(
+            'show_debug_window', True).value)
         # 결과 pose에 적용할 gripper roll 보정값입니다.
         self.gripper_roll = float(self.declare_parameter(
             'gripper_roll', 0.0).value)
@@ -187,6 +193,20 @@ class VisionManager(Node):
         # 책마다 변환된 pose를 PoseStamped로 발행합니다.
         self.book_pose_pub = self.create_publisher(
             PoseStamped, self.book_pose_topic, 10)
+        # 검출 결과를 그린 디버그 영상을 Image 메시지로 발행합니다.
+        self.debug_image_pub = self.create_publisher(
+            Image, self.debug_image_topic, 10)
+        # OpenCV 창을 한 번 생성해 실행 직후 검출 화면을 준비합니다.
+        self._debug_window_name = 'vision_manager detections'
+        self._debug_window_available = self.show_debug_window
+        if self._debug_window_available:
+            try:
+                cv2.namedWindow(self._debug_window_name, cv2.WINDOW_NORMAL)
+            except cv2.error as error:
+                # 디스플레이가 없는 PC에서도 ROS 노드는 계속 실행되게 합니다.
+                self._debug_window_available = False
+                self.get_logger().warning(
+                    f'Could not open debug window: {error}')
         # self.target_pub = self.create_publisher(PointStamped, self.target_topic, 10)
         # self.target_slot_pub = self.create_publisher(
         #     TargetSlot, self.target_slot_topic, 10)
@@ -392,6 +412,8 @@ class VisionManager(Node):
                 cy,
                 depth_scale,
             )
+            # 원본 RGB 영상에 검출 결과를 그려 디버그 토픽으로 발행합니다.
+            self._publish_debug_image(rgb_image, rgb_msg.header, detections)
         except (IndexError, ValueError) as error:
             # 모델 출력 또는 깊이 계산 오류를 action 실패 결과로 전달합니다.
             self.get_logger().error(f'Book detection failed: {error}')
@@ -509,6 +531,53 @@ class VisionManager(Node):
                 f'Could not transform {source_frame} to '
                 f'{self.target_frame}: {error}')
             return None
+
+    def _publish_debug_image(self, rgb_image, header, detections):
+        """검출 상자와 confidence를 그린 영상을 ROS Image로 발행합니다."""
+        # 원본 영상을 복사해 디버그 표시가 원본 데이터에 영향을 주지 않게 합니다.
+        debug_image = rgb_image.copy()
+        # 검출된 모든 상자에 대해 시각화 정보를 그립니다.
+        for detection in detections:
+            # 검출 상자의 픽셀 좌표를 읽습니다.
+            x1, y1, x2, y2 = detection['box']
+            # 책 상자를 초록색 사각형으로 표시합니다.
+            cv2.rectangle(
+                debug_image,
+                (x1, y1),
+                (x2, y2),
+                (0, 255, 0),
+                2,
+            )
+            # 화면에 표시할 confidence 문자열을 만듭니다.
+            label = f"book {detection['confidence']:.2f}"
+            # 상자 위쪽에 검출 class와 confidence를 표시합니다.
+            cv2.putText(
+                debug_image,
+                label,
+                (x1, max(20, y1 - 8)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (0, 255, 0),
+                2,
+                cv2.LINE_AA,
+            )
+        # OpenCV BGR 영상을 ROS Image 메시지로 변환합니다.
+        debug_msg = self.bridge.cv2_to_imgmsg(debug_image, encoding='bgr8')
+        # 원본 RGB와 같은 timestamp/frame을 유지합니다.
+        debug_msg.header = header
+        # 다른 PC의 rqt_image_view가 구독할 수 있도록 발행합니다.
+        self.debug_image_pub.publish(debug_msg)
+        # GUI가 사용 가능하면 같은 디버그 영상을 OpenCV 창에도 표시합니다.
+        if self._debug_window_available:
+            try:
+                cv2.imshow(self._debug_window_name, debug_image)
+                # OpenCV 창 이벤트를 처리하고 화면을 갱신합니다.
+                cv2.waitKey(1)
+            except cv2.error as error:
+                # GUI 오류가 반복되지 않도록 이후 창 표시를 비활성화합니다.
+                self._debug_window_available = False
+                self.get_logger().warning(
+                    f'Disabling debug window: {error}')
 
     def _make_book_pose(self, xyz, source_frame, stamp, image_angle):
         """책 위치와 영상 각도로 target_frame 기준 PoseStamped를 만듭니다."""

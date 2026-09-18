@@ -13,9 +13,10 @@ vision_manager:
     depth_scale: 0.0
     sync_slop: 0.1
     book_pose_topic: /perception/book_pose
+    debug_image_topic: /perception/debug_image
+    show_debug_window: true
     gripper_roll: 0.0
     gripper_pitch: 0.0
     gripper_yaw_offset: 0.0
     insertion_depth: 0.25
     pre_insert_offset: 0.05
-
