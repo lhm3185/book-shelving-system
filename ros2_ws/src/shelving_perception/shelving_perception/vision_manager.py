@@ -52,7 +52,8 @@ from tf2_ros import Buffer, TransformException, TransformListener
 
 # 깊이값을 이용해 책의 3차원 위치를 계산하는 보조 클래스입니다.
 from .book_detector import BookDetector
-# from .target_detector import TargetDetector
+# 깊이 영상에서 책장 빈 단을 찾는 보조 클래스입니다.
+from .target_detector import TargetDetector
 
 
 
@@ -106,9 +107,26 @@ class VisionManager(Node):
         # 검출 상자와 confidence를 그린 디버그 영상을 발행할 토픽입니다.
         self.debug_image_topic = self.declare_parameter(
             'debug_image_topic', '/perception/debug_image').value
+        # 책장 빈 단의 3D 점을 발행할 토픽입니다.
+        self.empty_slot_topic = self.declare_parameter(
+            'empty_slot_topic', '/perception/empty_shelf_position').value
         # True이면 vision_manager가 실행 중인 PC에 OpenCV 검출 창을 표시합니다.
         self.show_debug_window = bool(self.declare_parameter(
             'show_debug_window', True).value)
+        # 책장 segmentation 모델의 경로입니다.
+        self.shelf_model_path = self.declare_parameter(
+            'shelf_model_path',
+            '/home/rokey/livrary_datas/260918_train/best.pt',
+        ).value
+        # 책장 검출을 인정할 최소 confidence입니다.
+        self.shelf_confidence_threshold = float(self.declare_parameter(
+            'shelf_confidence_threshold', 0.50).value)
+        # 현재 학습된 책장은 5단이므로 기본값을 5로 둡니다.
+        self.shelf_row_count = int(self.declare_parameter(
+            'shelf_row_count', 5).value)
+        # 책 표면과 빈 칸의 배경 깊이를 구분할 최소 차이(m)입니다.
+        self.shelf_depth_margin = float(self.declare_parameter(
+            'shelf_depth_margin', 0.05).value)
         # 결과 pose에 적용할 gripper roll 보정값입니다.
         self.gripper_roll = float(self.declare_parameter(
             'gripper_roll', 0.0).value)
@@ -162,9 +180,15 @@ class VisionManager(Node):
 
         # 학습된 YOLO 모델을 메모리에 로드합니다.
         self.model = YOLO(self.model_path)
+        # 책장 segmentation YOLO 모델을 별도로 로드합니다.
+        self.shelf_model = YOLO(self.shelf_model_path)
         # 검출 상자와 깊이로 3차원 좌표를 계산하는 객체를 생성합니다.
         self.book_detector = BookDetector()
-        # self.target_detector = TargetDetector(self.scan_radius)
+        # 책장 각 단의 빈 공간을 깊이로 판단하는 객체를 생성합니다.
+        self.target_detector = TargetDetector(
+            row_count=self.shelf_row_count,
+            depth_margin=self.shelf_depth_margin,
+        )
         # TF 변환을 조회할 버퍼와 listener를 생성합니다.
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -196,6 +220,9 @@ class VisionManager(Node):
         # 검출 결과를 그린 디버그 영상을 Image 메시지로 발행합니다.
         self.debug_image_pub = self.create_publisher(
             Image, self.debug_image_topic, 10)
+        # 찾은 빈 단마다 카메라/로봇 기준 3D 점을 발행합니다.
+        self.empty_slot_pub = self.create_publisher(
+            PointStamped, self.empty_slot_topic, 10)
         # OpenCV 창을 한 번 생성해 실행 직후 검출 화면을 준비합니다.
         self._debug_window_name = 'vision_manager detections'
         self._debug_window_available = self.show_debug_window
@@ -412,8 +439,29 @@ class VisionManager(Node):
                 cy,
                 depth_scale,
             )
-            # 원본 RGB 영상에 검출 결과를 그려 디버그 토픽으로 발행합니다.
-            self._publish_debug_image(rgb_image, rgb_msg.header, detections)
+            # 책장 전체의 bbox와 클래스를 책장 YOLO 모델로 검출합니다.
+            shelf_detection = self._detect_shelf(rgb_image)
+            # 책장 bbox 내부의 각 단을 Depth로 검사해 빈 단을 계산합니다.
+            empty_slots = []
+            if shelf_detection is not None:
+                empty_slots = self.target_detector.find_empty_slots(
+                    depth_image,
+                    shelf_detection['box'],
+                    fx,
+                    fy,
+                    cx,
+                    cy,
+                    depth_scale,
+                    shelf_detection['class_name'],
+                )
+            # 책과 책장 검출 결과를 화면과 debug image 토픽에 표시합니다.
+            self._publish_debug_image(
+                rgb_image,
+                rgb_msg.header,
+                detections,
+                shelf_detection,
+                empty_slots,
+            )
         except (IndexError, ValueError) as error:
             # 모델 출력 또는 깊이 계산 오류를 action 실패 결과로 전달합니다.
             self.get_logger().error(f'Book detection failed: {error}')
@@ -469,41 +517,70 @@ class VisionManager(Node):
                 f"center={target['center']}, "
                 f"yaw={target['image_angle']:.3f} rad")
 
-        # action 요청이었다면 가장 신뢰도 높은 책을 action 결과로 만듭니다.
-        if active_goal is not None:
-            self._complete_action_from_books(
-                active_goal,
-                detected_targets,
+        # 찾은 빈 단들을 하나씩 target_frame으로 변환하고 토픽으로 발행합니다.
+        transformed_empty_slots = []
+        for empty_slot in empty_slots:
+            empty_point = self._transform_xyz(
+                empty_slot['xyz'],
                 rgb_msg.header.frame_id,
                 rgb_msg.header.stamp,
             )
+            if empty_point is None:
+                continue
+            empty_msg = PointStamped()
+            empty_msg.header = empty_point.header
+            empty_msg.point = empty_point.point
+            self.empty_slot_pub.publish(empty_msg)
+            transformed_empty_slots.append(empty_point)
+            self.get_logger().info(
+                f"Empty shelf row={empty_slot['row_index']}: "
+                f"xyz=({empty_point.point.x:.3f}, "
+                f"{empty_point.point.y:.3f}, "
+                f"{empty_point.point.z:.3f})")
 
-        # Shelf targeting is disabled for the book-only validation stage.
-        # scan_xyz = self._scan_position(
-        #     depth_image, fx, fy, cx, cy, depth_scale)
-        # empty_position = self.target_detector.process(detected_targets, scan_xyz)
-        # if empty_position is None:
-        #     self.get_logger().info('No placeable empty shelf position found')
-        #     return
-        #
-        # target_point = self._transform_xyz(
-        #     empty_position['xyz'], rgb_msg.header.frame_id, rgb_msg.header.stamp)
-        # if target_point is None:
-        #     return
-        #
-        # self.target_pub.publish(target_point)
-        # target_slot = TargetSlot()
-        # target_slot.header = target_point.header
-        # target_slot.pose.position.x = target_point.point.x
-        # target_slot.pose.position.y = target_point.point.y
-        # target_slot.pose.position.z = target_point.point.z
-        # target_slot.pose.orientation.w = 1.0
-        # target_slot.available_width = self.slot_width
-        # target_slot.available_height = self.slot_height
-        # target_slot.insertion_depth = self.insertion_depth
-        # target_slot.pre_insert_offset = self.pre_insert_offset
-        # target_slot.confidence = self.target_confidence
-        # self.target_slot_pub.publish(target_slot)
+        # action 요청이었다면 첫 번째 빈 단을 TargetSlot 결과로 반환합니다.
+        if active_goal is not None:
+            self._complete_action_from_empty_slots(
+                active_goal,
+                transformed_empty_slots,
+            )
+
+    def _detect_shelf(self, rgb_image):
+        """책장 YOLO 모델에서 가장 신뢰도 높은 책장 검출을 반환합니다."""
+        # 책장 모델의 결과를 저장할 후보 목록입니다.
+        candidates = []
+        # RGB 이미지에서 책장 segmentation을 수행합니다.
+        results = self.shelf_model(rgb_image, verbose=False)
+        # 모델 결과 묶음을 순회합니다.
+        for result in results:
+            # 현재 결과의 모든 bounding box를 순회합니다.
+            for box in result.boxes:
+                # 책장 검출 confidence를 실수로 변환합니다.
+                confidence = float(box.conf[0])
+                # 낮은 confidence 결과는 제거합니다.
+                if confidence < self.shelf_confidence_threshold:
+                    continue
+                # 모델 class 번호를 읽습니다.
+                class_id = int(box.cls[0])
+                # class 번호를 shelf_open 등의 이름으로 변환합니다.
+                class_name = self.shelf_model.names[class_id]
+                # 책장 클래스가 아니면 무시합니다.
+                if not class_name.startswith('shelf_'):
+                    continue
+                # 책장 bbox를 정수 픽셀 좌표로 저장합니다.
+                shelf_box = tuple(map(int, box.xyxy[0]))
+                # 후보를 confidence 순서로 선택할 수 있게 저장합니다.
+                candidates.append({
+                    'box': shelf_box,
+                    'class_name': class_name,
+                    'confidence': confidence,
+                })
+
+        # 검출된 책장이 없으면 None을 반환합니다.
+        if not candidates:
+            return None
+        # 가장 신뢰도가 높은 책장 하나를 선택합니다.
+        return max(candidates, key=lambda candidate: candidate['confidence'])
 
     def _transform_xyz(self, xyz, source_frame, stamp):
         """카메라 기준 점을 target_frame 기준 점으로 변환합니다."""
@@ -532,8 +609,15 @@ class VisionManager(Node):
                 f'{self.target_frame}: {error}')
             return None
 
-    def _publish_debug_image(self, rgb_image, header, detections):
-        """검출 상자와 confidence를 그린 영상을 ROS Image로 발행합니다."""
+    def _publish_debug_image(
+        self,
+        rgb_image,
+        header,
+        detections,
+        shelf_detection=None,
+        empty_slots=None,
+    ):
+        """책장·책·빈 단 표시를 그린 영상을 ROS Image로 발행합니다."""
         # 원본 영상을 복사해 디버그 표시가 원본 데이터에 영향을 주지 않게 합니다.
         debug_image = rgb_image.copy()
         # 검출된 모든 상자에 대해 시각화 정보를 그립니다.
@@ -558,6 +642,41 @@ class VisionManager(Node):
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.55,
                 (0, 255, 0),
+                2,
+                cv2.LINE_AA,
+            )
+        # 책장 검출 결과가 있으면 파란색 bbox로 표시합니다.
+        if shelf_detection is not None:
+            x1, y1, x2, y2 = shelf_detection['box']
+            cv2.rectangle(
+                debug_image,
+                (x1, y1),
+                (x2, y2),
+                (255, 0, 0),
+                2,
+            )
+            cv2.putText(
+                debug_image,
+                f"{shelf_detection['class_name']} "
+                f"{shelf_detection['confidence']:.2f}",
+                (x1, min(debug_image.shape[0] - 10, y2 + 20)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (255, 0, 0),
+                2,
+                cv2.LINE_AA,
+            )
+        # 빈 단의 중심 픽셀을 빨간색 원으로 표시합니다.
+        for empty_slot in empty_slots or []:
+            u, v = empty_slot['pixel']
+            cv2.circle(debug_image, (u, v), 8, (0, 0, 255), -1)
+            cv2.putText(
+                debug_image,
+                f"empty row {empty_slot['row_index']}",
+                (u + 10, v),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 0, 255),
                 2,
                 cv2.LINE_AA,
             )
@@ -615,6 +734,64 @@ class VisionManager(Node):
                 f'Could not transform book pose from {source_frame} to '
                 f'{self.target_frame}: {error}')
             return None
+
+    def _complete_action_from_empty_slots(self, goal_handle, empty_points):
+        """첫 번째 빈 책장 단을 DetectTargetSlot 결과로 반환합니다."""
+        # action 결과 메시지를 생성합니다.
+        result = DetectTargetSlot.Result()
+        # 찾은 빈 단의 개수를 action 후보 개수로 기록합니다.
+        result.candidate_count = len(empty_points)
+        # 빈 단을 하나도 찾지 못하면 action을 실패시킵니다.
+        if not empty_points:
+            result.error_code = 3003
+            result.message = 'No empty shelf position was detected.'
+            self._set_action_result(result)
+            return
+
+        # 현재는 위쪽에서부터 첫 번째 빈 단을 선택합니다.
+        point = empty_points[0]
+        self._publish_action_feedback(
+            goal_handle,
+            'CALCULATING_POSE',
+            len(empty_points),
+            1.0,
+        )
+
+        # action 결과의 TargetSlot에 빈 단 위치를 기록합니다.
+        slot = result.target_slot
+        slot.header = point.header
+        slot.pose.position.x = point.point.x
+        slot.pose.position.y = point.point.y
+        slot.pose.position.z = point.point.z
+        # 책장 칸 중심에서 사용할 기본 방향은 회전 없는 자세입니다.
+        slot.pose.orientation.w = 1.0
+
+        # goal의 책 크기를 이용해 삽입 가능한 폭과 높이를 계산합니다.
+        goal = goal_handle.request
+        slot.available_width = max(
+            0.0,
+            float(goal.book_thickness + 2.0 * goal.safety_margin),
+        )
+        slot.available_height = max(
+            0.0,
+            float(goal.book_height + goal.safety_margin),
+        )
+        # 삽입 관련 파라미터를 결과에 기록합니다.
+        slot.insertion_depth = self.insertion_depth
+        slot.pre_insert_offset = self.pre_insert_offset
+        # 깊이 기반 빈 공간 판정의 기본 confidence를 기록합니다.
+        slot.confidence = 1.0
+        result.success = True
+        result.error_code = 0
+        result.message = 'Empty shelf position detected from depth.'
+        self._publish_action_feedback(
+            goal_handle,
+            'TRANSFORMING_FRAME',
+            len(empty_points),
+            slot.confidence,
+        )
+        # execute callback이 결과를 받아 action을 끝내도록 저장합니다.
+        self._set_action_result(result)
 
     def _complete_action_from_books(
         self,

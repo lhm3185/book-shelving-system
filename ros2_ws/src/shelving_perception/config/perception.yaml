@@ -17,6 +17,16 @@ vision_manager:
     book_pose_topic: /perception/book_pose
     debug_image_topic: /perception/debug_image
     show_debug_window: true
+    # Depth로 계산한 빈 책장 단의 3D 점을 발행할 토픽입니다.
+    empty_slot_topic: /perception/empty_shelf_position
+    # 책장 전체 segmentation에 사용하는 YOLO weight 경로입니다.
+    shelf_model_path: /home/rokey/livrary_datas/260918_train/best.pt
+    # 책장 검출을 인정할 최소 confidence입니다.
+    shelf_confidence_threshold: 0.50
+    # 책장을 위에서부터 나눌 단 개수입니다.
+    shelf_row_count: 5
+    # 책 표면과 빈 공간의 깊이 차이 기준(m)입니다.
+    shelf_depth_margin: 0.05
     gripper_roll: 0.0
     gripper_pitch: 0.0
     gripper_yaw_offset: 0.0
