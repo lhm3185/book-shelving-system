@@ -73,6 +73,8 @@ ros2 action list                 # /place_book
 ros2 topic hz /rgb               # 약 60 Hz
 ```
 
+**같은 판을 여러 번 돌릴 때 M411(NOT_READY) 이 계속 나오면**: `ros2 daemon stop` 후 다시 시도한다. 데몬이 죽은 노드의 액션 서버 정보를 들고 있어 새 목표가 거절된다 (2026-09-18 실측). 노드를 새로 띄우는 것만으로는 풀리지 않는다.
+
 **토픽이 안 보이면** (PC 간 간헐 불통, 원인 미확정): GPU PC 에서 `source /opt/ros/jazzy/setup.bash; ros2 topic hz /clock` 을 한 번 실행한 뒤 이 PC 에서 다시 `ros2 topic list --no-daemon`. 오늘 두 번 모두 이 뒤에 보였다.
 
 ## 3. 이 PC — 카메라 화면 + 책 인식 (터미널 ②)

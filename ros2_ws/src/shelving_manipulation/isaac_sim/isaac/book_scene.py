@@ -418,6 +418,32 @@ class BookScene:
         return [named(MoveJoint(q, speed_scale=0.6, timeout_s=15), "home")
                 for q in tucked_joint_moves(q_now, self.q_home, self.conf["poses"]["stow"])]
 
+    def snap_to_home(self, settle_steps=180):
+        """시작 자세를 홈으로 **고정**한다 (움직여서 가는 대신 그 자세로 시작).
+
+        로봇 USD 의 기본 관절값은 AMR 담당 소유라 건드리지 않고, 재생 시작 시점에만 바꾼다.
+        시작 홈 이동(약 12초)이 사라지고, 매번 같은 자세에서 시작하므로 재시작이 빨라진다.
+        """
+        q = self.robot.get_joint_positions()
+        q[self.idx_arm] = self.q_home
+        self.robot.set_joint_positions(q)
+        self.robot.set_joint_velocities(np.zeros_like(q))
+        # 관절 위치만 옮기면 **구동 목표는 옛 자세에 남아** 첫 동작에서 팔이 튄다
+        # (실측: 고정 직후 첫 작업이 M406 으로 실패). 목표도 같은 값으로 맞춘다.
+        self.robot.apply_action(ArticulationAction(joint_positions=q))
+        # 기본 상태로도 저장해 두면 world.reset() 뒤에도 같은 자세로 돌아온다
+        try:
+            self.robot.set_joints_default_state(positions=q)
+        except Exception:
+            pass
+        # 순간이동 뒤에는 트레이 책도 흔들린다. 충분히 가라앉힌 뒤 준비 완료로 본다
+        # (실측: 30 스텝만 두면 첫 작업이 M406 으로 실패)
+        for _ in range(settle_steps):
+            self.arm.update(); self.world.step(render=False)
+        err = float(np.max(np.abs(self.robot.get_joint_positions()[self.idx_arm] - self.q_home)))
+        self.say(f"시작 자세를 홈으로 고정 (오차 {err:.4f} rad)")
+        return err
+
     def job_sequence(self, name, plan):
         s = plan["segs"]; book = plan["book"]
         T = plan.get("dims", (self.T, self.L, self.W))[0]

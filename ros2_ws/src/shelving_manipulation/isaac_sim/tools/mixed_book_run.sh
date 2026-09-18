@@ -21,8 +21,12 @@ $SSH "$GPU" "pgrep -f 'place_book_serve[r].py' | xargs -r kill -9; sleep 2; rm -
     nohup ~/arm/isaac/run_place_book_server.sh --usd $LEVEL ${VARIANTS[*]} > /tmp/mixed_run.log 2>&1 & echo 시작"
 
 echo "== 이 PC: 로봇팔 노드 재시작"
+# 판을 여러 번 돌리면 ros2 데몬이 죽은 노드의 액션 서버 정보를 들고 있어
+# 새 목표가 M411 로 거절된다 (2026-09-18 실측). 데몬을 먼저 내린다
 PAT="manipulation""_node"
 pgrep -f "$PAT" | xargs -r kill -9
+set +u; source /opt/ros/jazzy/setup.bash; set -u
+ros2 daemon stop > /dev/null 2>&1 || true
 sleep 1
 set +u; source /opt/ros/jazzy/setup.bash; source "$WS/install/setup.bash"; set -u
 export FASTRTPS_DEFAULT_PROFILES_FILE="${FASTRTPS_DEFAULT_PROFILES_FILE:-$HOME/.ros/fastdds_whitelist.xml}"

@@ -36,6 +36,10 @@ ap.add_argument("--amr-test-overrides", action="store_true",
 ap.add_argument("--camera-prim", default="",
                 help="레벨 로봇에 이미 있는 카메라 prim 경로. 카메라·이미지 그래프는 그대로 두고 TF(panda_link0→카메라)·/clock 만 보탠다")
 ap.add_argument("--max-seconds", type=float, default=0.0, help="0 이면 계속 실행")
+ap.add_argument("--start-home", choices=["move", "snap"], default="move",
+                help="move: 접은 채 홈으로 이동(기본, 검증된 경로). "
+                     "snap: 시작부터 홈 자세로 고정 — 시작이 약 12초 빠르지만 "
+                     "**첫 작업이 M406 으로 실패하는 것을 확인**했다(원인 미확정). 시연에는 쓰지 말 것")
 # 색·크기가 다른 6종. 앞 4칸이 먼저 꽂히므로 가장 두꺼운 책·가장 얇은 책을 앞에 둔다
 MIXED_BOOKS = [
     "book_encyclopedia_set_01_2k__book_encyclopedia_set_01_book15",   # 두께 0.035 폭 0.163 높이 0.237
@@ -69,7 +73,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from shelving_manipulation.book_placer import (  # noqa: E402
     COMMAND_CANCEL, COMMAND_PLACE, decode, encode, SIM_CANCELLED, SIM_FAILED, SIM_IDLE, SIM_RUNNING,
     SIM_SUCCEEDED)
-from book_scene import BookScene, VEL_LIMIT  # noqa: E402
+from book_scene import BookScene, MoveJoint, VEL_LIMIT  # noqa: E402
 from arm_primitives import Status  # noqa: E402
 
 
@@ -131,12 +135,19 @@ class Job:
 
 
 job = None           # 실행 중 또는 마지막으로 끝난 작업
-ready = False        # 시작 홈 이동을 마쳐야 명령을 받는다
+ready = False        # 시작 홈 이동을 마쳐야 명령을 받는다 (홈 고정이면 바로 True)
+announced = False    # "준비 완료" 를 한 번만 알린다
 q_prev = robot.get_joint_positions()[scene.idx_arm].copy()
 
-# 시작: 팔을 접은 채 트레이 위 홈으로 (arm_planning.tucked_joint_moves)
-for p in scene.home_moves():
-    arm.enqueue(p)
+# 시작 자세: 기본은 홈으로 고정(이동 없음). --start-home move 면 예전처럼 접은 채 이동한다
+if args.start_home == "snap":
+    scene.snap_to_home()
+    # 자세만 옮기면 팔 제어기의 내부 목표가 초기화되지 않는다 (실측: 첫 작업이 M406).
+    # 이미 도착해 있는 홈을 한 번 더 지시해 제어기 상태를 맞춘다 (1초 이내)
+    arm.enqueue(MoveJoint(scene.q_home, speed_scale=0.6, timeout_s=5))
+else:
+    for p in scene.home_moves():
+        arm.enqueue(p)
 
 
 def publish(state):
@@ -213,7 +224,7 @@ def need_render(step):
 
 
 render_steps = 0
-say("작업 실행기 시작 — 시작 홈 이동 중")
+say("작업 실행기 시작 — 시작 홈 이동 중" if args.start_home == "move" else "작업 실행기 시작 — 홈 자세 고정")
 t0 = time.time()
 last_pub = 0.0
 step = 0
@@ -267,7 +278,8 @@ while app.is_running():
         elif running:
             finish(SIM_FAILED, error_code=code, message=err)
     elif arm.idle:
-        if not ready:
+        if not announced:
+            announced = True
             ready = True
             say(f"준비 완료 (step {step}) — 명령 대기 {args.command_topic}")
         elif running:
