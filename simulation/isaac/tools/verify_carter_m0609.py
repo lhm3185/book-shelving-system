@@ -117,6 +117,13 @@ err = float(np.max(np.abs(end - target)))
 moved = float(np.max(np.abs(end - start)))
 say(f"팔 지령 추종: 이동 {moved:.3f} rad, 목표 오차 {err:.3f} rad "
     f"→ {'정상' if moved > 0.1 and err < 0.15 else '확인 필요'}")
+lower, upper = robot.dof_properties["lower"], robot.dof_properties["upper"]
+maxeff = robot.dof_properties["maxEffort"] if "maxEffort" in robot.dof_properties.dtype.names else None
+for k, n in enumerate(arm):
+    i = names.index(n)
+    say(f"  {n}: 시작 {start[k]:+.3f} → 목표 {target[k]:+.3f} / 실제 {end[k]:+.3f} "
+        f"(오차 {end[k] - target[k]:+.3f}, 한계 {lower[i]:+.2f}~{upper[i]:+.2f}"
+        + (f", 최대힘 {maxeff[i]:.0f}" if maxeff is not None else "") + ")")
 if idx_wheel:
     wheel_drift = float(np.max(np.abs(robot.get_joint_positions()[idx_wheel] - wheel_hold)))
     say(f"바퀴 고정: 편차 {wheel_drift:.4f} rad → {'정상' if wheel_drift < 0.05 else '확인 필요'}")
