@@ -76,12 +76,18 @@ wheel_hold = q[idx_wheel].copy() if idx_wheel else None
 start = robot.get_joint_positions()[idx_arm].copy()
 target = start + np.array([0.3, -0.2, 0.2, 0.0, 0.3, 0.0])
 from isaacsim.core.utils.types import ArticulationAction  # noqa: E402
+# 바퀴는 속도 구동이라 위치 지령으로는 세워지지 않는다 → 속도 0 을 준다 (실측: 위치 지령 시 1.4 rad 밀림)
+if idx_wheel:
+    vel = np.zeros(len(names))
+    robot.apply_action(ArticulationAction(joint_velocities=vel, joint_indices=np.arange(len(names))))
 for _ in range(240):
-    cmd = robot.get_joint_positions()
+    cmd = np.full(len(names), np.nan)
     cmd[idx_arm] = target
+    act = ArticulationAction(joint_positions=target, joint_indices=np.array(idx_arm))
+    robot.apply_action(act)
     if idx_wheel:
-        cmd[idx_wheel] = wheel_hold
-    robot.apply_action(ArticulationAction(joint_positions=cmd))
+        robot.apply_action(ArticulationAction(joint_velocities=np.zeros(len(idx_wheel)),
+                                              joint_indices=np.array(idx_wheel)))
     world.step(render=False)
 end = robot.get_joint_positions()[idx_arm]
 err = float(np.max(np.abs(end - target)))
@@ -104,8 +110,25 @@ if os.path.exists(args.descriptor) and os.path.exists(args.urdf):
         q0 = robot.get_joint_positions()[idx_arm]
         pos, rot = solver.compute_forward_kinematics(ee, q0)
         say(f"  FK({ee}) 위치 {np.round(pos, 3).tolist()}")
+        # Lula IK 는 자세를 **쿼터니언(w,x,y,z)** 으로 받는다. FK 가 준 3x3 행렬을 그대로 주면
+        # "index 3 is out of bounds" 로 실패한다 (실측)
+        m = np.asarray(rot, float)
+        t = float(np.trace(m))
+        if t > 0:
+            sq = np.sqrt(t + 1.0) * 2
+            quat = np.array([0.25 * sq, (m[2, 1] - m[1, 2]) / sq, (m[0, 2] - m[2, 0]) / sq,
+                             (m[1, 0] - m[0, 1]) / sq])
+        else:
+            i = int(np.argmax(np.diag(m))); j, k = (i + 1) % 3, (i + 2) % 3
+            sq = np.sqrt(1.0 + m[i, i] - m[j, j] - m[k, k]) * 2
+            quat = np.zeros(4)
+            quat[0] = (m[k, j] - m[j, k]) / sq
+            quat[i + 1] = 0.25 * sq
+            quat[j + 1] = (m[j, i] + m[i, j]) / sq
+            quat[k + 1] = (m[k, i] + m[i, k]) / sq
+        quat = quat / np.linalg.norm(quat)
         target_pos = np.array(pos) + np.array([0.05, 0.0, -0.05])
-        sol, ok = solver.compute_inverse_kinematics(ee, target_pos, rot, warm_start=q0)
+        sol, ok = solver.compute_inverse_kinematics(ee, target_pos, quat, warm_start=q0)
         say(f"  IK 목표 {np.round(target_pos, 3).tolist()} → {'성공' if ok else '실패'}"
             + (f", 관절 변화 최대 {float(np.max(np.abs(sol - q0))):.3f} rad" if ok else ""))
     except Exception as e:                       # noqa: BLE001

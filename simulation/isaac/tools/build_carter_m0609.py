@@ -107,7 +107,9 @@ say(f"팔 장착 위치 {np.round(mount, 3).tolist()}, yaw {args.mount_yaw}°")
 # 2) 팔을 월드에 박아 두던 고정 조인트를 끈다 (카터를 따라 움직여야 한다)
 disabled = []
 for p in Usd.PrimRange(stage.GetPrimAtPath(ARM)):
-    if p.IsA(UsdPhysics.FixedJoint) and p.GetName() in ("root_joint", "AssemblerFixedJoint"):
+    # root_joint 만 끈다. AssemblerFixedJoint 는 **그리퍼를 팔에 붙여 두는** 조인트라 끄면
+    # 그리퍼가 articulation 에서 떨어져 나간다 (실측: 그리퍼 관절 0개)
+    if p.IsA(UsdPhysics.FixedJoint) and p.GetName() == "root_joint":
         UsdPhysics.Joint(p).CreateJointEnabledAttr().Set(False)
         disabled.append(p.GetName())
 say(f"끈 고정 조인트: {disabled or '없음'}")
