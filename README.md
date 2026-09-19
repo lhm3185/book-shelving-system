@@ -38,6 +38,19 @@ colcon build --symlink-install
 source install/setup.bash
 ~~~
 
+lfs 설치
+~~~bash
+sudo apt update && sudo apt install git-lfs
+git lfs install
+~~~
+
+rosdep 초기화
+~~~bash
+sudo rosdep init
+rosdep update
+rosdep install --from-paths src --ignore-src -r -y
+~~~
+
 이미 저장소를 받은 팀원은 새 브랜치를 만들기 전에 main을 최신화합니다.
 
 ~~~bash

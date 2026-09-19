@@ -20,6 +20,15 @@ class MockPerceptionServer(Node):
         """Initialize the mock perception action server."""
         super().__init__("mock_perception_server")
 
+        # 검증된 서가 슬롯 4곳을 요청마다 순서대로 반환한다.
+        self._slot_x_positions = [
+            -0.3497,
+            -0.4297,
+            -0.5097,
+            -0.2697,
+        ]
+        self._next_slot_index = 0
+
         self.declare_parameter(
             "action_name",
             "/detect_target_slot",
@@ -171,14 +180,19 @@ class MockPerceptionServer(Node):
             self.get_parameter("target_frame").value
         )
 
-        target_slot.pose.position.x = 0.55
-        target_slot.pose.position.y = 0.0
-        target_slot.pose.position.z = 0.80
+
+        slot_index = (self._next_slot_index % len(self._slot_x_positions))
+        slot_x = self._slot_x_positions[slot_index]
+        self._next_slot_index += 1
+
+        target_slot.pose.position.x = slot_x
+        target_slot.pose.position.y = 0.5495
+        target_slot.pose.position.z = 0.3399
 
         target_slot.pose.orientation.x = 0.0
         target_slot.pose.orientation.y = 0.0
-        target_slot.pose.orientation.z = 0.0
-        target_slot.pose.orientation.w = 1.0
+        target_slot.pose.orientation.z = 0.7071068
+        target_slot.pose.orientation.w = 0.7071068
 
         target_slot.available_width = max(
             0.08,
@@ -193,6 +207,11 @@ class MockPerceptionServer(Node):
         target_slot.insertion_depth = 0.25
         target_slot.pre_insert_offset = 0.05
         target_slot.confidence = 0.95
+
+        self.get_logger().info(
+            f"Selected mock shelf slot: "
+            f"index={slot_index}, x={slot_x:.4f}"
+        )
 
         self.get_logger().info(
             "Mock slot detection completed: "
