@@ -151,7 +151,7 @@ def apply_amr_test_overrides(stage, robot_path, say=print):
     # → base_link 아래로 필요한 것만: panda_link0(팔·카메라 연결), Lidar(스캔)
     prim = stage.GetPrimAtPath(f"{robot_path}/ros2_odom_graph/TFRobot")
     if prim.IsValid():
-        targets = [Sdf.Path(f"{robot_path}/panda_link0")]
+        targets = [Sdf.Path(f"{robot_path}/{BOT.base_link}")]
         lidar = f"{robot_path}/front_laser/Lidar"
         if stage.GetPrimAtPath(lidar).IsValid():
             targets.append(Sdf.Path(lidar))

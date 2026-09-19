@@ -4,21 +4,29 @@
 Isaac 설치 위치만 시스템마다 다르므로 `ISAAC_SIM_PATH` 환경변수로 받는다 (실행 스크립트가 쓴다).
 """
 import os
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_USD = REPO_ROOT / "simulation" / "library_system.usd"
 DEFAULT_TRAY = REPO_ROOT / "simulation" / "assets" / "tray.usd"
 
+# 로봇 prim 경로는 로봇마다 다르다 → 프로파일에서 가져온다 (config/robot_profiles.py)
+sys.path.insert(0, str(Path(__file__).resolve().parent / "config"))
+from robot_profiles import profile  # noqa: E402
+
+BOT = profile()
+
 # 통합 USD 에 있어야 하는 것들. 없으면 시작할 때 바로 알린다
 REQUIRED_PRIMS = {
-    "로봇(AMR+로봇팔)": "/World/ridgeback_franka",
+    "로봇(AMR+로봇팔)": BOT.root,
     "서가": "/World/bookshelves",
     "책 원본": "/World/books",
 }
 OPTIONAL_PRIMS = {
-    "손목 카메라": "/World/ridgeback_franka/panda_hand/rsd455/RSD455/Camera_OmniVision_OV9782_Color",
-    "라이다": "/World/ridgeback_franka/front_laser/Lidar",
+    "손목 카메라": f"{BOT.root}/{BOT.camera_prim}",
+    # 라이다는 AMR 담당 구성이라 로봇마다 다르다. 없으면 건너뛴다
+    "라이다": f"{BOT.root}/front_laser/Lidar",
     "무인반납기": "/World/return_machine",
 }
 
