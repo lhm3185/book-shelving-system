@@ -1,0 +1,118 @@
+"""로봇마다 다른 이름·치수를 **한 곳에** 모은다.
+
+왜: 로봇이 ridgeback_franka → nova-carter + M0609(+RG2) 로 바뀐다. 관절 이름·프레임·그리퍼
+    방식이 전부 달라, 코드 곳곳에 박아 두면 바꿀 때마다 빠뜨리는 곳이 생기고 되돌리기도 어렵다.
+    **기존 경로(franka)는 검증이 끝났으므로 그대로 두고**, 새 로봇은 값만 채워 고른다.
+
+고르는 법
+    ARM_ROBOT=m0609 ./scripts/run_isaac_sim.sh --gui     # 환경변수
+    profile("m0609")                                      # 코드에서 직접
+
+M0609 값의 출처 (2026-09-19 실측 / `M0609_PORT_PLAN.md`)
+    - 관절 이름·한계: GPU PC `~/Isaac_Sim_b-1/src_pra/M0609/` 의 descriptor·URDF
+    - 그리퍼: **`finger_joint` 은 명령해도 0.0008 rad 밖에 안 움직인다** — 명령 대상이 아니다.
+      실제로 도는 것은 양쪽 knuckle (0.256 / 0.300 rad). 폐루프 링크라 연동이 깔끔하지 않다.
+      우리 파이프라인은 파지할 때 **고정 조인트로 책을 붙이므로** 그리퍼가 물리적으로 쥘 필요는 없다.
+    - 손목 카메라: RG2 의 `angle_bracket` 에 RealSense D455 가 이미 붙어 있고,
+      카메라 prim 이름이 기존과 같다(`Camera_OmniVision_OV9782_Color`). link_6 기준 오프셋 실측.
+
+**아직 비어 있는 것**: `root` 이하 prim 경로는 AMR 담당이 붙여 주는 에셋을 받아야 확정된다.
+아래 값은 우리가 만들었던 결합체 기준이라, 에셋 수령 시 `check()` 로 확인하고 고칠 것.
+"""
+import os
+
+
+class RobotProfile:
+    def __init__(self, name, root, base_link, arm_joints, grip_joints, grip_open, grip_close,
+                 ee_frame, hand_link, finger_links, vel_limit, lula, camera_prim, camera_offset):
+        self.name = name
+        self.root = root                  # articulation root prim
+        self.base_link = base_link        # IK·좌표의 기준 링크
+        self.arm_joints = arm_joints      # 팔 관절 이름 (순서 = 명령 순서)
+        self.grip_joints = grip_joints    # **실제 명령을 받는** 그리퍼 관절
+        self.grip_open = grip_open        # 열림 지령값 (grip_joints 와 같은 길이)
+        self.grip_close = grip_close
+        self.ee_frame = ee_frame          # Lula 엔드이펙터 프레임 이름
+        self.hand_link = hand_link        # 파지 고정 조인트를 매다는 링크
+        self.finger_links = finger_links  # 손끝 방향을 재는 두 링크 (없으면 빈 리스트)
+        self.vel_limit = vel_limit
+        self.lula = lula                  # ("supported", "Franka") 또는 ("files", descriptor, urdf)
+        self.camera_prim = camera_prim
+        self.camera_offset = camera_offset  # 손목 링크 기준 (x, y, z) m
+
+    @property
+    def dof(self):
+        return len(self.arm_joints)
+
+    # 상위 코드는 그리퍼를 **폭(m)** 으로 다룬다 (SetGripper). Franka 는 손가락 관절이 곧 폭이라
+    # 그대로지만, RG2 는 **각도**이고 좌우 부호가 반대다. 변환을 여기서만 한다.
+    GRIP_MAX_M = 0.04
+
+    def grip_targets(self, width_m):
+        """폭(m) → 각 그리퍼 관절의 지령값"""
+        f = min(max(float(width_m) / self.GRIP_MAX_M, 0.0), 1.0)
+        return [c + (o - c) * f for c, o in zip(self.grip_close, self.grip_open)]
+
+    def grip_width(self, positions):
+        """그리퍼 관절 현재값 → 폭(m). 대표 관절 하나로 역산한다"""
+        c, o = self.grip_close[0], self.grip_open[0]
+        if abs(o - c) < 1e-9:
+            return 0.0
+        return float((positions[0] - c) / (o - c) * self.GRIP_MAX_M)
+
+    def check(self, stage):
+        """에셋을 받았을 때 이 프로파일이 맞는지 확인한다. 빠진 prim 목록을 돌려준다."""
+        missing = []
+        for path in (self.root, f"{self.root}/{self.base_link}"):
+            if not stage.GetPrimAtPath(path).IsValid():
+                missing.append(path)
+        return missing
+
+
+FRANKA = RobotProfile(
+    name="franka",
+    root="/World/ridgeback_franka",
+    base_link="panda_link0",
+    arm_joints=[f"panda_joint{i}" for i in range(1, 8)],
+    grip_joints=["panda_finger_joint1", "panda_finger_joint2"],
+    grip_open=[0.04, 0.04],
+    grip_close=[0.0, 0.0],
+    ee_frame="right_gripper",
+    hand_link="panda_hand",
+    finger_links=["panda_leftfinger", "panda_rightfinger"],
+    vel_limit=[2.175] * 4 + [2.61] * 3,          # URDF 실측
+    lula=("supported", "Franka"),
+    camera_prim="panda_hand/rsd455/RSD455/Camera_OmniVision_OV9782_Color",
+    camera_offset=(0.0, 0.0, 0.0),               # 기존 경로는 카메라 오프셋을 따로 쓰지 않는다
+)
+
+M0609 = RobotProfile(
+    name="m0609",
+    # AMR 담당 에셋 수령 후 확인 — 우리가 만들었던 결합체 기준값이다
+    root="/World/carter_m0609",
+    base_link="arm/m0609/base_link",
+    arm_joints=[f"joint_{i}" for i in range(1, 7)],   # **6축**
+    # finger_joint 는 명령해도 안 움직인다 (2026-09-19 실측 0.0008 rad). 양쪽 knuckle 로 대칭 명령한다
+    grip_joints=["left_inner_knuckle_joint", "right_inner_knuckle_joint"],
+    grip_open=[-0.60, +0.60],
+    grip_close=[0.0, 0.0],
+    ee_frame="link_6",
+    hand_link="arm/m0609/link_6",
+    finger_links=["arm/onrobot_rg2ft/left_inner_finger", "arm/onrobot_rg2ft/right_inner_finger"],
+    vel_limit=[2.618, 2.618, 3.1416, 3.927, 3.927, 3.927],   # M0609 URDF
+    # verify_carter_m0609.py 에서 IK 가 실제로 풀린 조합 (2026-09-18 확인)
+    lula=("files", os.path.expanduser("~/Isaac_Sim_b-1/src_pra/M0609/descriptor/m0609_description.yaml"),
+          os.path.expanduser("~/Isaac_Sim_b-1/src_pra/M0609/doosan-robot2/urdf/m0609.urdf")),
+    camera_prim="arm/onrobot_rg2ft/angle_bracket/realsense_d455/RSD455/Camera_OmniVision_OV9782_Color",
+    camera_offset=(0.0115, 0.0450, 0.0525),      # link_6 기준, 회전 X축 180° (2026-09-19 실측)
+)
+
+_ALL = {p.name: p for p in (FRANKA, M0609)}
+
+
+def profile(name=None):
+    """이름으로 프로파일을 고른다. 안 주면 ARM_ROBOT 환경변수, 그것도 없으면 검증된 franka."""
+    key = (name or os.environ.get("ARM_ROBOT") or "franka").strip().lower()
+    if key not in _ALL:
+        raise ValueError(f"모르는 로봇 '{key}' — 있는 것: {sorted(_ALL)}")
+    return _ALL[key]

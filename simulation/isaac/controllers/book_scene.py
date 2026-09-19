@@ -27,18 +27,26 @@ from arm_geometry import R_from_quat, quat_angle, quat_from_R, slerp  # noqa: E4
 from arm_planning import tucked_joint_moves  # noqa: E402
 from arm_primitives import ArmController, MoveJoint, Primitive, SetGripper, Sequence, Status, Wait  # noqa: E402
 
-R = "/World/ridgeback_franka"
+# 로봇마다 다른 이름은 프로파일 한 곳에서 온다 (config/robot_profiles.py).
+# 기본은 검증이 끝난 franka. 새 로봇은 ARM_ROBOT=m0609 로 고른다.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config"))
+from robot_profiles import profile  # noqa: E402
+
+BOT = profile()
+R = BOT.root
+BASE_LINK = R + "/" + BOT.base_link
+HAND_LINK = R + "/" + BOT.hand_link
 SHELF = "/World/bookshelves/shelf_brown__book_shelf_01"
 BOOK_SRC = "/World/books/book_encyclopedia_set_01_2k__book_encyclopedia_set_01_book15"
-ARM_JOINTS = [f"panda_joint{i}" for i in range(1, 8)]
-FINGERS = ["panda_finger_joint1", "panda_finger_joint2"]
+ARM_JOINTS = BOT.arm_joints
+FINGERS = BOT.grip_joints
 DECK_Z = 0.286
 TIP_DOWN = 0.035            # 책등 윗면에서 손끝이 내려가 잡는 깊이
 GRIP_CLEAR = 0.005
 SPINE_INSET = 0.02          # 계획상 최종 책등이 서가 앞면에서 들어가는 거리
 MEASURED_INSET = 0.024      # 실측 최종 책등 위치 (밀기 후). 꽂힌 책 AABB 중심 → 서가 앞면 역산에 쓴다
 DIV_H, DIV_T, DIV_GAP = 0.07, 0.01, 0.003
-VEL_LIMIT = np.array([2.175] * 4 + [2.61] * 3)   # URDF 실측
+VEL_LIMIT = np.array(BOT.vel_limit)             # URDF 실측 (로봇별, 프로파일에서)
 MAX_STEP = 0.12             # 계획 인접점 최대 관절 변화 (초과 = 불연속, M402)
 GRASP_JOINT = "/World/bs_grasp_joint"
 
@@ -191,7 +199,7 @@ class BookScene:
         # 칸막이를 세우면 파지 경로를 막는다 (실측: down 단계 시간 초과). 대신 책 충돌을 상자로 근사해 세워 둔다.
         self.world = World(stage_units_in_meters=1.0, physics_dt=1 / 60, rendering_dt=1 / 60)
         self.robot = SingleArticulation(prim_path=R, name="rf")
-        link0_x = float(SingleXFormPrim(R + "/panda_link0").get_world_pose()[0][0])
+        link0_x = float(SingleXFormPrim(BASE_LINK).get_world_pose()[0][0])
         self.tray_floor_z = DECK_Z + floor_top
         self.slot_x = slot_x
         self.tray_y = float(tray_center[1])
@@ -234,23 +242,30 @@ class BookScene:
         for _ in range(120):
             self.world.step(render=False)
 
-        l0p, l0q = SingleXFormPrim(R + "/panda_link0").get_world_pose()
+        l0p, l0q = SingleXFormPrim(BASE_LINK).get_world_pose()
         self.l0p = np.asarray(l0p, float); self.Rl0 = R_from_quat(np.asarray(l0q, float))
-        self.lula = LulaKinematicsSolver(**interface_config_loader.load_supported_lula_kinematics_solver_config("Franka"))
+        if BOT.lula[0] == "supported":
+            cfg = interface_config_loader.load_supported_lula_kinematics_solver_config(BOT.lula[1])
+        else:
+            # Isaac 기본 지원 목록에 Doosan 이 없다 — descriptor·URDF 를 직접 준다
+            cfg = {"robot_description_path": BOT.lula[1], "urdf_path": BOT.lula[2]}
+        self.lula = LulaKinematicsSolver(**cfg)
         self.lula.set_robot_base_pose(l0p, l0q)
-        self.ik = ArticulationKinematicsSolver(r, self.lula, "right_gripper")
+        self.ik = ArticulationKinematicsSolver(r, self.lula, BOT.ee_frame)
 
         ee_p, ee_R = self.ik.compute_end_effector_pose()
-        hand_p = np.array(SingleXFormPrim(R + "/panda_hand").get_world_pose()[0])
-        lf = np.array(SingleXFormPrim(R + "/panda_leftfinger").get_world_pose()[0])
-        rf = np.array(SingleXFormPrim(R + "/panda_rightfinger").get_world_pose()[0])
+        hand_p = np.array(SingleXFormPrim(HAND_LINK).get_world_pose()[0])
+        lf = np.array(SingleXFormPrim(R + "/" + BOT.finger_links[0]).get_world_pose()[0])
+        rf = np.array(SingleXFormPrim(R + "/" + BOT.finger_links[1]).get_world_pose()[0])
         self._a_loc = np.round(ee_R.T @ ((ee_p - hand_p) / np.linalg.norm(ee_p - hand_p)))
         self._c_loc = np.round(ee_R.T @ ((rf - lf) / (np.linalg.norm(rf - lf) or 1.0)))
         self.DOWN = self.orientation([0, 0, -1], [1, 0, 0])
         self.HORIZ = self.orientation([0, 1, 0], [1, 0, 0])
 
-        conf = yaml.safe_load(open(os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "arm.yaml")))
+        # 로봇마다 자세·그리퍼 값이 다르다. franka 는 arm.yaml(검증 완료), 나머지는 arm_<이름>.yaml
+        _cfg_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config")
+        _cfg = os.path.join(_cfg_dir, "arm.yaml" if BOT.name == "franka" else f"arm_{BOT.name}.yaml")
+        conf = yaml.safe_load(open(_cfg))
         conf["gripper"]["tolerance_m"] = 0.006; conf["tolerance"]["position_m"] = 0.008; conf["tolerance"]["joint_rad"] = 0.03
         self.conf = conf
         self.arm = ArmController(_Backend(self), conf)
@@ -324,7 +339,7 @@ class BookScene:
         return quat_from_R(Wm @ Lm.T)
 
     def ik_joints(self, target, ori, seed):
-        q, ok = self.lula.compute_inverse_kinematics("right_gripper", np.asarray(target, float), np.asarray(ori, float),
+        q, ok = self.lula.compute_inverse_kinematics(BOT.ee_frame, np.asarray(target, float), np.asarray(ori, float),
                                                      np.asarray(seed, float), 0.004, 0.05)
         return np.asarray(q, float), bool(ok)
 
@@ -480,10 +495,10 @@ class BookScene:
         if book in self.upright_q:
             p_now = SingleXFormPrim(book).get_world_pose()[0]
             SingleXFormPrim(book).set_world_pose(np.asarray(p_now, float), self.upright_q[book])
-        hp, hq = SingleXFormPrim(R + "/panda_hand").get_world_pose(); bp, bq = SingleXFormPrim(book).get_world_pose()
+        hp, hq = SingleXFormPrim(HAND_LINK).get_world_pose(); bp, bq = SingleXFormPrim(book).get_world_pose()
         Rh = R_from_quat(hq); rel_p = Rh.T @ (np.asarray(bp) - np.asarray(hp)); rel_q = quat_from_R(Rh.T @ R_from_quat(bq))
         j = UsdPhysics.FixedJoint.Define(self.stage, GRASP_JOINT)
-        j.CreateBody0Rel().SetTargets([R + "/panda_hand"]); j.CreateBody1Rel().SetTargets([book])
+        j.CreateBody0Rel().SetTargets([HAND_LINK]); j.CreateBody1Rel().SetTargets([book])
         j.CreateLocalPos0Attr().Set(Gf.Vec3f(*[float(v) for v in rel_p]))
         j.CreateLocalRot0Attr().Set(Gf.Quatf(float(rel_q[0]), Gf.Vec3f(*[float(v) for v in rel_q[1:]])))
         j.CreateLocalPos1Attr().Set(Gf.Vec3f(0, 0, 0)); j.CreateLocalRot1Attr().Set(Gf.Quatf(1, Gf.Vec3f(0, 0, 0)))
@@ -497,7 +512,7 @@ class BookScene:
         return np.asarray(SingleXFormPrim(b).get_world_pose()[0], float)
 
     def book_in_hand(self, b):
-        hp, hq = SingleXFormPrim(R + "/panda_hand").get_world_pose()
+        hp, hq = SingleXFormPrim(HAND_LINK).get_world_pose()
         return R_from_quat(hq).T @ (self.book_origin(b) - np.asarray(hp, float))
 
     def verify(self, plan):
@@ -530,8 +545,8 @@ class _Backend:
         s = self.s
         q = s.robot.get_joint_positions().copy()
         if arm_q is not None:
-            q[s.idx_arm] = np.asarray(arm_q, float)[:7]
-        q[s.idx_fing] = self._grip; q[s.base_idx] = s.base_hold
+            q[s.idx_arm] = np.asarray(arm_q, float)[:BOT.dof]
+        q[s.idx_fing] = BOT.grip_targets(self._grip); q[s.base_idx] = s.base_hold
         s.robot.apply_action(ArticulationAction(joint_positions=q))
 
     def set_joint_targets(self, positions):
@@ -550,4 +565,4 @@ class _Backend:
         self._apply()
 
     def get_gripper_width(self):
-        return float(np.mean(self.s.robot.get_joint_positions()[self.s.idx_fing]))
+        return BOT.grip_width(self.s.robot.get_joint_positions()[self.s.idx_fing])
