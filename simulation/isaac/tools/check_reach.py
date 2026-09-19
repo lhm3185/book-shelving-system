@@ -24,7 +24,9 @@ ap.add_argument("--approach", type=float, default=0.10,
                 help="파지 전 접근 높이 (m). 이 높이에서도 닿는지 같이 본다")
 args = ap.parse_args()
 
-REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# tools/ → isaac/ → simulation/ → 저장소 루트 (네 번 올라간다)
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, os.path.join(REPO, "simulation", "isaac"))
 sys.path.insert(0, os.path.join(REPO, "simulation", "isaac", "config"))
 

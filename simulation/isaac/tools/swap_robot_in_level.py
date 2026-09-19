@@ -22,7 +22,9 @@ import argparse
 import os
 import sys
 
-REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# tools/ → isaac/ → simulation/ → 저장소 루트 (네 번 올라간다)
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__)))))
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--level", default="", help="비우면 SIM_USD 등 기본 규칙")
