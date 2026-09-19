@@ -25,6 +25,12 @@ ap.add_argument("--books", type=int, default=6)
 ap.add_argument("--book-variants", default="", help="'mixed' 면 색·크기가 다른 기본 6종, 쉼표 목록도 가능")
 ap.add_argument("--place-dx", type=float, nargs="+", default=[-0.51, -0.43, -0.35, -0.27],
                 help="1차 고정 칸 (팔 원점 x 기준). 북엔드를 세운다")
+# 카메라 토픽 이름. **기본값은 지금과 같다** — 바꾸지 않으면 동작이 달라지지 않는다.
+# 왜 필요한가: AMR 담당 카메라도 같은 ROS_DOMAIN_ID 에서 `/rgb` 로 나가면 rqt 에 어느 쪽이
+# 보이는지 보장되지 않는다 (2026-09-19 실제로 AMR 담당 시험 화면에 우리 손목 카메라가 잡혔다).
+# 팀이 네임스페이스를 나누기로 하면 `--camera-ns /arm` 한 줄로 전환한다.
+ap.add_argument("--camera-ns", default="", metavar="접두사",
+                help="카메라 토픽 앞에 붙일 네임스페이스 (예: /arm → /arm/rgb). 비우면 지금 그대로")
 ap.add_argument("--command-topic", default="/manipulation/sim/command")
 ap.add_argument("--state-topic", default="/manipulation/sim/state")
 ap.add_argument("--gui", action="store_true")
@@ -120,9 +126,12 @@ if args.camera_prim:
     say(f"기존 카메라 사용 {args.camera_prim} → TF panda_link0→{args.camera_prim.split('/')[-1]}, /clock 추가")
 elif args.camera:
     cam_path = camera_bridge.add_wrist_camera(scene.stage, R)
-    camera_bridge.build_ros_graph(cam_path, R)
+    _ns = args.camera_ns.rstrip("/")
+    camera_bridge.build_ros_graph(cam_path, R, rgb=f"{_ns}/rgb", depth=f"{_ns}/depth",
+                                  info=f"{_ns}/camera_info")
     world.play()
-    say(f"손목 카메라 {cam_path} → /rgb /depth /camera_info (frame {camera_bridge.OPTICAL_FRAME}), /tf, /clock")
+    say(f"손목 카메라 {cam_path} → {_ns}/rgb {_ns}/depth {_ns}/camera_info "
+        f"(frame {camera_bridge.OPTICAL_FRAME}), /tf, /clock")
 if args.camera or args.camera_prim or args.amr_test_overrides:
     gate = camera_bridge.SensorGate(scene.stage, R, say)
     if args.camera_hz < 60:

@@ -233,3 +233,17 @@ ffmpeg -framerate 20 -pattern_type glob -i "/tmp/b1_frames/f*.png" \
 | 녹화 켬 (1280×720, 10 fps) | **64~73초** |
 
 **시연 당일에는 녹화를 끈다.** 녹화본은 미리 찍어 둔 것을 쓴다.
+
+### 6. 카메라 토픽 이름이 AMR 과 겹친다 (미해결, 팀 결정 대기)
+
+우리 손목 카메라와 AMR 카메라가 **둘 다 `/rgb`** 로 나간다. 같은 `ROS_DOMAIN_ID` 에서는 **같은 토픽**이다.
+
+```bash
+# 네임스페이스를 나누기로 정해지면 우리 쪽은 이 한 줄이면 된다 (기본값은 지금 그대로)
+./scripts/run_isaac_sim.sh --headless --camera-ns /arm
+```
+
+`/clock` 은 더 위험하다 — **시뮬레이터는 한 판에 하나만 `/clock` 을 발행해야 한다.**
+상세와 결정 안건: `TOPIC_COLLISION_20260919.md`
+
+**정해지기 전까지는 우리가 돌릴 때 미리 알린다.**
