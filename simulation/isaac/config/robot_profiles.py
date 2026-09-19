@@ -16,8 +16,9 @@ M0609 값의 출처 (2026-09-19 실측 / `M0609_PORT_PLAN.md`)
     - 손목 카메라: RG2 의 `angle_bracket` 에 RealSense D455 가 이미 붙어 있고,
       카메라 prim 이름이 기존과 같다(`Camera_OmniVision_OV9782_Color`). link_6 기준 오프셋 실측.
 
-**아직 비어 있는 것**: `root` 이하 prim 경로는 AMR 담당이 붙여 주는 에셋을 받아야 확정된다.
-아래 값은 우리가 만들었던 결합체 기준이라, 에셋 수령 시 `check()` 로 확인하고 고칠 것.
+**경로는 2026-09-19 수령한 AMR 담당 에셋 기준으로 확정했다.**
+레벨: `~/Desktop/Collected_ing_library_env_v5-firstFinal/ing_library_env_v5.usd`
+(같은 이름의 바탕화면 단독 USD 에는 **로봇이 없다** — 참조가 안 풀린다. 자립본 폴더를 쓸 것)
 """
 import os
 
@@ -88,22 +89,25 @@ FRANKA = RobotProfile(
 
 M0609 = RobotProfile(
     name="m0609",
-    # AMR 담당 에셋 수령 후 확인 — 우리가 만들었던 결합체 기준값이다
-    root="/World/carter_m0609",
-    base_link="arm/m0609/base_link",
+    # **AMR 담당 에셋 기준** (2026-09-19 수령, Collected_ing_library_env_v5-firstFinal).
+    # 로봇 prim 이름이 우리가 만들었던 `carter_m0609` 가 아니라 `Nova_Carter_ROS` 다.
+    # 팔은 카터 하위가 아니라 **형제**로 들어가 있다 (chassis_link 옆 m0609).
+    root="/World/Nova_Carter_ROS",
+    base_link="m0609/base_link",
     arm_joints=[f"joint_{i}" for i in range(1, 7)],   # **6축**
     # finger_joint 는 명령해도 안 움직인다 (2026-09-19 실측 0.0008 rad). 양쪽 knuckle 로 대칭 명령한다
     grip_joints=["left_inner_knuckle_joint", "right_inner_knuckle_joint"],
     grip_open=[-0.60, +0.60],
     grip_close=[0.0, 0.0],
     ee_frame="link_6",
-    hand_link="arm/m0609/link_6",
-    finger_links=["arm/onrobot_rg2ft/left_inner_finger", "arm/onrobot_rg2ft/right_inner_finger"],
+    hand_link="m0609/link_6",
+    finger_links=["m0609/onrobot_rg2ft/left_inner_finger",
+                  "m0609/onrobot_rg2ft/right_inner_finger"],
     vel_limit=[2.618, 2.618, 3.1416, 3.927, 3.927, 3.927],   # M0609 URDF
     # verify_carter_m0609.py 에서 IK 가 실제로 풀린 조합 (2026-09-18 확인)
     lula=("files", os.path.expanduser("~/Isaac_Sim_b-1/src_pra/M0609/descriptor/m0609_description.yaml"),
           os.path.expanduser("~/Isaac_Sim_b-1/src_pra/M0609/doosan-robot2/urdf/m0609.urdf")),
-    camera_prim="arm/onrobot_rg2ft/angle_bracket/realsense_d455/RSD455/Camera_OmniVision_OV9782_Color",
+    camera_prim="m0609/onrobot_rg2ft/angle_bracket/realsense_d455/RSD455/Camera_OmniVision_OV9782_Color",
     camera_offset=(0.0115, 0.0450, 0.0525),      # link_6 기준, 회전 X축 180° (2026-09-19 실측)
 )
 

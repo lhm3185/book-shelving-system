@@ -21,6 +21,9 @@ ap.add_argument("--usd", default=os.path.expanduser("~/carter_m0609_handoff/cart
 ap.add_argument("--robot", default="/World/carter_m0609")
 ap.add_argument("--seconds", type=float, default=5.0)
 ap.add_argument("--ground", choices=["on", "off"], default="on", help="바닥을 깔고 시험한다")
+# 에셋마다 구조가 다르다 (우리 결합체는 carter/chassis_link, AMR 담당 것은 chassis_link)
+ap.add_argument("--base-link", default="carter/chassis_link", help="베이스 링크 (robot 기준 상대경로)")
+ap.add_argument("--arm-link", default="arm/m0609/base_link", help="팔 베이스 링크 (robot 기준 상대경로)")
 args = ap.parse_args()
 
 from isaacsim import SimulationApp  # noqa: E402

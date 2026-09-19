@@ -94,9 +94,35 @@ DOWN = np.array([0.0, 1.0, 0.0, 0.0])
 INSERT = np.array([0.7071068, 0.0, 0.0, 0.7071068])
 
 
+def quat_to_R(q):
+    w, x, y, z = [float(v) for v in q]
+    return np.array([
+        [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
+
+
+def quat_mul(a, b):
+    w1, x1, y1, z1 = [float(v) for v in a]
+    w2, x2, y2, z2 = [float(v) for v in b]
+    return np.array([w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+                     w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+                     w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+                     w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2])
+
+
+BASE_P = np.asarray(l0p, float)
+BASE_Q = np.asarray(l0q, float)
+BASE_R = quat_to_R(BASE_Q)
+
+
 def solve(pos, quat):
-    q, ok = lula.compute_inverse_kinematics(
-        BOT.ee_frame, np.asarray(pos, float), np.asarray(quat, float))
+    """좌표는 **arm_base_link 기준**으로 받는다 (book_profiles.yaml 과 같은 계약).
+    Lula 는 **월드 기준**을 받으므로 여기서 변환한다. 이 변환을 빼먹으면 로봇을 옮겼을 때
+    전부 '해 없음' 으로 나와 잘못된 판단을 하게 된다 (2026-09-19 실제로 그럴 뻔했다)."""
+    wp = BASE_P + BASE_R @ np.asarray(pos, float)
+    wq = quat_mul(BASE_Q, np.asarray(quat, float))
+    q, ok = lula.compute_inverse_kinematics(BOT.ee_frame, wp, wq)
     return bool(ok), q
 
 
