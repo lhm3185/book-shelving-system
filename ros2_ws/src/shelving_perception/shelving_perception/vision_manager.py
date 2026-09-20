@@ -11,6 +11,8 @@ Isaac Sim 카메라 데이터를 TargetDetector로 전달하는 ROS 2 노드.
 import rclpy
 # 종료 시 OpenCV 창을 정리하기 위해 가져옵니다.
 import cv2
+# 설치된 ROS 패키지 share 경로를 조합할 때 사용합니다.
+import os
 # roll/pitch/yaw를 사원수로 바꿀 때 사용할 삼각함수 모듈입니다.
 import math
 # RGB·Depth·CameraInfo를 시간 기준으로 묶어주는 ROS 메시지 필터입니다.
@@ -36,6 +38,7 @@ from shelving_interfaces.msg import TargetSlot
 # ROS 2 노드의 기본 클래스입니다.
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
+from ament_index_python.packages import get_package_share_directory
 # RGB/Depth 영상과 카메라 내부 파라미터 메시지입니다.
 from sensor_msgs.msg import Image, CameraInfo
 # 책 위치와 책 pose를 발행할 메시지입니다.
@@ -117,9 +120,11 @@ class VisionManager(Node):
         self.show_debug_window = bool(self.declare_parameter(
             'show_debug_window', False).value)
         # 책장 segmentation 모델의 경로입니다.
+        package_share = get_package_share_directory('shelving_perception')
+        resource_dir = os.path.join(package_share, 'resource')
         self.shelf_model_path = self.declare_parameter(
             'shelf_model_path',
-            '/home/rokey/livrary_datas/260918_train/best.pt',
+            os.path.join(resource_dir, 'best.pt'),
         ).value
         # 책장 검출을 인정할 최소 confidence입니다.
         self.shelf_confidence_threshold = float(self.declare_parameter(
@@ -192,7 +197,7 @@ class VisionManager(Node):
         # 실행할 학습된 YOLO weight 파일 경로입니다.
         self.model_path = self.declare_parameter(
             'model_path',
-            '/home/rokey/livrary_datas/260918_train/book_tray_best.pt',
+            os.path.join(resource_dir, 'book_tray_best.pt'),
         ).value
         # self.target_topic = self.declare_parameter(
         #     'target_topic', '/perception/empty_shelf_position').value
