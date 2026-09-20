@@ -68,5 +68,5 @@ timeout:
 # 6축이라 Franka(7축)보다 여유 자세가 적다. 우선 같은 값으로 두고 게이트 2 결과를 보고 푼다.
 # 드라이브 정착 오차가 Franka 보다 크다. 너무 조이면 도달했는데도 계속 기다리다 시간 초과가 난다.
 tolerance:
-  joint_rad:  0.03
+  joint_rad:  0.08
   position_m: 0.008
