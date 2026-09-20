@@ -11,6 +11,8 @@
 #
 # 알아 둘 것
 #     - 두 도구 다 **Lula 를 안 쓴다.** M0609 기술서(m0609_description.yaml)가 없어도 이 단계는 된다
+#     - 원본이 참조하는 바닥·벽(env_wall_floor)이 레벨 폴더에 없으면 **경고만 나고 판정은 통과한다.**
+#       이 스크립트가 저장소 사본으로 채운다 (바이트 동일). 건너뛰려면 NO_FILL=1
 #     - Nova Carter 본체가 Isaac 클라우드 에셋을 참조한다 → **첫 실행 때 몇 분 멈춘다. 인터넷 필요.**
 #       멈춘 게 아니니 기다릴 것
 set -u
@@ -56,6 +58,38 @@ else
     note "주의  Nova_Carter_ROS.usd 가 없다 — 로봇이 안 들어올 수 있다. 원본 폴더를 통째로 복원할 것"
 fi
 [ "$fail" -eq 0 ] || { echo; echo "**빠진 것이 있다** — docs/doyoon-kim/manipulation/SETUP_NEW_PC.md 참조"; exit 1; }
+
+# 원본 레벨은 **레벨 폴더 기준 상대경로**로 바닥·벽을 payload 한다.
+# 백업에서 복원한 폴더에 이 트리가 빠져 있으면 USD 가 'Could not open asset' 경고만 내고
+# **판정은 그대로 통과한다** — 바닥 없는 레벨이 조용히 저장된다 (2026-09-21 실제로 겪었다).
+# 저장소에 같은 상대경로로 들어 있으므로(바이트 동일) 없으면 채운다.
+_REPO_BD="$REPO_ROOT/simulation/assets/book_dataset"
+_need_fill=0
+for _rel in assets/env_wall_floor dataset/env_wall_floor; do
+    [ -d "$LV/book_dataset/$_rel" ] || _need_fill=1
+done
+if [ "$_need_fill" -eq 1 ]; then
+    if [ "${NO_FILL:-0}" = "1" ]; then
+        note "주의  레벨 폴더에 env_wall_floor 가 없다 — 바닥·벽 없이 저장된다 (NO_FILL=1 이라 그대로 둔다)"
+    else
+        note "레벨 폴더에 바닥·벽 에셋이 없다 → 저장소 사본으로 채운다"
+        for _rel in assets/env_wall_floor dataset/env_wall_floor; do
+            if [ -d "$_REPO_BD/$_rel" ]; then
+                if [ "$DRY" -eq 1 ]; then
+                    printf '   $ rsync -a %s/ %s/\n' "$_REPO_BD/$_rel" "$LV/book_dataset/$_rel"
+                else
+                    mkdir -p "$LV/book_dataset/$_rel"
+                    rsync -a "$_REPO_BD/$_rel/" "$LV/book_dataset/$_rel/" \
+                        && note "  채움 book_dataset/$_rel" \
+                        || note "  **복사 실패** book_dataset/$_rel"
+                fi
+            fi
+        done
+        note "(건너뛰려면 NO_FILL=1)"
+    fi
+else
+    note "OK    레벨 폴더의 바닥·벽 에셋 (env_wall_floor)"
+fi
 
 step() {   # step <번호> <설명> <출력파일> <명령...>
     local n="$1" desc="$2" out="$3"; shift 3
