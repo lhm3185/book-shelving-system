@@ -229,7 +229,7 @@ class BookScene:
         # 트레이 칸막이는 두지 않는다: 칸 간격 0.075 m 안에서는 손가락이 지나갈 폭이 남지 않아
         # 칸막이를 세우면 파지 경로를 막는다 (실측: down 단계 시간 초과). 대신 책 충돌을 상자로 근사해 세워 둔다.
         self.world = World(stage_units_in_meters=1.0, physics_dt=1 / 60, rendering_dt=1 / 60)
-        self.robot = SingleArticulation(prim_path=R, name="rf")
+        self.robot = SingleArticulation(prim_path=BOT.articulation_root, name="rf")
         link0_x = float(SingleXFormPrim(BASE_LINK).get_world_pose()[0][0])
         self.tray_floor_z = DECK_Z + floor_top
         self.slot_x = slot_x

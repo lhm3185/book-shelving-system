@@ -26,7 +26,7 @@ import os
 class RobotProfile:
     def __init__(self, name, root, base_link, arm_joints, grip_joints, grip_open, grip_close,
                  ee_frame, hand_link, finger_links, vel_limit, lula, camera_prim, camera_offset,
-                 deck_z, drive_stiffness=0.0, drive_damping=0.0):
+                 deck_z, drive_stiffness=0.0, drive_damping=0.0, art_root=""):
         self.name = name
         self.root = root                  # articulation root prim
         self.base_link = base_link        # IK·좌표의 기준 링크
@@ -47,6 +47,13 @@ class RobotProfile:
         # 실행 시점에 올릴 팔 구동 게인. 0 이면 손대지 않는다 (에셋 값을 그대로 쓴다).
         self.drive_stiffness = drive_stiffness
         self.drive_damping = drive_damping
+        # **articulation root 가 로봇 루트와 다를 수 있다.** 받은 에셋은 chassis_link 가 root 라
+        # 루트 prim 으로 SingleArticulation 을 만들면 관절 명령이 안 먹는다 (2026-09-20).
+        self._art_root = art_root
+
+    @property
+    def articulation_root(self):
+        return f"{self.root}/{self._art_root}" if self._art_root else self.root
 
     @property
     def dof(self):
@@ -123,6 +130,7 @@ M0609 = RobotProfile(
     # 1e5 면 어깨·팔꿈치가 처지고 1e6 은 불안정했다 → 1e7/1e5 (2026-09-18 실측)
     drive_stiffness=1.0e7,
     drive_damping=1.0e5,
+    art_root="chassis_link",                     # 받은 에셋의 articulation root
 )
 
 _ALL = {p.name: p for p in (FRANKA, M0609)}
