@@ -7,14 +7,14 @@ import os
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_USD = ( REPO_ROOT / "simulation" / "assets" / "level" / "ing_library_env_v5.usd" )
+DEFAULT_USD = REPO_ROOT / "simulation" / "assets" / "ing_library_env_v5-test.usd"
 DEFAULT_TRAY = ( REPO_ROOT / "simulation" / "assets" / "book_dataset" / "assets" / "tray" / "tray_v1.usdc" )
 
 # 통합 USD 에 있어야 하는 것들. 없으면 시작할 때 바로 알린다
 REQUIRED_PRIMS = {
-    "로봇(AMR+로봇팔)": "/World/ridgeback_franka",
-    "서가": "/World/bookshelves",
-    "책 원본": "/World/books",
+    "로봇(AMR+로봇팔)": "/World/Nova_Carter_ROS",
+    "서가": "/World/Nova_Carter_ROS/m0609/onrobot_rg2ft/angle_bracket/realsense_d455/RSD455/Camera_OmniVision_OV9782_Color",
+    "책 원본": "/World/Nova_Carter_ROS/chassis_link/sensors/XT_32/PandarXT_32_10hz",
 }
 OPTIONAL_PRIMS = {
     "손목 카메라": "/World/ridgeback_franka/panda_hand/rsd455/RSD455/Camera_OmniVision_OV9782_Color",
