@@ -6,3 +6,5 @@ __pycache__/
 *.pyc
 .env
 simulation/isaac/config/sim_local.env
+.venv/
+.vscode/

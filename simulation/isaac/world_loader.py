@@ -8,8 +8,8 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_USD = REPO_ROOT / "simulation" / "library_system.usd"
-DEFAULT_TRAY = REPO_ROOT / "simulation" / "assets" / "tray.usd"
+DEFAULT_USD = ( REPO_ROOT / "simulation" / "assets" / "level" / "ing_library_env_v5.usd" )
+DEFAULT_TRAY = ( REPO_ROOT / "simulation" / "assets" / "book_dataset" / "assets" / "tray" / "tray_v1.usdc" )
 
 # 로봇 prim 경로는 로봇마다 다르다 → 프로파일에서 가져온다 (config/robot_profiles.py)
 sys.path.insert(0, str(Path(__file__).resolve().parent / "config"))

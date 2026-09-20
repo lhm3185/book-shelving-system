@@ -13,11 +13,15 @@ CONTROLLERS = ISAAC_ROOT / "controllers"
 
 
 def default_usd():
-    return os.environ.get("SIM_USD") or str(REPO_ROOT / "simulation" / "library_system.usd")
+    return os.environ.get("SIM_USD") or str(
+        REPO_ROOT / "simulation" / "assets" / "level" / "ing_library_env_v5.usd"
+    )
 
 
 def default_tray():
-    return os.environ.get("SIM_TRAY") or str(REPO_ROOT / "simulation" / "assets" / "tray.usd")
+    return os.environ.get("SIM_TRAY") or str(
+        REPO_ROOT / "simulation" / "assets" / "book_dataset" / "assets" / "tray" / "tray_v1.usdc"
+    )
 
 
 def default_model():
