@@ -35,7 +35,9 @@ manipulation_node:
     require_slot_dimensions: false
     max_book_dimension: 0.5
     place_region_min: [-0.56, 0.45, 0.25]
-    place_region_max: [-0.22, 0.65, 0.45]
+    # z 상한을 0.45 → 0.55 로 넓혔다. M0609 는 팔 베이스가 37 cm 높아 같은 서가라도
+    # 꽂는 단이 팔 기준 0.5056 이 된다 (Franka 는 0.3399). 한 상자로 둘 다 덮는다 (2026-09-20)
+    place_region_max: [-0.22, 0.65, 0.55]
 
     # mock 실행기 (실패 입력 시험)
     mock_step_s: 0.2

@@ -36,7 +36,12 @@ BOT = profile()
 R = BOT.root
 BASE_LINK = R + "/" + BOT.base_link
 HAND_LINK = R + "/" + BOT.hand_link
-SHELF = "/World/bookshelves/shelf_brown__book_shelf_01"
+# 어느 서가 앞에서 꽂는가. 로봇을 다른 서가 앞에 세우면 **앞면 y 가 달라진다** —
+# 박아 두면 엉뚱한 서가의 앞면을 읽어 책을 허공에 놓는다 (2026-09-20 실제로 겪었다).
+SHELF = os.environ.get("SIM_SHELF_PRIM", "/World/bookshelves/shelf_brown__book_shelf_01")
+# 꽂을 선반판 윗면의 **월드 z**. 로봇 키가 바뀌면 같은 계약 z 라도 다른 단을 가리킨다
+# (M0609 는 팔 베이스가 37 cm 높아 Franka 가 쓰던 단이 팔 기준 -0.04 가 된다).
+SHELF_ROW_Z = float(os.environ.get("SIM_SHELF_ROW_Z", 0.355 * 1.4))
 BOOK_SRC = "/World/books/book_encyclopedia_set_01_2k__book_encyclopedia_set_01_book15"
 ARM_JOINTS = BOT.arm_joints
 FINGERS = BOT.grip_joints
@@ -280,7 +285,7 @@ class BookScene:
         self.shelf_front_y = float(shelf[1])
 
         # 북엔드: 1차 고정 칸마다 한 쌍 (세운 책이 스스로 넘어지는 것 방지 — 칸막이 교훈)
-        floor_z = self.shelf_floor_z = 0.355 * 1.4
+        floor_z = self.shelf_floor_z = SHELF_ROW_Z
         spine_final = self.shelf_front_y + SPINE_INSET
         UsdGeom.Scope.Define(st, "/World/bs_bookends")
         self.bookends = {}      # place_x → (왼쪽 translate op, 오른쪽 translate op, y, z)
