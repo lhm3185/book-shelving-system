@@ -115,6 +115,12 @@ class JointPath(Primitive):
                    f"최대오차 {err:.4f} (허용 {tol}), "
                    f"현재 {np.round(now, 3).tolist()} 목표 {np.round(self._pts[-1], 3).tolist()}")
             (say or print)(msg)
+            # 경유점을 다 넘었는데도 팔이 안 따라오면 **무엇엔가 막힌 것**이다.
+            # 관절값만 보면 어느 물체인지 영영 모른다 — 겹치는 대상을 같이 남긴다
+            # (2026-09-20: 서가인 줄 알고 로봇을 두 번 옮겼는데 아니었다).
+            clash = getattr(ctx.backend, "clash_report", None)
+            if clash is not None and self._i >= len(self._pts) - 1:
+                (say or print)(clash())
         return Status.RUNNING
 
 
@@ -432,6 +438,9 @@ class BookScene:
                 break
         return best
 
+    def _prim_valid(self, p):
+        return self.stage.GetPrimAtPath(p).IsValid() if getattr(self, "stage", None) else True
+
     def aabb(self, p):
         self._cache.Clear()
         return np.array(compute_aabb(self._cache, p, include_children=True), float)
@@ -439,6 +448,33 @@ class BookScene:
     def center(self, p):
         b = self.aabb(p)
         return (b[:3] + b[3:]) / 2
+
+    def clash_report(self):
+        """팔 링크가 무엇과 겹치는지 보고한다.
+
+        왜: 관절이 목표에 못 가면 로그에는 숫자만 남아 **무엇에 막혔는지 알 수 없다.**
+        AABB 겹침은 정확하지는 않지만 '어느 물체를 의심할지' 를 바로 좁혀 준다.
+        """
+        links = [f"{R}/m0609/link_{i}" for i in range(1, 7)] + [HAND_LINK]
+        links = [p for p in links if self._prim_valid(p)]
+        obstacles = [("트레이", self.tray), ("서가", SHELF)]
+        obstacles += [(f"책 {os.path.basename(b)}", b) for b in self.books]
+        obstacles += [("받침판", f"{R}/Cube")]
+        hits = []
+        for ln in links:
+            try:
+                lb = self.aabb(ln)
+            except Exception:
+                continue
+            for label, ob in obstacles:
+                try:
+                    obb = self.aabb(ob)
+                except Exception:
+                    continue
+                ov = np.minimum(lb[3:], obb[3:]) - np.maximum(lb[:3], obb[:3])
+                if np.all(ov > 0):
+                    hits.append(f"{os.path.basename(ln)}↔{label} {np.round(ov, 3).tolist()}")
+        return ("[진단] 겹침: " + ", ".join(hits)) if hits else "[진단] 겹침 없음 (AABB 기준)"
 
     def to_world(self, p_arm):
         return self.l0p + self.Rl0 @ np.asarray(p_arm, float)
@@ -726,6 +762,13 @@ class _Backend:
 
     def say(self, m):
         self.s.say(m)
+
+    def clash_report(self):
+        """팔 링크와 장면 물체의 겹침을 한 줄로 요약한다 (막힌 이유를 눈 없이 알아내려고)"""
+        try:
+            return self.s.clash_report()
+        except Exception as e:
+            return f"[진단] 겹침 검사 실패: {e}"
 
     def set_joint_targets(self, positions):
         self._apply(positions)
