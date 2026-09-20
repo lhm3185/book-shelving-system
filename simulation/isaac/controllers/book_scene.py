@@ -378,8 +378,25 @@ class BookScene:
         hand_p = np.array(SingleXFormPrim(HAND_LINK).get_world_pose()[0])
         lf = np.array(SingleXFormPrim(R + "/" + BOT.finger_links[0]).get_world_pose()[0])
         rf = np.array(SingleXFormPrim(R + "/" + BOT.finger_links[1]).get_world_pose()[0])
-        self._a_loc = np.round(ee_R.T @ ((ee_p - hand_p) / np.linalg.norm(ee_p - hand_p)))
-        self._c_loc = np.round(ee_R.T @ ((rf - lf) / (np.linalg.norm(rf - lf) or 1.0)))
+        # ee_frame 과 hand_link 가 **같은 링크면 차이가 0** 이라 나누면 nan 이 된다. nan 은
+        # quat_from_R 의 max(0.0, nan)=0.0 에 먹혀 **쿼터니언 [0,0,0,0]** 이 되고, 예외 하나 없이
+        # 경로 전체가 망가진다. 지금은 Lula(URDF)와 USD prim 의 원점이 달라 우연히 0 이 아니지만
+        # 로봇이 바뀌면 조용히 터진다. 손가락 쪽 `or 1.0` 도 같은 이유로 위험하다 (2026-09-21 점검).
+        def _unit(v, what):
+            n = float(np.linalg.norm(v))
+            if n < 1e-6:
+                raise RuntimeError(
+                    f"{what} 를 못 구한다 (길이 {n:.2e}). "
+                    f"ee_frame={BOT.ee_frame} hand_link={BOT.hand_link} "
+                    f"finger_links={BOT.finger_links} 를 확인할 것")
+            return v / n
+
+        self._a_loc = np.round(ee_R.T @ _unit(ee_p - hand_p, "접근축"))
+        self._c_loc = np.round(ee_R.T @ _unit(rf - lf, "물림축"))
+        if abs(float(np.dot(self._a_loc, self._c_loc))) > 1e-6:
+            raise RuntimeError(
+                f"접근축 {self._a_loc.tolist()} 와 물림축 {self._c_loc.tolist()} 가 직교하지 않는다. "
+                "np.round 가 축을 뭉갰거나 그리퍼가 비스듬히 달려 있다 — 회전행렬이 안 만들어진다")
         self.say(f"그리퍼 축: 접근축(손 기준) {np.round(self._a_loc, 3).tolist()}, "
                  f"물림축 {np.round(self._c_loc, 3).tolist()}")
         # **파지·삽입 자세는 팔이 놓인 방향을 따라야 한다.**
@@ -452,7 +469,8 @@ class BookScene:
         return best
 
     def _prim_valid(self, p):
-        return self.stage.GetPrimAtPath(p).IsValid() if getattr(self, "stage", None) else True
+        # 확인할 수 없으면 **유효하지 않다**고 본다. 검사의 기본값이 '통과' 면 검사가 아니다
+        return self.stage.GetPrimAtPath(p).IsValid() if getattr(self, "stage", None) else False
 
     def aabb(self, p):
         self._cache.Clear()
@@ -474,9 +492,13 @@ class BookScene:
             sq = get_physx_scene_query_interface()
         except Exception as e:
             return f"[진단] PhysX 조회 불가: {e}"
+        # 로봇 이름을 박으면 다른 프로파일에서 전부 건너뛰고 **'없음' 이라는 거짓 안심**을 준다.
+        # 이 진단은 "서가인 줄 알았는데 아니었다" 를 막으려고 만든 것이라 그게 제일 나쁘다.
+        _arm_dir = os.path.dirname(BOT.hand_link)          # m0609 → 'm0609', franka → ''
+        _pre = f"{R}/{_arm_dir}" if _arm_dir else R
         hits = []
-        for i in range(1, 7):
-            lp = f"{R}/m0609/link_{i}"
+        for i in range(1, BOT.dof + 1):
+            lp = f"{_pre}/link_{i}"
             if not self._prim_valid(lp):
                 continue
             pos = np.asarray(SingleXFormPrim(lp).get_world_pose()[0], float)
@@ -492,7 +514,8 @@ class BookScene:
                 return f"[진단] overlap 실패: {e}"
             # **팔 자신만** 뺀다. 받침판·카터 몸체는 남긴다 —
             # 이것들을 걸러냈다가 "팔 주변에 아무것도 없다" 는 잘못된 결론을 냈다 (2026-09-20).
-            out = sorted({f.split("/World/")[-1] for f in found if "/m0609/link_" not in f})
+            _self = f"/{_arm_dir}/link_" if _arm_dir else "/link_"
+            out = sorted({f.split("/World/")[-1] for f in found if _self not in f})
             if out:
                 hits.append(f"link_{i} 반경18cm: " + ", ".join(x[:46] for x in out[:4]))
         return ("[진단] 팔 주변 물체 — " + " | ".join(hits)) if hits else "[진단] 팔 주변에 바깥 물체 없음"
@@ -577,6 +600,15 @@ class BookScene:
         floor_z = float(place_center_world[2]) - Lb / 2
         if abs(floor_z - self.shelf_floor_z) < 0.07:
             floor_z = self.shelf_floor_z
+        else:
+            # 명령이 가리키는 단과 SHELF_ROW_Z 가 다르다. 책은 명령대로 꽂히지만
+            # **survey() 가 그 책을 '바닥/기타' 로 분류해 성공을 실패로 보고**하고,
+            # 북엔드도 엉뚱한 높이에 만들어진다. SIM_SHELF_ROW_Z 를 안 넘겼을 때 생긴다
+            # (2026-09-21 점검). 조용히 지나가지 않게 한다.
+            self.say(f"[경고] 명령이 가리키는 선반판 {floor_z:.3f} 가 "
+                     f"SIM_SHELF_ROW_Z({self.shelf_floor_z:.3f}) 와 {abs(floor_z-self.shelf_floor_z)*100:.1f} cm 다르다. "
+                     f"꽂기는 되지만 **성공을 실패로 보고**하고 북엔드 높이가 틀린다 — "
+                     f"SIM_SHELF_ROW_Z={floor_z:.3f} 로 다시 띄울 것")
         spine_final = y_front + SPINE_INSET
         grasp = np.array([bc[0], bc[1], bb[5] - TIP_DOWN])
         if book in self.grasp_local:
@@ -618,13 +650,24 @@ class BookScene:
     def fit_bookends(self, place_x, thickness):
         """북엔드 한 쌍을 이 책 두께에 맞춘다 (책마다 두께가 달라서 — 꽂기 전에만 옮긴다)"""
         key = min(self.bookends, key=lambda k: abs(k - place_x)) if self.bookends else None
-        if key is None or abs(key - place_x) > 0.03:
+        if key is None:
+            return
+        gap = abs(key - place_x)
+        if gap > 0.03:
+            # 조용히 돌아가면 북엔드가 **만들어진 자리에 그대로 남는다.** 칸 x 를 옮긴 뒤
+            # (2026-09-20 M0609 에서 +0.04) --place-dx 를 같이 안 옮기면 매번 여기로 빠지는데,
+            # 로그가 없어서 북엔드가 제 자리에 없는 줄도 모른다 (2026-09-21 점검에서 발견).
+            self.say(f"[경고] 북엔드를 못 맞춘다: 꽂을 x {place_x:+.4f} 에서 가장 가까운 "
+                     f"북엔드가 {key:+.4f} ({gap*100:.1f} cm 차이). "
+                     f"--place-dx 를 칸 좌표에 맞출 것 — 북엔드가 엉뚱한 자리에 남는다")
             return
         pL, pR, y, z = self.bookends[key]
         half = thickness / 2 + DIV_GAP + DIV_T / 2
         q = np.array([1.0, 0.0, 0.0, 0.0])
-        SingleXFormPrim(pL).set_world_pose(np.array([key - half, y, z]), q)
-        SingleXFormPrim(pR).set_world_pose(np.array([key + half, y, z]), q)
+        # **key(=--place-dx 값) 가 아니라 실제 꽂을 x 를 중심으로** 놓는다.
+        # key 를 쓰면 3 cm 창 안에서도 그만큼 어긋난 자리에 세워진다
+        SingleXFormPrim(pL).set_world_pose(np.array([place_x - half, y, z]), q)
+        SingleXFormPrim(pR).set_world_pose(np.array([place_x + half, y, z]), q)
 
     # ---------------------------------------------------------------- 실행 조립
     def home_moves(self):
@@ -644,12 +687,16 @@ class BookScene:
         self.robot.set_joint_velocities(np.zeros_like(q))
         # 관절 위치만 옮기면 **구동 목표는 옛 자세에 남아** 첫 동작에서 팔이 튄다
         # (실측: 고정 직후 첫 작업이 M406 으로 실패). 목표도 같은 값으로 맞춘다.
-        self.robot.apply_action(ArticulationAction(joint_positions=q))
+        # joint_indices 를 빼면 일부 환경에서 지령이 반영되지 않는다 (아래 _apply 주석과 같은 이유).
+        # 여기서 빠지면 '구동 목표를 같은 값으로 맞춘다' 는 이 함수의 목적이 조용히 무산된다.
+        self.robot.apply_action(ArticulationAction(
+            joint_positions=q, joint_indices=np.arange(len(q))))
         # 기본 상태로도 저장해 두면 world.reset() 뒤에도 같은 자세로 돌아온다
         try:
             self.robot.set_joints_default_state(positions=q)
-        except Exception:
-            pass
+        except Exception as exc:     # noqa: BLE001
+            # 삼키면 world.reset() 뒤 에셋 기본 자세로 돌아가는데 이유를 알 수 없다
+            self.say(f"기본 자세 저장 실패(무시하고 진행): {exc}")
         # 순간이동 뒤에는 트레이 책도 흔들린다. 충분히 가라앉힌 뒤 준비 완료로 본다
         # (실측: 30 스텝만 두면 첫 작업이 M406 으로 실패)
         for _ in range(settle_steps):
@@ -800,7 +847,7 @@ class _Backend:
 
     def compute_ik(self, position, orientation, seed=None):
         q, ok = self.s.ik_joints(position, orientation, self.get_joint_positions())
-        return (q, True) if ok else (np.zeros(7), False)
+        return (q, True) if ok else (np.zeros(BOT.dof), False)   # 7 이 박혀 있었다 (2026-09-21)
 
     def set_gripper_width(self, w):
         self._grip = float(w)
