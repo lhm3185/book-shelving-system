@@ -25,10 +25,10 @@ ap.add_argument("--out", required=True)
 ap.add_argument("--robot", default="/World/Nova_Carter_ROS")
 ap.add_argument("--plate", default="Cube", help="받침판 prim 이름 (robot 기준)")
 ap.add_argument("--arm-base", default="m0609/base_link")
-ap.add_argument("--max-half", type=float, default=0.396,
-                help="팔 베이스에서 **서가 쪽** 판 끝까지 허용 거리 (m). 실측 기준 0.396")
-ap.add_argument("--shelf-dir", default="-x", choices=["+x", "-x", "+y", "-y"],
-                help="서가가 있는 방향 (월드 기준). 이 레벨은 -x")
+ap.add_argument("--edge", action="append", default=None, metavar="방향:거리",
+                help="변마다 '팔 베이스에서 판 끝까지의 거리'를 지정한다. 여러 번 줄 수 있다. "
+                     "예: --edge -x:0.396 (서가 쪽) --edge -y:0.70 (트레이 쪽). "
+                     "안 주면 서가 쪽 -x:0.396 만 적용")
 args = ap.parse_args()
 
 from isaacsim import SimulationApp  # noqa: E402
@@ -66,22 +66,13 @@ P = np.array(UsdGeom.Xformable(arm).ComputeLocalToWorldTransform(0).ExtractTrans
 say(f"판 x {b[0]:+.3f}~{b[3]:+.3f} ({b[3]-b[0]:.3f} m)  y {b[1]:+.3f}~{b[4]:+.3f} ({b[4]-b[1]:.3f} m)")
 say(f"팔 베이스 {np.round(P, 3).tolist()}")
 
-axis = 0 if "x" in args.shelf_dir else 1
-sign = -1 if args.shelf_dir.startswith("-") else +1
-edge = b[axis] if sign < 0 else b[axis + 3]
-half = abs(edge - P[axis])
-say(f"서가 쪽({args.shelf_dir}) 판 끝 {edge:+.3f}, 팔에서 {half:.3f} m")
+specs = []
+for spec in (args.edge or ["-x:0.396"]):
+    d, v = spec.split(":")
+    specs.append((0 if "x" in d else 1, -1 if d.startswith("-") else +1, float(v), d))
 
-if half <= args.max_half + 1e-6:
-    say(f"이미 {args.max_half} m 이하다 — 바꿀 것 없음")
-    app.close()
-    sys.exit(0)
-
-trim = half - args.max_half
-say(f"**{trim*1000:.0f} mm 트림한다** → 그 변 반폭 {args.max_half:.3f} m")
-
-# Cube 는 size·scale·translate 로 크기가 정해진다. 한 변만 줄이려면
-# 스케일을 줄이고 중심을 반대쪽으로 옮겨 **반대편 끝을 그대로 둔다**.
+# Cube 는 size·scale·translate 로 크기가 정해진다. 한 변만 바꾸려면
+# 스케일을 바꾸고 **반대편 끝이 그대로 있도록** 옮긴다.
 xf = UsdGeom.Xformable(plate)
 ops = {op.GetOpName(): op for op in xf.GetOrderedXformOps()}
 sc_op = next((o for n, o in ops.items() if "scale" in n), None)
@@ -91,45 +82,57 @@ if sc_op is None or tr_op is None:
     app.close()
     sys.exit(1)
 
-sc = np.array(sc_op.Get(), float)
-tr = np.array(tr_op.Get(), float)
-span = b[axis + 3] - b[axis]
-new_span = span - trim
-sc[axis] *= new_span / span
-sc_op.Set(Gf.Vec3f(*[float(v) for v in sc]))
-app.update()
-
-# 스케일은 prim 자기 원점 기준으로 줄어든다. 줄인 뒤 실제 위치를 재서 보정한다.
-#
-# **주의**: translate 는 부모 좌표계 값이고, 이 판은 부모·자신 모두 180° yaw 가 걸려 있다.
-# 월드 보정량을 그대로 더하면 **부호가 뒤집힌다** (2026-09-20 실제로 당함).
-# 부모의 회전을 풀어서 로컬 증분으로 바꾼다.
-cache.Clear()
-mid = np.array(compute_aabb(cache, plate_path, include_children=True), float)
-want_edge = P[axis] + sign * args.max_half
-have_edge = mid[axis] if sign < 0 else mid[axis + 3]
-d_world = np.zeros(3)
-d_world[axis] = want_edge - have_edge
-
 parent = plate.GetParent()
 pw = UsdGeom.Xformable(parent).ComputeLocalToWorldTransform(0)
 Rp = np.array([[pw[0][0], pw[1][0], pw[2][0]],
                [pw[0][1], pw[1][1], pw[2][1]],
                [pw[0][2], pw[1][2], pw[2][2]]], float)
-d_local = Rp.T @ d_world          # 회전만 푼다 (평행이동은 증분이라 무관)
-say(f"보정: 월드 {np.round(d_world, 4).tolist()} → 로컬 {np.round(d_local, 4).tolist()}")
-tr = tr + d_local
-tr_op.Set(Gf.Vec3d(*[float(v) for v in tr]))
-app.update()
+
+for axis, sign, want_half, label in specs:
+    cache.Clear()
+    b = np.array(compute_aabb(cache, plate_path, include_children=True), float)
+    edge = b[axis] if sign < 0 else b[axis + 3]
+    keep = b[axis + 3] if sign < 0 else b[axis]        # 반대편 끝 — 그대로 둬야 한다
+    half = abs(edge - P[axis])
+    if abs(half - want_half) < 1e-4:
+        say(f"{label}: 이미 {want_half:.3f} m — 그대로 둔다")
+        continue
+    say(f"{label}: 팔에서 {half:.3f} m → {want_half:.3f} m "
+        f"({'트림' if want_half < half else '확장'} {abs(want_half-half)*1000:.0f} mm)")
+
+    sc = np.array(sc_op.Get(), float)
+    tr = np.array(tr_op.Get(), float)
+    span = b[axis + 3] - b[axis]
+    new_span = span + (want_half - half)
+    sc[axis] *= new_span / span
+    sc_op.Set(Gf.Vec3f(*[float(v) for v in sc]))
+    app.update()
+
+    # 스케일은 prim 자기 원점 기준으로 바뀐다. 바꾼 뒤 실제 위치를 재서 보정한다.
+    #
+    # **주의**: translate 는 부모 좌표계 값이고, 이 판은 부모·자신 모두 180° yaw 가 걸려 있다.
+    # 월드 보정량을 그대로 더하면 **부호가 뒤집힌다** (2026-09-20 실제로 당함).
+    cache.Clear()
+    mid = np.array(compute_aabb(cache, plate_path, include_children=True), float)
+    have_keep = mid[axis + 3] if sign < 0 else mid[axis]
+    d_world = np.zeros(3)
+    d_world[axis] = keep - have_keep       # 반대편 끝을 원래 자리로 되돌린다
+    tr = tr + Rp.T @ d_world
+    tr_op.Set(Gf.Vec3d(*[float(v) for v in tr]))
+    app.update()
+
+    cache.Clear()
+    b2 = np.array(compute_aabb(cache, plate_path, include_children=True), float)
+    e2 = b2[axis] if sign < 0 else b2[axis + 3]
+    k2 = b2[axis + 3] if sign < 0 else b2[axis]
+    say(f"  → 팔에서 {abs(e2 - P[axis]):.3f} m, 반대편 {keep:+.3f}→{k2:+.3f} "
+        f"{'OK' if abs(k2-keep) < 1e-3 else '**유지 실패**'}")
 
 cache.Clear()
 b2 = np.array(compute_aabb(cache, plate_path, include_children=True), float)
-edge2 = b2[axis] if sign < 0 else b2[axis + 3]
-say(f"바뀐 판 x {b2[0]:+.3f}~{b2[3]:+.3f} ({b2[3]-b2[0]:.3f} m)  "
+say("")
+say(f"최종 판 x {b2[0]:+.3f}~{b2[3]:+.3f} ({b2[3]-b2[0]:.3f} m)  "
     f"y {b2[1]:+.3f}~{b2[4]:+.3f} ({b2[4]-b2[1]:.3f} m)")
-say(f"서가 쪽 끝 {edge2:+.3f}, 팔에서 {abs(edge2 - P[axis]):.3f} m")
-say(f"반대편 끝은 {b[axis+3] if sign < 0 else b[axis]:+.3f} → "
-    f"{b2[axis+3] if sign < 0 else b2[axis]:+.3f} (유지되어야 한다)")
 
 out = os.path.expanduser(args.out)
 stage.Export(out)
