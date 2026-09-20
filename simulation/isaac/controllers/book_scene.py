@@ -457,7 +457,11 @@ class BookScene:
             p_w, q_w = SingleXFormPrim(book).get_world_pose()
             top = np.asarray(p_w, float) + R_from_quat(np.asarray(q_w, float)) @ (c_loc + up_loc * hz)
             grasp = np.array([top[0], top[1], top[2] - TIP_DOWN])   # 책 자신의 윗면 중심에서 내려간다
-        pre = grasp + np.array([0, 0, 0.13]); lift = grasp + np.array([0, 0, 0.17])
+        # 파지 전 대기 높이와 들어올림 높이. 예전에는 0.13/0.17 이 코드에 박혀 있었는데,
+        # 6축은 그 높이에서 IK 가 안 풀린다 (2026-09-20 M0609 에서 접근 IK 실패) → 설정으로 뺀다.
+        _pre_h = float(self.conf["grasp"].get("pre_lift_m", 0.13))
+        _lift_h = float(self.conf["grasp"].get("lift_m", 0.17))
+        pre = grasp + np.array([0, 0, _pre_h]); lift = grasp + np.array([0, 0, _lift_h])
         grip_z = floor_z + Lb / 2 + 0.004
         y_pre = y_front - (W - TIP_DOWN) - 0.03
         transfer = np.array([place_x, y_pre - 0.02, grip_z + 0.06]); pre_ins = np.array([place_x, y_pre, grip_z + 0.01])
