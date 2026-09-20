@@ -157,11 +157,22 @@ class BookScene:
         _BR = R_from_quat(np.asarray(_bq, float))
         # 팔 기준 트레이 중앙 — book_profiles.yaml 의 칸 좌표와 같은 값이어야 한다
         _tray_rel = np.array([float(tray_center[0]), float(tray_center[1]), 0.0])
-        _tray_w = _bp + _BR @ _tray_rel
+        _R0 = R_from_quat(np.asarray(_bq, float))
+        _yaw0 = math.atan2(float(_R0[1, 0]), float(_R0[0, 0]))
+        _Ry0 = np.array([[math.cos(_yaw0), -math.sin(_yaw0), 0.0],
+                         [math.sin(_yaw0), math.cos(_yaw0), 0.0],
+                         [0.0, 0.0, 1.0]])
+        _tray_w = _bp + _Ry0 @ _tray_rel
         self.tray = "/World/bs_tray"
         add_reference_to_stage(tray_usd, self.tray)
+        # **트레이는 수평이어야 한다.** 팔 베이스 자세를 그대로 쓰면 거기 섞인 뒤집힘·기울기가
+        # 트레이에 그대로 들어가 책이 미끄러진다 (2026-09-20: 책 6권이 한쪽에 뭉쳤다).
+        # 방향(yaw)만 따르고 나머지는 버린다.
+        _yaw = _yaw0
+        _tray_q = np.array([math.cos(_yaw / 2), 0.0, 0.0, math.sin(_yaw / 2)])
         SingleXFormPrim(self.tray).set_world_pose(
-            np.array([_tray_w[0], _tray_w[1], DECK_Z]), np.asarray(_bq, float))
+            np.array([_tray_w[0], _tray_w[1], DECK_Z]), _tray_q)
+        say(f"트레이 자세: yaw {math.degrees(_yaw):.1f}° (수평 유지)")
         # **월드 값을 따로 들고 있는다** — 아래 계산들은 월드 기준이라 팔 기준 값을 그대로
         # 쓰면 x,y 는 팔 기준·z 는 월드인 잡종 좌표가 된다 (2026-09-20 실제로 IK 실패).
         self.tray_center_w = _tray_w.copy()
@@ -179,7 +190,10 @@ class BookScene:
         # 칸은 **팔 기준 x 축**을 따라 늘어선다 (월드 x 가 아니다)
         slot_rel = [np.array([tray_center[0] + (i + 0.5 - nslots / 2) * pitch,
                               tray_center[1], 0.0]) for i in range(nslots)]
-        slot_w = [_bp + _BR @ r for r in slot_rel]
+        _Ryaw = np.array([[math.cos(_yaw), -math.sin(_yaw), 0.0],
+                          [math.sin(_yaw), math.cos(_yaw), 0.0],
+                          [0.0, 0.0, 1.0]])
+        slot_w = [_bp + _Ryaw @ r for r in slot_rel]
         slot_x = [float(w[0]) for w in slot_w]      # 호환용 (월드 x)
 
         # 책
