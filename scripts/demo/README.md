@@ -102,8 +102,10 @@ FEEDBACK=1 ./scripts/demo/pick.sh          # 단계별 진행 보기
 | `target_slot.pose.orientation` | yaw +90° → `z=w=0.7071068` |
 | `job_id`, `book_id` | 비어 있으면 거절 |
 
-> **`base_link` 를 쓰면 안 됩니다.** 결합 로봇에서 `base_link` 는 AMR 몸체라
-> 팔 기준과 **0.655 m** 어긋납니다.
+> **`base_link` 를 쓰면 안 됩니다.** 지금 TF 에서 `base_link` 는 **팔 베이스가 맞지만**
+> (Isaac 이 prim 이름 `m0609/base_link` 를 frame 으로 냅니다), AMR 쪽도 같은 이름을 낼 수
+> 있어 **tf2 가 팔 베이스와 AMR 몸체를 같은 frame 으로 볼 위험**이 있습니다. 그러면 어긋난
+> 좌표가 조용히 통과합니다. 계약 이름 `arm_base_link` 는 로봇이 바뀌어도 안 바뀝니다.
 
 오류 코드는 `docs/doyoon-kim/web_claude/learning_manipulation_node.md` §3 참조.
 요약: **410 = 요청이 잘못됨(재시도 금지)**, 411 = 아직 준비 안 됨(잠시 뒤 재시도),
