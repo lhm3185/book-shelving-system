@@ -7,20 +7,18 @@ vision_manager:
     trigger_topic: /perception/detect_request
     perception_action: /detect_target_slot
     wait_for_trigger: true
-    camera_frame: sim_camera
-    target_frame: arm_base_link
+    camera_frame: RSD455
+    target_frame: base_link
     depth_registered: true
     depth_scale: 0.0
-    sync_slop: 0.1
-    model_path: /home/rokey/도서관/260918_bag_vision/model/book_tray_best.pt
+    sync_slop: 0.5
     book_topic: /perception/books
     book_pose_topic: /perception/book_pose
     debug_image_topic: /perception/debug_image
-    show_debug_window: true
+    show_debug_window: false
     # Depth로 계산한 빈 책장 단의 3D 점을 발행할 토픽입니다.
     empty_slot_topic: /perception/empty_shelf_position
     # 책장 전체 segmentation에 사용하는 YOLO weight 경로입니다.
-    shelf_model_path: /home/rokey/livrary_datas/260918_train/best.pt
     # 책장 검출을 인정할 최소 confidence입니다.
     shelf_confidence_threshold: 0.50
     # 책장을 위에서부터 나눌 단 개수입니다.
@@ -28,7 +26,7 @@ vision_manager:
     # 책 표면과 빈 공간의 깊이 차이 기준(m)입니다.
     shelf_depth_margin: 0.05
     # 삽입 후보 좌표가 정의된 기준 frame입니다.
-    slot_position_frame: arm_base_link
+    slot_position_frame: base_link
     # 검증된 4개 삽입 후보의 x,y,z 좌표를 평탄화해 기록합니다.
     slot_positions: [-0.3497, 0.5495, 0.3399, -0.4297, 0.5495, 0.3399, -0.5097, 0.5495, 0.3399, -0.2697, 0.5495, 0.3399]
     # 후보 중심 주변에서 깊이를 읽을 픽셀 반경입니다.
