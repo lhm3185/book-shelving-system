@@ -51,6 +51,16 @@ rosdep update
 rosdep install --from-paths src --ignore-src -r -y
 ~~~
 
+nav2 관련 패키지 설치
+~~~bash
+sudo apt update
+
+sudo apt install -y \
+  ros-jazzy-navigation2 \
+  ros-jazzy-nav2-bringup \
+  ros-jazzy-pointcloud-to-laserscan
+~~~
+
 이미 저장소를 받은 팀원은 새 브랜치를 만들기 전에 main을 최신화합니다.
 
 ~~~bash

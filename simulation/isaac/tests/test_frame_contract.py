@@ -13,7 +13,10 @@
 import re
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
+
+import yaml
 
 ISAAC_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = ISAAC_ROOT.parents[1]
@@ -52,6 +55,30 @@ def test_통합_월드의_기본_로봇은_m0609(monkeypatch):
     monkeypatch.delenv("ARM_ROBOT", raising=False)
     assert profile().name == "m0609"
     assert profile().root == "/World/Nova_Carter_ROS"
+
+
+def test_m0609_lula_입력은_저장소_내부에_있다():
+    """개인 홈 디렉터리의 강의 실습 폴더에 다시 의존하지 않게 한다."""
+    mode, descriptor, urdf = profile("m0609").lula
+    assert mode == "files"
+    for path in (Path(descriptor), Path(urdf)):
+        assert path.is_file(), f"M0609 Lula 입력 파일이 없다: {path}"
+        assert path.resolve().is_relative_to(REPO_ROOT.resolve()), (
+            f"M0609 Lula 입력은 저장소 내부여야 한다: {path}")
+
+
+def test_m0609_descriptor와_urdf의_관절_프레임이_일치한다():
+    """파일 두 개가 존재해도 서로 다른 로봇용이면 Lula 초기화가 실패한다."""
+    _, descriptor, urdf = profile("m0609").lula
+    spec = yaml.safe_load(Path(descriptor).read_text(encoding="utf-8"))
+    robot = ET.parse(urdf).getroot()
+    urdf_joints = {joint.attrib["name"] for joint in robot.findall("joint")}
+    urdf_links = {link.attrib["name"] for link in robot.findall("link")}
+
+    assert spec["cspace"] == profile("m0609").arm_joints
+    assert set(spec["cspace"]).issubset(urdf_joints)
+    assert spec["root_link"] in urdf_links
+    assert profile("m0609").ee_frame in urdf_links
 
 
 def test_라이다_prim은_로봇_프로파일마다_다르다():

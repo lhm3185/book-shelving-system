@@ -9,18 +9,23 @@
     profile("m0609")                                      # 코드에서 직접
 
 M0609 값의 출처 (2026-09-19 실측 / `M0609_PORT_PLAN.md`)
-    - 관절 이름·한계: GPU PC `~/Isaac_Sim_b-1/src_pra/M0609/` 의 descriptor·URDF
+    - 관절 이름·한계: 저장소 `simulation/assets/cobot3_ws/isaacpjt/M0609/` 의 descriptor·URDF
     - 그리퍼: **`finger_joint` 은 명령해도 0.0008 rad 밖에 안 움직인다** — 명령 대상이 아니다.
       실제로 도는 것은 양쪽 knuckle (0.256 / 0.300 rad). 폐루프 링크라 연동이 깔끔하지 않다.
       우리 파이프라인은 파지할 때 **고정 조인트로 책을 붙이므로** 그리퍼가 물리적으로 쥘 필요는 없다.
     - 손목 카메라: RG2 의 `angle_bracket` 에 RealSense D455 가 이미 붙어 있고,
       카메라 prim 이름이 기존과 같다(`Camera_OmniVision_OV9782_Color`). link_6 기준 오프셋 실측.
 
-**경로는 2026-09-19 수령한 AMR 담당 에셋 기준으로 확정했다.**
-레벨: `~/Desktop/Collected_ing_library_env_v5-firstFinal/ing_library_env_v5.usd`
-(같은 이름의 바탕화면 단독 USD 에는 **로봇이 없다** — 참조가 안 풀린다. 자립본 폴더를 쓸 것)
+**경로는 2026-09-19 수령한 AMR 담당 에셋을 프로젝트에 이식한 구조로 확정했다.**
+최종 레벨: `simulation/assets/ing_library_env_v5-test.usd`
+결합 로봇과 하위 M0609/RG2 USD도 `simulation/assets/` 아래의 상대 참조로 함께 둔다.
 """
 import os
+from pathlib import Path
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_M0609_ASSET_ROOT = _REPO_ROOT / "simulation/assets/cobot3_ws/isaacpjt/M0609"
 
 
 class RobotProfile:
@@ -131,8 +136,10 @@ M0609 = RobotProfile(
                   "m0609/onrobot_rg2ft/right_inner_finger"],
     vel_limit=[2.618, 2.618, 3.1416, 3.927, 3.927, 3.927],   # M0609 URDF
     # verify_carter_m0609.py 에서 IK 가 실제로 풀린 조합 (2026-09-18 확인)
-    lula=("files", os.path.expanduser("~/Isaac_Sim_b-1/src_pra/M0609/descriptor/m0609_description.yaml"),
-          os.path.expanduser("~/Isaac_Sim_b-1/src_pra/M0609/doosan-robot2/urdf/m0609.urdf")),
+    # IK 입력도 결합 로봇 USD 와 같은 저장소 자산 트리에서 읽는다. 개인 홈 경로에
+    # 의존하면 새 PC/다른 팀원 환경에서 시뮬 시작 직후 Lula 로드가 실패한다.
+    lula=("files", str(_M0609_ASSET_ROOT / "descriptor/m0609_description.yaml"),
+          str(_M0609_ASSET_ROOT / "doosan-robot2/urdf/m0609.urdf")),
     camera_prim="m0609/onrobot_rg2ft/angle_bracket/realsense_d455/RSD455/Camera_OmniVision_OV9782_Color",
     lidar_prim="chassis_link/sensors/XT_32/PandarXT_32_10hz",
     camera_offset=(0.0115, 0.0450, 0.0525),      # link_6 기준, 회전 X축 180° (2026-09-19 실측)

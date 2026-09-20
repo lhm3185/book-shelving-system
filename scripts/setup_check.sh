@@ -3,9 +3,8 @@
 #
 #   ./scripts/setup_check.sh
 #
-# 왜 있나: 저장소만 받아서는 안 돌아간다. Isaac 설치, ROS, 그리고 **git 에 없는 자산**
-# (레벨 USD, 책 USD, M0609 기술서)이 따로 있어야 한다. 무엇이 없는지 사람이 하나씩
-# 찾아내는 데 시간이 든다 — 한 번에 보여준다.
+# 왜 있나: 저장소 자산은 Git LFS 내려받기 상태까지 온전해야 하고, Isaac/ROS/GPU도
+# 준비돼야 한다. 무엇이 없는지 사람이 하나씩 찾는 대신 한 번에 보여준다.
 set -u
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 miss=0
@@ -66,23 +65,21 @@ _n=$(ls "$REPO_ROOT"/simulation/assets/book_dataset/usd_v2/*book0[1-6].usdc 2>/d
 [ "$_n" -eq 6 ] && ok "책 USD 6종" || bad "책 USD ($_n/6) — git 클론이 온전한지 확인"
 [ -f "$REPO_ROOT/simulation/assets/book_dataset/assets/tray/tray_v1.usdc" ] \
     && ok "트레이 USD" || bad "트레이 USD"
+[ -f "$REPO_ROOT/simulation/assets/cobot3_ws/isaacpjt/M0609/descriptor/m0609_description.yaml" ] \
+    && ok "M0609 Lula 기술서" || bad "M0609 Lula 기술서"
+[ -f "$REPO_ROOT/simulation/assets/cobot3_ws/isaacpjt/M0609/doosan-robot2/urdf/m0609.urdf" ] \
+    && ok "M0609 URDF" || bad "M0609 URDF"
 
-head_ "5-2. git 에 없는 자산 (USB 나 scp 로 받아야 한다)"
-# 용량이 크거나 외부 소유라 저장소에 못 넣은 것들. 경로는 robot_profiles.py 기본값과 같아야 한다.
-declare -A ASSETS=(
-    ["$HOME/Isaac_Sim_b-1/src_pra/M0609/descriptor/m0609_description.yaml"]="M0609 Lula 기술서 (IK 에 필요)"
-    ["$HOME/Isaac_Sim_b-1/src_pra/M0609/doosan-robot2/urdf/m0609.urdf"]="M0609 URDF"
-    ["$HOME/Desktop/Collected_ing_library_env_v5-firstFinal"]="레벨 USD 폴더 (약 130MB/개) — AMR 담당 제작본"
-)
-for p in "${!ASSETS[@]}"; do
-    [ -e "$p" ] && ok "${ASSETS[$p]}" || bad "${ASSETS[$p]}  →  $p"
-done
-
-# 레벨은 **생성물**이다. 없으면 Isaac 이 4분 뜬 뒤에야 실패한다 — 여기서 미리 본다
-_LV="$HOME/Desktop/Collected_ing_library_env_v5-firstFinal"
-for _f in level_yaw0.usd level_shelf01.usd; do
-    [ -f "$_LV/$_f" ] && ok "레벨 $_f" \
-        || bad "레벨 $_f — 원본에서 생성 필요 (SETUP_NEW_PC.md §5)"
+head_ "5-2. 최종 통합 월드 (저장소 기본값)"
+# world_loader.py의 기본값과 같은 파일을 본다. 외부 Desktop 경로는 기본 실행에 필요 없다.
+_LV="$REPO_ROOT/simulation/assets"
+for _f in ing_library_env_v5-test.usd Nova_Carter_ROS.usd \
+    cobot3_ws/isaacpjt/M0609/doosan-robot2/urdf/m0609_isaac_sim/m0609_isaac_sim.usd \
+    cobot3_ws/isaacpjt/M0609/onrobot_rg2/urdf/onrobot_rg2/onrobot_rg2.usd; do
+    _p="$_LV/$_f"
+    _sz=$(stat -c%s "$_p" 2>/dev/null || echo 0)
+    [ "$_sz" -gt 1024 ] && ok "시뮬 자산 $_f" \
+        || bad "시뮬 자산 $_f — git lfs pull 또는 클론 상태 확인"
 done
 
 head_ "6. DDS 네트워크 설정 (가장 많이 걸리는 함정)"

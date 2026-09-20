@@ -18,7 +18,7 @@ HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[1]
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--usd", default="", help="열 USD. 비우면 simulation/library_system.usd (환경변수 SIM_USD 도 가능)")
+ap.add_argument("--usd", default="", help="열 USD. 비우면 저장소의 ing_library_env_v5-test.usd (SIM_USD로 재정의 가능)")
 ap.add_argument("--tray", default="", help="트레이 USD. 비우면 simulation/assets/tray.usd")
 # **팔 기준(arm_base_link) 좌표**다. 예전에는 월드 좌표(2.36, -2.94)였는데, 로봇이 다른
 # 자리로 가면 그대로 깨진다. 기본값은 book_profiles.yaml 의 트레이 칸 평균과 같다.
@@ -65,7 +65,10 @@ sys.path.insert(0, str(HERE / "sensors"))
 sys.path.insert(0, str(REPO_ROOT / "ros2_ws" / "src" / "shelving_manipulation"))
 
 from isaacsim import SimulationApp  # noqa: E402
-app = SimulationApp({"headless": not args.gui})
+app = SimulationApp({
+    "headless": not args.gui,
+    "enable_motion_bvh": True,
+    })
 
 import ros_bridge  # noqa: E402
 import world_loader  # noqa: E402
@@ -101,9 +104,38 @@ MIXED_BOOKS = [
 
 
 def _before_reset(stage):
-    """재생(초기화) 전에만 반영되는 설정 — OmniGraph 값은 실행 중 바꾸면 무시된다"""
+    """재생 전에 AMR 물리 상태와 ROS 그래프를 준비한다."""
+    from pxr import UsdPhysics
+
+    # M0609 원본의 root_joint는 body0가 비어 있어 팔을 월드에 고정한다.
+    # 팔이 FixedJoint를 통해 chassis_link와 연결돼 있으므로 이것이 켜져 있으면
+    # 카터 전체가 월드에 고정되어 /cmd_vel을 받아도 움직이지 않는다.
+    root_joint_path = "/World/Nova_Carter_ROS/m0609/root_joint"
+    root_joint = stage.GetPrimAtPath(root_joint_path)
+
+    if not root_joint.IsValid():
+        raise RuntimeError(
+            f"월드 고정 root_joint를 찾을 수 없음: {root_joint_path}"
+        )
+
+    root_joint_api = UsdPhysics.Joint(root_joint)
+    root_joint_api.CreateJointEnabledAttr().Set(False)
+
+    # 중복 Articulation Root를 먼저 제거한다.
+    if root_joint.HasAPI(UsdPhysics.ArticulationRootAPI):
+        root_joint.RemoveAPI(UsdPhysics.ArticulationRootAPI)
+
+    # jointEnabled=False만으로 PhysX가 조인트를 계속 생성하므로
+    # Prim 자체를 비활성화해 물리 장면에서 완전히 제외한다.
+    root_joint.SetActive(False)
+
+    say(f"AMR 월드 고정 조인트 완전 비활성화: {root_joint_path}")
+
+    ros_bridge.ensure_navigation_graph(stage, say=say)
+
     if (args.camera_prim or args.amr_test_overrides) and args.camera_hz < 60:
         camera_bridge.SensorGate.preset_camera_hz(stage, R, args.camera_hz, say)
+
     if args.amr_test_overrides:
         camera_bridge.apply_amr_test_overrides(stage, R, say)
 

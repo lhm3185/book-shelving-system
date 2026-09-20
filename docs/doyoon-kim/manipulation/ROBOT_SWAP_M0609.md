@@ -8,15 +8,15 @@
 
 ## 1. 다행인 것 — M0609 설정이 이미 있다
 
-GPU PC `~/Isaac_Sim_b-1/src_pra/M0609/` 에 예전 작업물이 그대로 있습니다.
+실행에 필요한 M0609 Lula 입력과 결합 로봇 USD는 저장소의
+`simulation/assets/cobot3_ws/isaacpjt/M0609/` 아래에 함께 둡니다.
 
 | 있는 것 | 내용 |
 | --- | --- |
 | `descriptor/m0609_description.yaml` | Lula 로봇 기술서 (관절 `joint_1`~`joint_6`, root `base_link`, 충돌 구) |
-| `rmpflow/m0609_rmpflow_common.yaml` | RMPflow 설정 |
-| `doosan-robot2/urdf/m0609.urdf`, `m0609_isaac_sim.urdf` | URDF (관절 속도 한계 2.618~3.927 rad/s) |
-| `onrobot_rg2/urdf/onrobot_rg2.urdf` | **OnRobot RG2 그리퍼** |
-| `Collected_m0609_gripper/`, `~/Desktop/Collected_m0609_gripper.usd` | 그리퍼 붙인 USD |
+| `doosan-robot2/urdf/m0609.urdf` | Lula용 URDF (관절 속도 한계 2.618~3.927 rad/s) |
+| `doosan-robot2/urdf/m0609_isaac_sim/` | 결합 월드가 참조하는 M0609 USD |
+| `onrobot_rg2/urdf/onrobot_rg2/` | 결합 월드가 참조하는 **OnRobot RG2** USD |
 
 Isaac 이 기본 제공하는 motion_generation 설정에는 **Doosan 이 없습니다** (Franka·FR3·UR·Kawasaki·Denso·Festo·Techman·Kuka·Fanuc 뿐). 위 파일들이 그 자리를 대신합니다.
 

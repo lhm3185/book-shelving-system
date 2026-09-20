@@ -7,20 +7,27 @@
     4. M0609 Lula 설정으로 IK 가 풀리는가 (기존 Franka 설정 대신)
 
 실행
-    ISAAC_ENTRY=simulation/isaac/tools/verify_carter_m0609.py ./scripts/run_isaac_tool.sh \\
-        --usd ~/Desktop/carter_m0609.usd
+    ISAAC_ENTRY=simulation/isaac/tools/verify_carter_m0609.py ./scripts/run_isaac_tool.sh
 """
 import argparse
 import os
 import sys
+from pathlib import Path
+
+_ISAAC_ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT = _ISAAC_ROOT.parents[1]
+sys.path.insert(0, str(_ISAAC_ROOT / "config"))
+from robot_profiles import profile  # noqa: E402
+
+
+_M0609 = profile("m0609")
+_DEFAULT_DESCRIPTOR, _DEFAULT_URDF = _M0609.lula[1:]
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--usd", default=os.path.expanduser("~/Desktop/carter_m0609.usd"))
-ap.add_argument("--robot", default="/World/carter_m0609")
-ap.add_argument("--descriptor", default=os.path.expanduser(
-    "~/Isaac_Sim_b-1/src_pra/M0609/descriptor/m0609_description.yaml"))
-ap.add_argument("--urdf", default=os.path.expanduser(
-    "~/Isaac_Sim_b-1/src_pra/M0609/doosan-robot2/urdf/m0609.urdf"))
+ap.add_argument("--usd", default=str(_REPO_ROOT / "simulation/assets/ing_library_env_v5-test.usd"))
+ap.add_argument("--robot", default=_M0609.articulation_root)
+ap.add_argument("--descriptor", default=_DEFAULT_DESCRIPTOR)
+ap.add_argument("--urdf", default=_DEFAULT_URDF)
 ap.add_argument("--ee", default="link_6", help="IK 를 풀 말단 링크 이름")
 ap.add_argument("--kp", type=float, default=1.0e5, help="팔 위치 게인")
 ap.add_argument("--kd", type=float, default=1.0e4, help="팔 감쇠 게인")

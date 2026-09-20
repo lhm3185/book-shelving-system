@@ -3,7 +3,7 @@
 #   ISAAC_ENTRY=simulation/isaac/tools/capture_spines.py ./scripts/run_isaac_tool.sh --views 10
 #   ./scripts/run_isaac_sim.sh --gui        # 화면 있음
 #   ./scripts/run_isaac_sim.sh --headless   # 화면 없음 (기본)
-#   SIM_USD=~/Desktop/ing_library_env_v5.usd ./scripts/run_isaac_sim.sh --gui --book-variants mixed
+#   ./scripts/run_isaac_sim.sh --gui --book-variants mixed
 #
 # 저장소 코드를 그대로 실행한다 (~/arm 으로 복사하지 않는다).
 # Isaac 설치 위치만 시스템마다 다르므로 ISAAC_SIM_PATH 로 받는다.
@@ -25,7 +25,13 @@ export LD_LIBRARY_PATH="$(strip_ros "${LD_LIBRARY_PATH:-}")"
 unset AMENT_PREFIX_PATH CMAKE_PREFIX_PATH COLCON_PREFIX_PATH ROS_VERSION ROS_PYTHON_VERSION ROS_AUTOMATIC_DISCOVERY_RANGE
 export ROS_DISTRO=jazzy
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-export FASTRTPS_DEFAULT_PROFILES_FILE="${FASTRTPS_DEFAULT_PROFILES_FILE:-$HOME/.ros/fastdds_whitelist.xml}"
+if [ -z "${FASTRTPS_DEFAULT_PROFILES_FILE+x}" ]; then
+    _DDS_PROFILE="$HOME/.ros/fastdds_whitelist.xml"
+    [ -f "$_DDS_PROFILE" ] && export FASTRTPS_DEFAULT_PROFILES_FILE="$_DDS_PROFILE"
+elif [ -n "$FASTRTPS_DEFAULT_PROFILES_FILE" ] && [ ! -f "$FASTRTPS_DEFAULT_PROFILES_FILE" ]; then
+    echo "FASTRTPS_DEFAULT_PROFILES_FILE 파일이 없다: $FASTRTPS_DEFAULT_PROFILES_FILE" >&2
+    exit 1
+fi
 export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$ISAAC_SIM_PATH/exts/isaacsim.ros2.bridge/jazzy/lib"
 
 # 원격(ssh)에서 창을 이 PC 모니터에 띄울 때

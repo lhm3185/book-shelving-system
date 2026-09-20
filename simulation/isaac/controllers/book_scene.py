@@ -199,7 +199,7 @@ class BookScene:
                          [math.sin(_yaw0), math.cos(_yaw0), 0.0],
                          [0.0, 0.0, 1.0]])
         _tray_w = _bp + _Ry0 @ _tray_rel
-        self.tray = "/World/bs_tray"
+        self.tray = f"{BOT.articulation_root}/bs_tray"
         add_reference_to_stage(tray_usd, self.tray)
         # **트레이는 수평이어야 한다.** 팔 베이스 자세를 그대로 쓰면 거기 섞인 뒤집힘·기울기가
         # 트레이에 그대로 들어가 책이 미끄러진다 (2026-09-20: 책 6권이 한쪽에 뭉쳤다).
