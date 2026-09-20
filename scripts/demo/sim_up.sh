@@ -47,5 +47,9 @@ if [ "$SIM_HOST" = "local" ]; then
     bash -c "$REMOTE"
 else
     say "### ssh $SIM_USER@$SIM_HOST (Ctrl+C 로 Isaac 종료)"
-    ssh -t "$SIM_USER@$SIM_HOST" "bash -lc '$(printf '%s' "$REMOTE" | sed "s/'/'\\\\''/g")'"
+    # 스크립트를 base64 로 실어 보낸다. 따옴표를 sed 로 이스케이프하는 방식은 한 번 틀리면
+    # **원격에서만** 깨져서, 지금처럼 GPU PC 에 접속 못 하는 상황에서는 검증할 방법이 없다.
+    # base64 는 따옴표·개행·한글이 섞여도 안 깨진다 (왕복 일치를 로컬에서 확인함).
+    ssh -t "$SIM_USER@$SIM_HOST" \
+        "echo $(printf '%s' "$REMOTE" | base64 -w0) | base64 -d | bash -l"
 fi
