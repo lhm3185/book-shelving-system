@@ -455,7 +455,11 @@ class BookScene:
         왜: 관절이 목표에 못 가면 로그에는 숫자만 남아 **무엇에 막혔는지 알 수 없다.**
         AABB 겹침은 정확하지는 않지만 '어느 물체를 의심할지' 를 바로 좁혀 준다.
         """
-        links = [f"{R}/m0609/link_{i}" for i in range(1, 7)] + [HAND_LINK]
+        # **자식을 빼고** 링크 자체만 본다. 자식을 넣으면 link_2 안에 그리퍼까지 들어가서
+        # "link_2 가 트레이와 겹친다" 는 당연한(그리고 쓸모없는) 결과가 나온다 (2026-09-20).
+        links = [f"{R}/m0609/link_{i}" for i in range(1, 7)]
+        links += [f"{R}/m0609/onrobot_rg2ft/{n}" for n in
+                  ("base_link", "left_inner_finger", "right_inner_finger")]
         links = [p for p in links if self._prim_valid(p)]
         obstacles = [("트레이", self.tray), ("서가", SHELF)]
         obstacles += [(f"책 {os.path.basename(b)}", b) for b in self.books]
@@ -463,7 +467,8 @@ class BookScene:
         hits = []
         for ln in links:
             try:
-                lb = self.aabb(ln)
+                self._cache.Clear()
+                lb = np.array(compute_aabb(self._cache, ln, include_children=False), float)
             except Exception:
                 continue
             for label, ob in obstacles:
