@@ -85,7 +85,8 @@ DEFAULT_LIMITS = {
     'max_book_dimension': 0.5,
     # 검증된 꽂기 범위 (Isaac 레벨 v3, 책 4곳 × 트레이 6칸 계획 통과 영역 + 여유)
     'place_region_min': [-0.56, 0.45, 0.25],
-    # 0.45 → 0.55: M0609 는 팔 베이스가 높아 꽂는 단이 팔 기준 0.5056 이다 (manipulation.yaml 과 같이 유지)
+    # 0.45 → 0.55: M0609 는 팔 베이스가 높아 꽂는 단이 팔 기준 0.5097 이다 (manipulation.yaml 과 같이 유지).
+    # 이 값이 계약 좌표를 담는지는 test/test_contract_coords.py 가 지킨다
     'place_region_max': [-0.22, 0.65, 0.55],
 }
 
