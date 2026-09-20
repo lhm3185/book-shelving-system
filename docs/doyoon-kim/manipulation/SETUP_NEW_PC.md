@@ -96,12 +96,35 @@ scp -r rokey@10.10.0.2:~/Desktop/Collected_ing_library_env_v5-firstFinal ~/Deskt
 scp -r rokey@10.10.0.2:~/Isaac_Sim_b-1 ~/
 ```
 
-레벨은 **개당 130MB** 다. 필요한 것만 받아도 된다:
+레벨은 **개당 130MB** 다.
 
-| 파일 | 쓰임 |
-| --- | --- |
-| `level_yaw0.usd` | 파지 시연 (검증됨) |
-| `level_shelf01.usd` | 서가 삽입 (미해결) |
+### 원본 하나만 있으면 된다 — 나머지는 만들 수 있다
+
+| 파일 | 어디서 | 쓰임 |
+| --- | --- | --- |
+| `ing_library_env_v5.usd` | **AMR 담당 원본** (USB·GPU PC) | 이것만 있으면 아래를 만든다 |
+| `level_yaw0.usd` | **아래 명령으로 생성** | 파지 시연 (검증됨) |
+| `level_shelf01.usd` | **아래 명령으로 생성** | 서가 삽입 (미해결) |
+
+`level_*.usd` 는 우리가 원본에서 만든 파생본이다. 옮겨 오지 않았어도
+Isaac 만 깔려 있으면 **저장소 도구로 재생성**된다.
+
+```bash
+cd ~/<저장소>
+LV=~/Desktop/Collected_ing_library_env_v5-firstFinal
+
+# ① 로봇 yaw 를 0 으로 — 경로 계산이 월드 축을 쓰기 때문 (임시 조치, 도구 주석 참조)
+ARM_ROBOT=m0609 ISAAC_ENTRY=simulation/isaac/tools/set_robot_yaw.py \
+  ./scripts/run_isaac_tool.sh --usd $LV/ing_library_env_v5.usd --out $LV/level_yaw0.usd --yaw 0
+
+# ② 서가 앞으로 로봇 배치 (서가 삽입용). ①의 결과를 입력으로 쓴다
+ARM_ROBOT=m0609 ISAAC_ENTRY=simulation/isaac/tools/place_robot_at_shelf.py \
+  ./scripts/run_isaac_tool.sh --usd $LV/level_yaw0.usd --out $LV/level_shelf01.usd \
+  --shelf /World/bookshelves/shelf_brown__book_shelf_01 --row-z 1.042
+```
+
+②는 자기검증(왕복 일치·오답 주입·0 가정 깨기)을 스스로 돌린다.
+**`오차 0.0 mm`, `여유 +4.8 cm` 가 나와야 맞게 선 것이다.**
 
 ---
 
