@@ -86,10 +86,19 @@ class JointPath(Primitive):
         # 정착 오차가 그보다 큰 로봇(M0609 는 0.06)에서는 영원히 도착하지 못하고
         # 제한 시간 초과(M404)가 났다 (2026-09-20 실측).
         tol = ctx.cfg("tolerance", "joint_rad", default=0.02)
-        err = float(np.max(np.abs(ctx.backend.get_joint_positions() - self._pts[-1])))
+        now = ctx.backend.get_joint_positions()
+        err = float(np.max(np.abs(now - self._pts[-1])))
         if self._i >= len(self._pts) - 1 and err <= tol:
             return Status.SUCCEEDED
-        self._last_err = err
+        # [진단] 왜 안 끝나는지 주기적으로 남긴다 — 경유점을 못 넘는 것인지,
+        # 넘었는데 팔이 안 따라오는 것인지 가른다
+        self._n = getattr(self, "_n", 0) + 1
+        if self._n % 120 == 0:
+            say = getattr(ctx.backend, "say", None)
+            msg = (f"[진단] {self.name}: 경유점 {self._i}/{len(self._pts)-1}, "
+                   f"최대오차 {err:.4f} (허용 {tol}), "
+                   f"현재 {np.round(now, 3).tolist()} 목표 {np.round(self._pts[-1], 3).tolist()}")
+            (say or print)(msg)
         return Status.RUNNING
 
 
@@ -670,6 +679,9 @@ class _Backend:
         # 팔이 제자리에 머문다 (2026-09-20 M0609 에서 approach 제한 시간 초과).
         s.robot.apply_action(ArticulationAction(
             joint_positions=q, joint_indices=np.arange(len(q))))
+
+    def say(self, m):
+        self.s.say(m)
 
     def set_joint_targets(self, positions):
         self._apply(positions)
