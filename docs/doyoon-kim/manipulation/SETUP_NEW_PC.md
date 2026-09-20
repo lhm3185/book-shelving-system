@@ -87,6 +87,22 @@ cd ros2_ws && colcon build --symlink-install && cd ..
 | M0609 URDF | `~/Isaac_Sim_b-1/src_pra/M0609/doosan-robot2/urdf/m0609.urdf` |
 | 레벨 USD 폴더 | `~/Desktop/Collected_ing_library_env_v5-firstFinal/` |
 
+### ⚠️ M0609 기술서·URDF 가 없으면 **팔이 아예 안 움직인다**
+
+Lula(IK)가 이 두 파일을 읽는다 (`robot_profiles.py` 의 `lula=("files", ...)`).
+Franka 는 Isaac 내장 설정(`lula=("supported", "Franka")`)을 써서 파일이 필요 없지만,
+M0609 는 외부 파일이다. **저장소에 없고 USD 변환본으로 대체할 수 없다.**
+
+없이도 되는 것 / 안 되는 것:
+
+| | |
+| --- | --- |
+| 되는 것 | 설치, 빌드, `run_tests.sh`, **레벨 재생성**(`set_robot_yaw.py`, `place_robot_at_shelf.py` — Lula 를 안 쓴다) |
+| 안 되는 것 | `check_reach.py`, 시뮬 실행 전체 (IK 가 필요한 모든 것) |
+
+> **할 일 (연구실에서)**: 이 두 파일은 작다. **저장소에 넣어** 다시는 이것 때문에
+> 막히지 않게 하는 편이 낫다. doosan-robot2 는 공개 저장소이므로 라이선스만 확인하고 반영할 것.
+
 (책 USD·트레이는 저장소에 있으므로 옮길 필요가 없다)
 
 GPU PC 에서 가져오려면:
