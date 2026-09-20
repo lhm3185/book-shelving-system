@@ -34,11 +34,14 @@ ros2 run shelving_perception vision_manager --ros-args \
     --params-file "$WS/src/shelving_perception/config/perception.yaml" -p model_path:="$MODEL_PATH" \
     -p shelf_model_path:="$SHELF_MODEL" \
     -p confidence_threshold:="${VISION_CONF:-0.75}" \
+    ${VISION_EXTRA:-} \
     > "$LOG/vision.log" 2>&1 & pids+=($!)
 ros2 run shelving_manipulation manipulation_node --ros-args \
     --params-file "$WS/src/shelving_manipulation/config/manipulation.yaml" -p executor:=sim \
     > "$LOG/manipulation.log" 2>&1 & pids+=($!)
 
+# 비전 CV 창은 origin/vision 에서 기본값이 false 로 바뀌었다. 시연에서 화면을 띄우려면
+#   VISION_EXTRA="-p show_debug_window:=true" ROS_DOMAIN_ID=130 ./run_demo_pc.sh
 echo "실행됨 (ROS_DOMAIN_ID=$ROS_DOMAIN_ID). 로그: $LOG"
 echo "  책 모델   $MODEL_PATH"
 echo "  책장 모델 $SHELF_MODEL"
