@@ -8,3 +8,4 @@ __pycache__/
 simulation/isaac/config/sim_local.env
 .venv/
 .vscode/
+scripts/demo/demo_local.env
