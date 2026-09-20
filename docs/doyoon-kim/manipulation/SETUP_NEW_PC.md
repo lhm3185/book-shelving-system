@@ -10,11 +10,18 @@
 | 종류 | 어디에 | 크기 |
 | --- | --- | --- |
 | 코드·설정·문서 | **git** | 작음 |
+| **책 USD 6종·트레이·서가·바닥** | **git** (`simulation/assets/book_dataset/`) | 작음 |
 | 비전 모델 `.pt` | **git LFS** (`git lfs pull`) | 6MB × 2 |
-| **레벨 USD, 책 USD, M0609 기술서·URDF** | **git 에 없다** — USB 나 `scp` | 130MB × N |
+| **레벨 USD (통합 씬)** | **git 에 없다** — USB 나 `scp` | 130MB × N |
+| **M0609 기술서·URDF** | **git 에 없다** (외부 소유) | 작음 |
 | Isaac Sim 본체 | NVIDIA 에서 별도 설치 | 큼 |
 
-에셋이 git 에 없는 것은 용량 때문이다. **이것부터 확보하지 않으면 Isaac 을 깔아도 못 돌린다.**
+> **2026-09-20 정정**: 책·트레이·서가는 **저장소에 들어 있다.** 그런데 스크립트가
+> 개인 홈 경로(`~/book_dataset/...`)만 보고 있어서, 새로 클론한 PC 에서는
+> **저장소에 있는 파일을 두고 "없다"** 가 됐다. 지금은 저장소 사본을 먼저 본다.
+
+git 에 없는 것은 **통합 레벨 USD(용량)와 M0609 기술서·URDF(외부 소유)** 둘뿐이다.
+**이 둘이 없으면 Isaac 을 깔아도 시뮬을 못 돌린다.**
 
 ---
 
@@ -79,13 +86,13 @@ cd ros2_ws && colcon build --symlink-install && cd ..
 | M0609 기술서 | `~/Isaac_Sim_b-1/src_pra/M0609/descriptor/m0609_description.yaml` |
 | M0609 URDF | `~/Isaac_Sim_b-1/src_pra/M0609/doosan-robot2/urdf/m0609.urdf` |
 | 레벨 USD 폴더 | `~/Desktop/Collected_ing_library_env_v5-firstFinal/` |
-| 책 USD 6종 | `~/book_dataset/usd_v2/` |
+
+(책 USD·트레이는 저장소에 있으므로 옮길 필요가 없다)
 
 GPU PC 에서 가져오려면:
 
 ```bash
 scp -r rokey@10.10.0.2:~/Desktop/Collected_ing_library_env_v5-firstFinal ~/Desktop/
-scp -r rokey@10.10.0.2:~/book_dataset/usd_v2 ~/book_dataset/
 scp -r rokey@10.10.0.2:~/Isaac_Sim_b-1 ~/
 ```
 

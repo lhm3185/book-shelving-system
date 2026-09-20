@@ -33,8 +33,14 @@ if [ -z "${SIM_USD:-}" ]; then
         done
     fi
 fi
-if [ -z "${SIM_TRAY:-}" ] && [ -f "$HOME/book_dataset/assets/tray/tray_v1.usdc" ]; then
-    export SIM_TRAY="$HOME/book_dataset/assets/tray/tray_v1.usdc"
+# 트레이는 **저장소 안에 있다** (simulation/assets/book_dataset/). 예전에는 개인 홈 경로만 봐서,
+# 새로 클론한 PC 에서는 파일이 저장소에 있는데도 "없다" 가 됐다 (2026-09-20).
+# 저장소 사본을 먼저 보고, 없으면 홈 경로로 넘어간다.
+if [ -z "${SIM_TRAY:-}" ]; then
+    for _t in "$REPO_ROOT/simulation/assets/book_dataset/assets/tray/tray_v1.usdc" \
+              "$HOME/book_dataset/assets/tray/tray_v1.usdc"; do
+        [ -f "$_t" ] && { export SIM_TRAY="$_t"; break; }
+    done
 fi
 
 # 터미널에 시스템 ROS(Python 3.12)가 source 돼 있으면 Isaac(3.11)이 그 rclpy 를 먼저 import 하다 죽는다

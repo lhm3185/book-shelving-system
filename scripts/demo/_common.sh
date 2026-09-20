@@ -25,7 +25,10 @@ SIM_HOST="${SIM_HOST:-10.10.0.2}"          # Isaac 을 띄울 PC. 그 PC 에서 
 SIM_USER="${SIM_USER:-rokey}"
 SIM_REPO="${SIM_REPO:-~/b1_arm}"            # GPU PC 의 저장소 경로
 SIM_LEVEL_DIR="${SIM_LEVEL_DIR:-~/Desktop/Collected_ing_library_env_v5-firstFinal}"
-SIM_BOOK_GLOB="${SIM_BOOK_GLOB:-~/book_dataset/usd_v2/book_encyclopedia_set_01_2k__book_encyclopedia_set_01_book0[1-6].usdc}"
+# 책 USD 는 **저장소 안에 있다** (simulation/assets/book_dataset/usd_v2/).
+# 예전에는 개인 홈 경로만 봐서, 새로 클론한 PC 에서는 저장소에 있는 파일을 못 찾았다 (2026-09-20).
+# 원격(GPU PC)에서 돌 때는 그 PC 의 저장소 경로를 쓰므로 $SIM_REPO 기준으로 만든다.
+SIM_BOOK_GLOB="${SIM_BOOK_GLOB:-$SIM_REPO/simulation/assets/book_dataset/usd_v2/book_encyclopedia_set_01_2k__book_encyclopedia_set_01_book0[1-6].usdc}"
 
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-130}"
 export FASTRTPS_DEFAULT_PROFILES_FILE="${FASTRTPS_DEFAULT_PROFILES_FILE:-$HOME/.ros/fastdds_whitelist.xml}"

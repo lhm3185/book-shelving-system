@@ -52,13 +52,20 @@ for f in "$REPO_ROOT"/ros2_ws/src/shelving_perception/resource/*.pt; do
         || bad "비전 모델이 LFS 포인터다 ($(basename "$f")) — git lfs pull"
 done
 
-head_ "5. git 에 없는 자산 (USB 나 scp 로 받아야 한다)"
-# 경로는 robot_profiles.py / scripts 의 기본값과 같아야 한다
+head_ "5-1. 저장소 안에 있는 에셋 (클론하면 따라온다)"
+# 책·트레이·서가는 git 에 들어 있다. 2026-09-20 까지 스크립트가 개인 홈 경로만 봐서
+# "저장소에 있는데 없다" 가 됐었다 — 지금은 저장소 사본을 먼저 본다.
+_n=$(ls "$REPO_ROOT"/simulation/assets/book_dataset/usd_v2/*book0[1-6].usdc 2>/dev/null | wc -l)
+[ "$_n" -eq 6 ] && ok "책 USD 6종" || bad "책 USD ($_n/6) — git 클론이 온전한지 확인"
+[ -f "$REPO_ROOT/simulation/assets/book_dataset/assets/tray/tray_v1.usdc" ] \
+    && ok "트레이 USD" || bad "트레이 USD"
+
+head_ "5-2. git 에 없는 자산 (USB 나 scp 로 받아야 한다)"
+# 용량이 크거나 외부 소유라 저장소에 못 넣은 것들. 경로는 robot_profiles.py 기본값과 같아야 한다.
 declare -A ASSETS=(
     ["$HOME/Isaac_Sim_b-1/src_pra/M0609/descriptor/m0609_description.yaml"]="M0609 Lula 기술서 (IK 에 필요)"
     ["$HOME/Isaac_Sim_b-1/src_pra/M0609/doosan-robot2/urdf/m0609.urdf"]="M0609 URDF"
-    ["$HOME/Desktop/Collected_ing_library_env_v5-firstFinal"]="레벨 USD 폴더 (약 130MB/개)"
-    ["$HOME/book_dataset/usd_v2"]="책 USD 6종"
+    ["$HOME/Desktop/Collected_ing_library_env_v5-firstFinal"]="레벨 USD 폴더 (약 130MB/개) — AMR 담당 제작본"
 )
 for p in "${!ASSETS[@]}"; do
     [ -e "$p" ] && ok "${ASSETS[$p]}" || bad "${ASSETS[$p]}  →  $p"
