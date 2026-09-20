@@ -216,8 +216,15 @@ class BookScene:
         say(f"트레이 배치: 팔 기준 {np.round(_tray_rel[:2], 4).tolist()} "
             f"→ 월드 {np.round(_tray_w[:2], 3).tolist()}, 면 z {DECK_Z:.3f}")
         pitch = nslots = floor_top = None
+        # **진단용 스위치.** SIM_TRAY_COLLIDER=0 이면 트레이 콜라이더를 안 붙인다.
+        # "팔이 트레이에 막히는가" 를 5분 만에 가르기 위한 것 — 책은 트레이를 통과해
+        # 받침판 위로 떨어지므로 파지는 못 하지만, **접근 자세에 도달하는지**는 볼 수 있다.
+        # (2026-09-20: 서가·게인·질량·이웃책·받침판을 전부 배제하고 트레이만 남았다)
+        _tray_coll = os.environ.get("SIM_TRAY_COLLIDER", "1") != "0"
+        if not _tray_coll:
+            say("**트레이 콜라이더 없음** (SIM_TRAY_COLLIDER=0) — 진단 전용, 시연에 쓰지 말 것")
         for p in Usd.PrimRange(st.GetPrimAtPath(self.tray)):
-            if p.IsA(UsdGeom.Mesh):
+            if p.IsA(UsdGeom.Mesh) and _tray_coll:
                 UsdPhysics.CollisionAPI.Apply(p); UsdPhysics.MeshCollisionAPI.Apply(p).CreateApproximationAttr().Set("none")
             for a in p.GetAttributes():
                 n = a.GetName()
