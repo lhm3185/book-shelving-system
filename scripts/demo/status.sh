@@ -15,5 +15,13 @@ else
     exit 1
 fi
 say "--- 시뮬 상태 (트레이 책 목록) ---"
-timeout 10 ros2 topic echo /manipulation/sim/state --once 2>/dev/null | head -14 \
-    || say "  /manipulation/sim/state 를 못 받았다 — Isaac 쪽을 확인할 것"
+# 파이프라인의 종료코드는 **마지막 명령(head) 것**이라 늘 0 이다.
+# `... | head || say ...` 로 쓰면 실패 안내가 영원히 안 나온다 (2026-09-20 점검에서 발견).
+# 출력을 받아서 비었는지로 판단한다.
+_state=$(timeout 10 ros2 topic echo /manipulation/sim/state --once 2>/dev/null | head -14)
+if [ -n "$_state" ]; then
+    printf '%s\n' "$_state"
+else
+    say "  /manipulation/sim/state 를 못 받았다 — Isaac 쪽을 확인할 것"
+    exit 1
+fi

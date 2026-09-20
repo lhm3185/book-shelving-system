@@ -25,10 +25,17 @@ set -e
 cd $SIM_REPO
 BOOKS=\$(ls $SIM_BOOK_GLOB | paste -sd,)
 [ -n "\$BOOKS" ] || { echo "책 USD 를 못 찾았다: $SIM_BOOK_GLOB"; exit 1; }
-echo "### 책 \$(echo \$BOOKS | tr , '\n' | wc -l)권"
+# 일부만 있어도 통과하면 **다른 책 구성으로 장면이 뜬다** — 개수까지 본다
+_n=\$(echo \$BOOKS | tr , '\n' | wc -l)
+[ "\$_n" -eq 6 ] || { echo "책이 6권이 아니다 (\$_n권). git lfs·클론 상태를 확인할 것"; exit 1; }
+echo "### 책 \$_n권"
+# 레벨 USD 는 **생성물**이라 없을 수 있다. 여기서 안 잡으면 Isaac 이 4분 뜬 뒤에 실패한다
+[ -f $SIM_LEVEL_DIR/$SIM_LEVEL_NAME ] || {
+    echo "레벨 USD 가 없다: $SIM_LEVEL_DIR/$SIM_LEVEL_NAME"
+    echo "  원본에서 만드는 명령은 docs/doyoon-kim/manipulation/SETUP_NEW_PC.md §5 참조"; exit 1; }
 ARM_ROBOT=m0609 \\
 ROS_DOMAIN_ID=$ROS_DOMAIN_ID \\
-FASTRTPS_DEFAULT_PROFILES_FILE=\$HOME/.ros/fastdds_whitelist.xml \\
+FASTRTPS_DEFAULT_PROFILES_FILE=$FASTRTPS_DEFAULT_PROFILES_FILE \\
 SIM_USD=$SIM_LEVEL_DIR/$SIM_LEVEL_NAME $SHELF_ENV \\
 ./scripts/run_isaac_sim.sh --start-home snap \\
   --camera-prim $CAMERA_PRIM \\

@@ -37,8 +37,15 @@ if [ -x "$ISAAC/python.sh" ]; then
 else
     bad "Isaac Sim — $ISAAC/python.sh 가 없다. 설치 후 ISAAC_SIM_PATH 로 지정"
 fi
-command -v nvidia-smi >/dev/null && nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null \
-    | sed 's/^/  OK    GPU /' || bad "nvidia-smi — NVIDIA 드라이버 (Isaac 은 RTX 계열이 필요하다)"
+# `A && B | sed || bad` 는 파이프라인 종료코드가 sed 것이라 **드라이버가 깨져도 통과**한다
+# (커널 모듈 불일치가 시연 당일 아침에 실제로 생길 수 있는 상태다). if 로 명확히 가른다.
+if command -v nvidia-smi >/dev/null \
+   && _gpu=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null) \
+   && [ -n "$_gpu" ]; then
+    printf '%s\n' "$_gpu" | sed 's/^/  OK    GPU /'
+else
+    bad "nvidia-smi — NVIDIA 드라이버 (Isaac 은 RTX 계열이 필요하다)"
+fi
 
 head_ "4. 저장소 빌드"
 for p in shelving_manipulation shelving_perception shelving_interfaces; do
@@ -71,6 +78,13 @@ for p in "${!ASSETS[@]}"; do
     [ -e "$p" ] && ok "${ASSETS[$p]}" || bad "${ASSETS[$p]}  →  $p"
 done
 
+# 레벨은 **생성물**이다. 없으면 Isaac 이 4분 뜬 뒤에야 실패한다 — 여기서 미리 본다
+_LV="$HOME/Desktop/Collected_ing_library_env_v5-firstFinal"
+for _f in level_yaw0.usd level_shelf01.usd; do
+    [ -f "$_LV/$_f" ] && ok "레벨 $_f" \
+        || bad "레벨 $_f — 원본에서 생성 필요 (SETUP_NEW_PC.md §5)"
+done
+
 head_ "6. DDS 네트워크 설정 (가장 많이 걸리는 함정)"
 WL="$HOME/.ros/fastdds_whitelist.xml"
 if [ -f "$WL" ]; then
@@ -94,4 +108,5 @@ if [ "$miss" -eq 0 ]; then
 else
     echo "**빠진 것 $miss 개** — 위 '없음' 항목을 채울 것 (docs/doyoon-kim/manipulation/SETUP_NEW_PC.md)"
 fi
-exit 0
+# 빠진 게 있으면 0 이 아닌 값으로 끝낸다 — `setup_check && run_tests` 로 이어 쓰는 사람이 있다
+[ "$miss" -eq 0 ]

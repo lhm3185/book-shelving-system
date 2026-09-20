@@ -3,12 +3,17 @@
 #
 #   ./scripts/run_tests.sh          # 전부
 #   ./scripts/run_tests.sh sim      # 시뮬 쪽만 (ROS 없이)
+#   ./scripts/run_tests.sh ros      # 로봇팔 노드만
 #
 # 왜 있나: 테스트는 있는데 돌리는 진입점이 비어 있었다 (2026-09-20 기준 1바이트 빈 파일).
 # 그 사이 `arm_base_link` 별칭이 M0609 에서 끊긴 것을 **시연 전날 밤에야** 알았다.
 set -u
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WHAT="${1:-all}"
+case "$WHAT" in
+    all|sim|ros) ;;
+    *) echo "모르는 인자: $WHAT  (쓸 수 있는 값: all | sim | ros)"; exit 2 ;;
+esac
 fail=0
 
 run() {   # run <이름> <작업디렉터리> <경로>

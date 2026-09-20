@@ -61,6 +61,11 @@ trap cleanup INT TERM EXIT
 ARM_BASE_FRAME="${ARM_BASE_FRAME:-$(ARM_ROBOT="${ARM_ROBOT:-m0609}" python3 -c \
     "import sys; sys.path.insert(0, '$REPO_ROOT/simulation/isaac/config'); \
      from robot_profiles import profile; print(profile().base_link.split('/')[-1])")}"
+# 조회가 실패하면 빈 문자열이 되고, 빈 부모로 TF 를 내도 로그는 "실행됨" 이라 성공처럼 보인다.
+# 그러면 arm_base_link 가 트리에 안 붙어 모든 목표가 TF 에서 실패한다 — 큰 소리로 멈춘다.
+[ -n "$ARM_BASE_FRAME" ] || {
+    echo "팔 기준 프레임을 못 구했다 (robot_profiles 조회 실패). ARM_BASE_FRAME=... 로 직접 지정할 것"
+    exit 1; }
 echo "팔 기준 프레임: $ARM_BASE_FRAME → arm_base_link (ARM_ROBOT=${ARM_ROBOT:-m0609})"
 ros2 run tf2_ros static_transform_publisher --frame-id "$ARM_BASE_FRAME" --child-frame-id arm_base_link \
     --ros-args -p use_sim_time:=true > "$LOG/tf_arm.log" 2>&1 & pids+=($!)
