@@ -1,0 +1,23 @@
+#usda 1.0
+(
+    defaultPrim = "shelf_darkbrown_filled"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "shelf_darkbrown_filled" (
+    kind = "component"
+)
+{
+    def "book_shelf" (
+        prepend references = @./shelf_darkbrown_filled__book_shelf.usdc@
+    )
+    {
+    }
+
+    def "book_cube" (
+        prepend references = @./shelf_darkbrown_filled__book_cube.usdc@
+    )
+    {
+    }
+}

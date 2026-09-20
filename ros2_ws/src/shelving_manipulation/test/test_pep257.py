@@ -19,5 +19,6 @@ import pytest
 @pytest.mark.linter
 @pytest.mark.pep257
 def test_pep257():
-    rc = main(argv=['.', 'test'])
+    # isaac_sim/ 은 Isaac 내장 Python 스크립트라 제외 (isaac_sim/README.md)
+    rc = main(argv=['.', 'test', '--exclude', 'isaac_sim'])
     assert rc == 0, 'Found code style errors / warnings'

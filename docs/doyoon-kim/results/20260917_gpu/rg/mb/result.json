@@ -1,0 +1,541 @@
+{
+ "results": [
+  {
+   "job": 0,
+   "success": true,
+   "error_code": 0,
+   "error": "",
+   "aabb": [
+    2.467,
+    -2.551,
+    0.498,
+    2.504,
+    -2.388,
+    0.735
+   ],
+   "upright": true,
+   "spine_y": -2.551,
+   "x_center": 2.486
+  },
+  {
+   "job": 1,
+   "success": true,
+   "error_code": 0,
+   "error": "",
+   "aabb": [
+    2.548,
+    -2.551,
+    0.498,
+    2.585,
+    -2.388,
+    0.735
+   ],
+   "upright": true,
+   "spine_y": -2.551,
+   "x_center": 2.567
+  },
+  {
+   "job": 2,
+   "success": true,
+   "error_code": 0,
+   "error": "",
+   "aabb": [
+    2.387,
+    -2.551,
+    0.498,
+    2.424,
+    -2.388,
+    0.735
+   ],
+   "upright": true,
+   "spine_y": -2.551,
+   "x_center": 2.405
+  },
+  {
+   "job": 3,
+   "success": true,
+   "error_code": 0,
+   "error": "",
+   "aabb": [
+    2.306,
+    -2.551,
+    0.498,
+    2.342,
+    -2.388,
+    0.735
+   ],
+   "upright": true,
+   "spine_y": -2.551,
+   "x_center": 2.324
+  }
+ ],
+ "joint_over80_steps": 0,
+ "joint_peak_ratio": 0.276,
+ "spikes": {},
+ "job_sec": {
+  "0": 17.9,
+  "1": 18.6,
+  "2": 16.4,
+  "3": 17.2
+ },
+ "phases": [
+  [
+   0,
+   "start:set_gripper"
+  ],
+  [
+   19,
+   "idle"
+  ],
+  [
+   20,
+   "move_joint"
+  ],
+  [
+   276,
+   "idle"
+  ],
+  [
+   277,
+   "move_joint"
+  ],
+  [
+   583,
+   "idle"
+  ],
+  [
+   584,
+   "move_joint"
+  ],
+  [
+   762,
+   "idle"
+  ],
+  [
+   763,
+   "j0:set_gripper"
+  ],
+  [
+   780,
+   "j0:approach"
+  ],
+  [
+   859,
+   "j0:down"
+  ],
+  [
+   924,
+   "j0:set_gripper"
+  ],
+  [
+   960,
+   "j0:attach"
+  ],
+  [
+   961,
+   "j0:lift"
+  ],
+  [
+   1046,
+   "j0:carry_rotate"
+  ],
+  [
+   1476,
+   "j0:wedge"
+  ],
+  [
+   1537,
+   "j0:detach"
+  ],
+  [
+   1538,
+   "j0:set_gripper"
+  ],
+  [
+   1562,
+   "j0:wait"
+  ],
+  [
+   1586,
+   "j0:back"
+  ],
+  [
+   1613,
+   "j0:set_gripper"
+  ],
+  [
+   1641,
+   "j0:touch"
+  ],
+  [
+   1651,
+   "j0:push"
+  ],
+  [
+   1740,
+   "j0:wait"
+  ],
+  [
+   1758,
+   "j0:retreat"
+  ],
+  [
+   1814,
+   "j0:set_gripper"
+  ],
+  [
+   1836,
+   "j0:return"
+  ],
+  [
+   2064,
+   "idle"
+  ],
+  [
+   2065,
+   "j1:set_gripper"
+  ],
+  [
+   2082,
+   "j1:approach"
+  ],
+  [
+   2156,
+   "j1:down"
+  ],
+  [
+   2227,
+   "j1:set_gripper"
+  ],
+  [
+   2263,
+   "j1:attach"
+  ],
+  [
+   2264,
+   "j1:lift"
+  ],
+  [
+   2356,
+   "j1:carry_rotate"
+  ],
+  [
+   2774,
+   "j1:wedge"
+  ],
+  [
+   2849,
+   "j1:detach"
+  ],
+  [
+   2850,
+   "j1:set_gripper"
+  ],
+  [
+   2874,
+   "j1:wait"
+  ],
+  [
+   2898,
+   "j1:back"
+  ],
+  [
+   2930,
+   "j1:set_gripper"
+  ],
+  [
+   2958,
+   "j1:touch"
+  ],
+  [
+   2970,
+   "j1:push"
+  ],
+  [
+   3073,
+   "j1:wait"
+  ],
+  [
+   3091,
+   "j1:retreat"
+  ],
+  [
+   3158,
+   "j1:set_gripper"
+  ],
+  [
+   3180,
+   "j1:return"
+  ],
+  [
+   3417,
+   "idle"
+  ],
+  [
+   3418,
+   "j2:set_gripper"
+  ],
+  [
+   3435,
+   "j2:approach"
+  ],
+  [
+   3511,
+   "j2:down"
+  ],
+  [
+   3591,
+   "j2:set_gripper"
+  ],
+  [
+   3627,
+   "j2:attach"
+  ],
+  [
+   3628,
+   "j2:lift"
+  ],
+  [
+   3731,
+   "j2:carry_rotate"
+  ],
+  [
+   4089,
+   "j2:wedge"
+  ],
+  [
+   4136,
+   "j2:detach"
+  ],
+  [
+   4137,
+   "j2:set_gripper"
+  ],
+  [
+   4161,
+   "j2:wait"
+  ],
+  [
+   4185,
+   "j2:back"
+  ],
+  [
+   4206,
+   "j2:set_gripper"
+  ],
+  [
+   4234,
+   "j2:touch"
+  ],
+  [
+   4241,
+   "j2:push"
+  ],
+  [
+   4318,
+   "j2:wait"
+  ],
+  [
+   4336,
+   "j2:retreat"
+  ],
+  [
+   4380,
+   "j2:set_gripper"
+  ],
+  [
+   4402,
+   "j2:return"
+  ],
+  [
+   4622,
+   "idle"
+  ],
+  [
+   4623,
+   "j3:set_gripper"
+  ],
+  [
+   4640,
+   "j3:approach"
+  ],
+  [
+   4715,
+   "j3:down"
+  ],
+  [
+   4808,
+   "j3:set_gripper"
+  ],
+  [
+   4844,
+   "j3:attach"
+  ],
+  [
+   4845,
+   "j3:lift"
+  ],
+  [
+   4963,
+   "j3:carry_rotate"
+  ],
+  [
+   5355,
+   "j3:wedge"
+  ],
+  [
+   5397,
+   "j3:detach"
+  ],
+  [
+   5398,
+   "j3:set_gripper"
+  ],
+  [
+   5422,
+   "j3:wait"
+  ],
+  [
+   5446,
+   "j3:back"
+  ],
+  [
+   5467,
+   "j3:set_gripper"
+  ],
+  [
+   5495,
+   "j3:touch"
+  ],
+  [
+   5501,
+   "j3:push"
+  ],
+  [
+   5575,
+   "j3:wait"
+  ],
+  [
+   5593,
+   "j3:retreat"
+  ],
+  [
+   5635,
+   "j3:set_gripper"
+  ],
+  [
+   5657,
+   "j3:return"
+  ],
+  [
+   5872,
+   "idle"
+  ]
+ ],
+ "log": [
+  "트레이 칸 6개 간격 0.075  칸 x [2.172, 2.248, 2.322, 2.397, 2.472, 2.547]",
+  "책 치수 두께 0.035 길이 0.237 폭 0.163  꽂을 x [2.485, 2.565, 2.405, 2.325]",
+  "데크(트레이) 홈 자세 IK True: [2.774, -0.254, 0.176, -1.928, 0.044, 1.68, -0.987]",
+  "----- 계획 (칸 → 꽂을 위치) -----",
+  "작업 0: 칸 0 (x 2.172) → 서가 x 2.485  OK 최대 인접변화 0.091 rad",
+  "작업 1: 칸 1 (x 2.248) → 서가 x 2.565  OK 최대 인접변화 0.091 rad",
+  "작업 2: 칸 2 (x 2.322) → 서가 x 2.405  OK 최대 인접변화 0.091 rad",
+  "작업 3: 칸 3 (x 2.397) → 서가 x 2.325  OK 최대 인접변화 0.091 rad",
+  "step     0 → start:set_gripper",
+  "step    19 → idle",
+  "step    20 → move_joint",
+  "step   276 → idle",
+  "step   277 → move_joint",
+  "step   583 → idle",
+  "step   584 → move_joint",
+  "step   762 → idle",
+  "step   763 → j0:set_gripper",
+  "step   780 → j0:approach",
+  "step   859 → j0:down",
+  "step   924 → j0:set_gripper",
+  "step   960 → j0:attach",
+  "step   961 → j0:lift",
+  "step  1046 → j0:carry_rotate",
+  "step  1476 → j0:wedge",
+  "step  1537 → j0:detach",
+  "step  1538 → j0:set_gripper",
+  "step  1562 → j0:wait",
+  "step  1586 → j0:back",
+  "step  1613 → j0:set_gripper",
+  "step  1641 → j0:touch",
+  "step  1651 → j0:push",
+  "step  1740 → j0:wait",
+  "step  1758 → j0:retreat",
+  "step  1814 → j0:set_gripper",
+  "step  1836 → j0:return",
+  "step  2064 → idle",
+  "step  2065 → j1:set_gripper",
+  "step  2082 → j1:approach",
+  "step  2156 → j1:down",
+  "step  2227 → j1:set_gripper",
+  "step  2263 → j1:attach",
+  "step  2264 → j1:lift",
+  "step  2356 → j1:carry_rotate",
+  "step  2774 → j1:wedge",
+  "step  2849 → j1:detach",
+  "step  2850 → j1:set_gripper",
+  "step  2874 → j1:wait",
+  "step  2898 → j1:back",
+  "step  2930 → j1:set_gripper",
+  "step  2958 → j1:touch",
+  "step  2970 → j1:push",
+  "step  3073 → j1:wait",
+  "step  3091 → j1:retreat",
+  "step  3158 → j1:set_gripper",
+  "step  3180 → j1:return",
+  "step  3417 → idle",
+  "step  3418 → j2:set_gripper",
+  "step  3435 → j2:approach",
+  "step  3511 → j2:down",
+  "step  3591 → j2:set_gripper",
+  "step  3627 → j2:attach",
+  "step  3628 → j2:lift",
+  "step  3731 → j2:carry_rotate",
+  "step  4089 → j2:wedge",
+  "step  4136 → j2:detach",
+  "step  4137 → j2:set_gripper",
+  "step  4161 → j2:wait",
+  "step  4185 → j2:back",
+  "step  4206 → j2:set_gripper",
+  "step  4234 → j2:touch",
+  "step  4241 → j2:push",
+  "step  4318 → j2:wait",
+  "step  4336 → j2:retreat",
+  "step  4380 → j2:set_gripper",
+  "step  4402 → j2:return",
+  "step  4622 → idle",
+  "step  4623 → j3:set_gripper",
+  "step  4640 → j3:approach",
+  "step  4715 → j3:down",
+  "step  4808 → j3:set_gripper",
+  "step  4844 → j3:attach",
+  "step  4845 → j3:lift",
+  "step  4963 → j3:carry_rotate",
+  "step  5355 → j3:wedge",
+  "step  5397 → j3:detach",
+  "step  5398 → j3:set_gripper",
+  "step  5422 → j3:wait",
+  "step  5446 → j3:back",
+  "step  5467 → j3:set_gripper",
+  "step  5495 → j3:touch",
+  "step  5501 → j3:push",
+  "step  5575 → j3:wait",
+  "step  5593 → j3:retreat",
+  "step  5635 → j3:set_gripper",
+  "step  5657 → j3:return",
+  "step  5872 → idle",
+  "전체 완료 step 5872",
+  "작업 0: 성공  M0  세움 True 깊이 True 책등 y -2.551(목표 -2.555) x 2.486(목표 2.485)",
+  "작업 1: 성공  M0  세움 True 깊이 True 책등 y -2.551(목표 -2.555) x 2.567(목표 2.565)",
+  "작업 2: 성공  M0  세움 True 깊이 True 책등 y -2.551(목표 -2.555) x 2.405(목표 2.405)",
+  "작업 3: 성공  M0  세움 True 깊이 True 책등 y -2.551(목표 -2.555) x 2.324(목표 2.325)",
+  "작업별 소요(초, 마지막 단계 시작까지): {0: 17.9, 1: 18.6, 2: 16.4, 3: 17.2}  전체 97.9",
+  "관절 각속도: 최대 한계의 28%, 80% 초과 0스텝",
+  "결과: 4/4 성공"
+ ]
+}

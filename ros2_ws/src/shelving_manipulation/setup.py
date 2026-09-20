@@ -28,6 +28,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'manipulation_node = shelving_manipulation.manipulation_node:main',
+            'sim_mock = shelving_manipulation.manipulation_node:sim_mock_main',
         ],
     },
 )

@@ -1,0 +1,76 @@
+"""통합 USD 를 열고 필요한 Prim 이 있는지 검사한다 (Isaac Sim 5.1.0).
+
+경로는 **저장소 기준**으로 계산한다. 개인 PC 절대경로를 기본값으로 쓰지 않는다.
+Isaac 설치 위치만 시스템마다 다르므로 `ISAAC_SIM_PATH` 환경변수로 받는다 (실행 스크립트가 쓴다).
+"""
+import os
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_USD = ( REPO_ROOT / "simulation" / "assets" / "level" / "ing_library_env_v5.usd" )
+DEFAULT_TRAY = ( REPO_ROOT / "simulation" / "assets" / "book_dataset" / "assets" / "tray" / "tray_v1.usdc" )
+
+# 통합 USD 에 있어야 하는 것들. 없으면 시작할 때 바로 알린다
+REQUIRED_PRIMS = {
+    "로봇(AMR+로봇팔)": "/World/ridgeback_franka",
+    "서가": "/World/bookshelves",
+    "책 원본": "/World/books",
+}
+OPTIONAL_PRIMS = {
+    "손목 카메라": "/World/ridgeback_franka/panda_hand/rsd455/RSD455/Camera_OmniVision_OV9782_Color",
+    "라이다": "/World/ridgeback_franka/front_laser/Lidar",
+    "무인반납기": "/World/return_machine",
+}
+
+
+def resolve_usd(path=None):
+    """USD 경로 결정: 인자 > 환경변수 SIM_USD > 저장소 기본값"""
+    p = path or os.environ.get("SIM_USD") or str(DEFAULT_USD)
+    return str(Path(os.path.expanduser(p)).resolve())
+
+
+def is_placeholder(path):
+    """git-lfs 포인터거나 비어 있는 파일인지 (아직 통합 USD 가 없는 상태)"""
+    try:
+        if os.path.getsize(path) < 4096:
+            with open(path, "rb") as f:
+                head = f.read(200)
+            return head.startswith(b"version https://git-lfs") or len(head.strip()) == 0
+    except OSError:
+        return False
+    return False
+
+
+def open_world(app, usd_path, say=print):
+    """USD 를 열고 로딩이 끝날 때까지 기다린다. 열 수 없으면 이유를 분명히 알린다"""
+    from isaacsim.core.utils.stage import get_current_stage, is_stage_loading, open_stage
+
+    usd = resolve_usd(usd_path)
+    if not os.path.exists(usd):
+        raise FileNotFoundError(
+            f"USD 가 없다: {usd}\n"
+            f"  통합 USD 는 {DEFAULT_USD} 이다. 아직 없으면 --usd 로 시험용 레벨을 지정한다.")
+    if is_placeholder(usd):
+        raise RuntimeError(
+            f"USD 가 빈 파일이다 (git-lfs 포인터 또는 빈 내용): {usd}\n"
+            f"  통합 USD 가 아직 채워지지 않았다. 채워질 때까지 --usd 로 시험용 레벨을 지정한다.")
+    say(f"USD 열기: {usd}")
+    open_stage(usd)
+    app.update()
+    while is_stage_loading():
+        app.update()
+    return get_current_stage()
+
+
+def check_prims(stage, say=print, required=None, optional=None):
+    """있어야 하는 Prim 을 검사한다. 없으면 RuntimeError, 선택 항목은 알리기만 한다"""
+    missing = []
+    for name, path in (required or REQUIRED_PRIMS).items():
+        if not stage.GetPrimAtPath(path).IsValid():
+            missing.append(f"{name} ({path})")
+    for name, path in (optional or OPTIONAL_PRIMS).items():
+        if not stage.GetPrimAtPath(path).IsValid():
+            say(f"선택 Prim 없음: {name} ({path}) — 해당 기능은 건너뛴다")
+    if missing:
+        raise RuntimeError("통합 USD 에 필요한 Prim 이 없다: " + ", ".join(missing))
+    say(f"Prim 검사 통과 ({len(required or REQUIRED_PRIMS)}개)")
