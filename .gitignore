@@ -5,5 +5,7 @@ ros2_ws/log/
 __pycache__/
 *.pyc
 .env
+simulation/isaac/config/sim_local.env
 .venv/
 .vscode/
+scripts/demo/demo_local.env

@@ -256,6 +256,13 @@ class SetGripper(Primitive):
 
     def on_update(self, ctx: Context) -> Status:
         tolerance = ctx.cfg("gripper", "tolerance_m", default=0.004)
+        # **폭 도달을 못 읽는 그리퍼가 있다.** RG2 는 폐루프 평행 링크라 명령한 관절각이
+        # 그대로 읽히지 않아, 폭 기준으로 기다리면 영원히 끝나지 않는다
+        # (2026-09-20 M0609: approach 단계가 제한 시간 초과 — JointPath 가 아니라 여기였다).
+        # 그런 로봇은 **정착 시간만** 기다린다.
+        if not ctx.cfg("gripper", "check_width", default=True):
+            self._settle_left -= 1
+            return Status.SUCCEEDED if self._settle_left <= 0 else Status.RUNNING
         reached = abs(ctx.backend.get_gripper_width() - self.width_m) <= tolerance
         if reached:
             # 닿자마자 다음 동작으로 넘어가면 물체가 흔들린 채로 들린다.

@@ -27,18 +27,31 @@ from arm_geometry import R_from_quat, quat_angle, quat_from_R, slerp  # noqa: E4
 from arm_planning import tucked_joint_moves  # noqa: E402
 from arm_primitives import ArmController, MoveJoint, Primitive, SetGripper, Sequence, Status, Wait  # noqa: E402
 
-R = "/World/ridgeback_franka"
-SHELF = "/World/bookshelves/shelf_brown__book_shelf_01"
+# 로봇마다 다른 이름은 프로파일 한 곳에서 온다 (config/robot_profiles.py).
+# 기본은 통합 월드의 m0609. 이전 Franka 월드는 ARM_ROBOT=franka 로 고른다.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config"))
+from robot_profiles import profile  # noqa: E402
+
+BOT = profile()
+R = BOT.root
+BASE_LINK = R + "/" + BOT.base_link
+HAND_LINK = R + "/" + BOT.hand_link
+# 어느 서가 앞에서 꽂는가. 로봇을 다른 서가 앞에 세우면 **앞면 y 가 달라진다** —
+# 박아 두면 엉뚱한 서가의 앞면을 읽어 책을 허공에 놓는다 (2026-09-20 실제로 겪었다).
+SHELF = os.environ.get("SIM_SHELF_PRIM", "/World/bookshelves/shelf_brown__book_shelf_01")
+# 꽂을 선반판 윗면의 **월드 z**. 로봇 키가 바뀌면 같은 계약 z 라도 다른 단을 가리킨다
+# (M0609 는 팔 베이스가 37 cm 높아 Franka 가 쓰던 단이 팔 기준 -0.04 가 된다).
+SHELF_ROW_Z = float(os.environ.get("SIM_SHELF_ROW_Z", 0.355 * 1.4))
 BOOK_SRC = "/World/books/book_encyclopedia_set_01_2k__book_encyclopedia_set_01_book15"
-ARM_JOINTS = [f"panda_joint{i}" for i in range(1, 8)]
-FINGERS = ["panda_finger_joint1", "panda_finger_joint2"]
-DECK_Z = 0.286
+ARM_JOINTS = BOT.arm_joints
+FINGERS = BOT.grip_joints
+DECK_Z = BOT.deck_z          # 트레이가 놓이는 면의 월드 높이 (로봇별)
 TIP_DOWN = 0.035            # 책등 윗면에서 손끝이 내려가 잡는 깊이
 GRIP_CLEAR = 0.005
 SPINE_INSET = 0.02          # 계획상 최종 책등이 서가 앞면에서 들어가는 거리
 MEASURED_INSET = 0.024      # 실측 최종 책등 위치 (밀기 후). 꽂힌 책 AABB 중심 → 서가 앞면 역산에 쓴다
 DIV_H, DIV_T, DIV_GAP = 0.07, 0.01, 0.003
-VEL_LIMIT = np.array([2.175] * 4 + [2.61] * 3)   # URDF 실측
+VEL_LIMIT = np.array(BOT.vel_limit)             # URDF 실측 (로봇별, 프로파일에서)
 MAX_STEP = 0.12             # 계획 인접점 최대 관절 변화 (초과 = 불연속, M402)
 GRASP_JOINT = "/World/bs_grasp_joint"
 
@@ -54,6 +67,7 @@ class JointPath(Primitive):
 
     def __init__(self, name, qs, speed=0.35):
         length = sum(float(np.max(np.abs(b - a))) for a, b in zip(qs[:-1], qs[1:]))
+        self._plan_len = length
         super().__init__(max(4.0, length / speed * 2.0 + 3.0))
         self.name = name
         self.qs = [np.asarray(q, float) for q in qs]
@@ -63,6 +77,16 @@ class JointPath(Primitive):
         self._pts = [ctx.backend.get_joint_positions()] + self.qs
         self._i = 0
         self._target = self._pts[0].copy()
+        # 제한 시간은 만들 때 **계획된 경유점만으로** 계산했다. 실제로는 현재 자세에서
+        # 첫 경유점까지의 간격이 더 붙는데, IK 가 먼 해를 고르면 그 간격이 3 rad 를 넘는다
+        # (2026-09-20 M0609: 경로 길이 0.7 rad 인데 첫 간격만 3.4 rad → 제한 시간 초과).
+        # 실제 경로 길이로 다시 잡는다.
+        real = sum(float(np.max(np.abs(b - a))) for a, b in zip(self._pts[:-1], self._pts[1:]))
+        need = max(4.0, real / self.speed * 2.0 + 3.0)
+        self._limit = max(getattr(self, "_limit", 0), ctx.steps_for(need))
+        if real > 1.5:
+            ctx.backend.say(f"[진단] {self.name}: 실제 경로 {real:.2f} rad "
+                            f"(계획 {self._plan_len:.2f}), 제한 {need:.0f}초로 확장")
 
     def on_update(self, ctx):
         budget = self.speed * ctx.backend.dt
@@ -74,9 +98,29 @@ class JointPath(Primitive):
             else:
                 self._target = self._target + (nxt - self._target) * (budget / gap); budget = 0.0
         ctx.backend.set_joint_targets(self._target)
-        if self._i >= len(self._pts) - 1 and \
-                float(np.max(np.abs(ctx.backend.get_joint_positions() - self._pts[-1]))) <= 0.02:
+        # 도착 판정은 **설정의 허용 오차**를 쓴다. 예전에는 0.02 가 박혀 있어서
+        # 정착 오차가 그보다 큰 로봇(M0609 는 0.06)에서는 영원히 도착하지 못하고
+        # 제한 시간 초과(M404)가 났다 (2026-09-20 실측).
+        tol = ctx.cfg("tolerance", "joint_rad", default=0.02)
+        now = ctx.backend.get_joint_positions()
+        err = float(np.max(np.abs(now - self._pts[-1])))
+        if self._i >= len(self._pts) - 1 and err <= tol:
             return Status.SUCCEEDED
+        # [진단] 왜 안 끝나는지 주기적으로 남긴다 — 경유점을 못 넘는 것인지,
+        # 넘었는데 팔이 안 따라오는 것인지 가른다
+        self._n = getattr(self, "_n", 0) + 1
+        if self._n % 120 == 0:
+            say = getattr(ctx.backend, "say", None)
+            msg = (f"[진단] {self.name}: 경유점 {self._i}/{len(self._pts)-1}, "
+                   f"최대오차 {err:.4f} (허용 {tol}), "
+                   f"현재 {np.round(now, 3).tolist()} 목표 {np.round(self._pts[-1], 3).tolist()}")
+            (say or print)(msg)
+            # 경유점을 다 넘었는데도 팔이 안 따라오면 **무엇엔가 막힌 것**이다.
+            # 관절값만 보면 어느 물체인지 영영 모른다 — 겹치는 대상을 같이 남긴다
+            # (2026-09-20: 서가인 줄 알고 로봇을 두 번 옮겼는데 아니었다).
+            clash = getattr(ctx.backend, "clash_report", None)
+            if clash is not None and self._i >= len(self._pts) - 1:
+                (say or print)(clash())
         return Status.RUNNING
 
 
@@ -106,6 +150,15 @@ class BookScene:
         # 책 원본: 기본은 한 종류, --book-variants 를 주면 레벨 /World/books 의 여러 종류를 돌려 쓴다
         sources = []
         for name in (book_variants or [BOOK_SRC]):
+            # **레벨이 평탄화(flatten)되어 있으면 책 prim 에 참조가 없다** (2026-09-20, 담당자
+            # Collected 레벨). 그때는 이름이 곧 원본 USD 인 것으로 보고 직접 읽는다.
+            if name.endswith((".usd", ".usda", ".usdc")):
+                src = os.path.expanduser(name)
+                if not os.path.exists(src):
+                    say(f"책 원본 파일 없음, 건너뜀: {src}")
+                    continue
+                sources.append((None, src, np.array([1.0, 0.0, 0.0, 0.0])))
+                continue
             path = name if name.startswith("/") else "/World/books/" + name
             prim = st.GetPrimAtPath(path)
             if not prim.IsValid():
@@ -124,25 +177,68 @@ class BookScene:
         if not sources:
             raise RuntimeError("쓸 수 있는 책 원본이 없다")
         shelf = self.aabb(SHELF)
-        for p in ([s[0] for s in sources]
+        for p in ([s[0] for s in sources if s[0] is not None]
                   + ([str(c.GetPath()) for c in st.GetPrimAtPath("/World/fixtures").GetChildren()]
                      if st.GetPrimAtPath("/World/fixtures").IsValid() else [])):
             st.GetPrimAtPath(p).SetActive(False)
 
         # 트레이
+        #
+        # 예전에는 월드 좌표(--tray-center)와 항등 자세로 놓았다. 로봇이 다른 자리·다른
+        # 방향으로 서는 순간 트레이가 엉뚱한 데 생긴다 (2026-09-20: 37 cm 아래 + 방향 90° 틀어짐).
+        # 좌표 계약이 `arm_base_link` 기준이므로 **트레이도 팔 기준으로 놓는다.**
+        _bl = SingleXFormPrim(BASE_LINK)
+        _bp, _bq = _bl.get_world_pose()
+        _bp = np.asarray(_bp, float)
+        _BR = R_from_quat(np.asarray(_bq, float))
+        # 팔 기준 트레이 중앙 — book_profiles.yaml 의 칸 좌표와 같은 값이어야 한다
+        _tray_rel = np.array([float(tray_center[0]), float(tray_center[1]), 0.0])
+        _R0 = R_from_quat(np.asarray(_bq, float))
+        _yaw0 = math.atan2(float(_R0[1, 0]), float(_R0[0, 0]))
+        _Ry0 = np.array([[math.cos(_yaw0), -math.sin(_yaw0), 0.0],
+                         [math.sin(_yaw0), math.cos(_yaw0), 0.0],
+                         [0.0, 0.0, 1.0]])
+        _tray_w = _bp + _Ry0 @ _tray_rel
         self.tray = "/World/bs_tray"
         add_reference_to_stage(tray_usd, self.tray)
-        SingleXFormPrim(self.tray).set_world_pose(np.array([tray_center[0], tray_center[1], DECK_Z]), np.array([1.0, 0, 0, 0]))
+        # **트레이는 수평이어야 한다.** 팔 베이스 자세를 그대로 쓰면 거기 섞인 뒤집힘·기울기가
+        # 트레이에 그대로 들어가 책이 미끄러진다 (2026-09-20: 책 6권이 한쪽에 뭉쳤다).
+        # 방향(yaw)만 따르고 나머지는 버린다.
+        _yaw = _yaw0
+        _tray_q = np.array([math.cos(_yaw / 2), 0.0, 0.0, math.sin(_yaw / 2)])
+        SingleXFormPrim(self.tray).set_world_pose(
+            np.array([_tray_w[0], _tray_w[1], DECK_Z]), _tray_q)
+        say(f"트레이 자세: yaw {math.degrees(_yaw):.1f}° (수평 유지)")
+        # **월드 값을 따로 들고 있는다** — 아래 계산들은 월드 기준이라 팔 기준 값을 그대로
+        # 쓰면 x,y 는 팔 기준·z 는 월드인 잡종 좌표가 된다 (2026-09-20 실제로 IK 실패).
+        self.tray_center_w = _tray_w.copy()
+        self.tray_yaw = float(_yaw0)      # 파지·삽입 자세의 기준 방향
+        say(f"트레이 배치: 팔 기준 {np.round(_tray_rel[:2], 4).tolist()} "
+            f"→ 월드 {np.round(_tray_w[:2], 3).tolist()}, 면 z {DECK_Z:.3f}")
         pitch = nslots = floor_top = None
+        # **진단용 스위치.** SIM_TRAY_COLLIDER=0 이면 트레이 콜라이더를 안 붙인다.
+        # "팔이 트레이에 막히는가" 를 5분 만에 가르기 위한 것 — 책은 트레이를 통과해
+        # 받침판 위로 떨어지므로 파지는 못 하지만, **접근 자세에 도달하는지**는 볼 수 있다.
+        # (2026-09-20: 서가·게인·질량·이웃책·받침판을 전부 배제하고 트레이만 남았다)
+        _tray_coll = os.environ.get("SIM_TRAY_COLLIDER", "1") != "0"
+        if not _tray_coll:
+            say("**트레이 콜라이더 없음** (SIM_TRAY_COLLIDER=0) — 진단 전용, 시연에 쓰지 말 것")
         for p in Usd.PrimRange(st.GetPrimAtPath(self.tray)):
-            if p.IsA(UsdGeom.Mesh):
+            if p.IsA(UsdGeom.Mesh) and _tray_coll:
                 UsdPhysics.CollisionAPI.Apply(p); UsdPhysics.MeshCollisionAPI.Apply(p).CreateApproximationAttr().Set("none")
             for a in p.GetAttributes():
                 n = a.GetName()
                 if n.endswith("tray_pitch"): pitch = float(a.Get())
                 if n.endswith("tray_slots"): nslots = int(a.Get())
                 if n.endswith("floor_top_z"): floor_top = float(a.Get())
-        slot_x = [tray_center[0] + (i + 0.5 - nslots / 2) * pitch for i in range(nslots)]
+        # 칸은 **팔 기준 x 축**을 따라 늘어선다 (월드 x 가 아니다)
+        slot_rel = [np.array([tray_center[0] + (i + 0.5 - nslots / 2) * pitch,
+                              tray_center[1], 0.0]) for i in range(nslots)]
+        _Ryaw = np.array([[math.cos(_yaw), -math.sin(_yaw), 0.0],
+                          [math.sin(_yaw), math.cos(_yaw), 0.0],
+                          [0.0, 0.0, 1.0]])
+        slot_w = [_bp + _Ryaw @ r for r in slot_rel]
+        slot_x = [float(w[0]) for w in slot_w]      # 호환용 (월드 x)
 
         # 책
         self.books = []
@@ -168,7 +264,8 @@ class BookScene:
             q_up = self.upright_quat(path, np.asarray(src_q, float), np.array([0.0, 0.0, 5.0 + i]))
             xf.set_world_pose(np.array([0.0, 0.0, 5.0 + i]), q_up)
             b = self.aabb(path); c = (b[:3] + b[3:]) / 2
-            target = np.array([slot_x[i], tray_center[1], DECK_Z + floor_top + (b[5] - b[2]) / 2 + 0.002])
+            target = np.array([slot_w[i][0], slot_w[i][1],
+                               DECK_Z + floor_top + (b[5] - b[2]) / 2 + 0.002])
             pos, q = xf.get_world_pose(); xf.set_world_pose(np.array(pos) + (target - c), q)
             self.books.append(path)
             self.slot_pose[path] = (target.copy(), None)   # 트레이 칸 자세 (자세는 아래에서 채운다)
@@ -190,18 +287,18 @@ class BookScene:
         # 트레이 칸막이는 두지 않는다: 칸 간격 0.075 m 안에서는 손가락이 지나갈 폭이 남지 않아
         # 칸막이를 세우면 파지 경로를 막는다 (실측: down 단계 시간 초과). 대신 책 충돌을 상자로 근사해 세워 둔다.
         self.world = World(stage_units_in_meters=1.0, physics_dt=1 / 60, rendering_dt=1 / 60)
-        self.robot = SingleArticulation(prim_path=R, name="rf")
-        link0_x = float(SingleXFormPrim(R + "/panda_link0").get_world_pose()[0][0])
+        self.robot = SingleArticulation(prim_path=BOT.articulation_root, name="rf")
+        link0_x = float(SingleXFormPrim(BASE_LINK).get_world_pose()[0][0])
         self.tray_floor_z = DECK_Z + floor_top
         self.slot_x = slot_x
-        self.tray_y = float(tray_center[1])
+        self.tray_y = float(self.tray_center_w[1])      # 월드 y
         self.T, self.L, self.W = self.dims[self.books[0]]   # 기본값 (홈 자세·여러 종류일 때의 대표값)
         self.T_max = max(d[0] for d in self.dims.values())
         self.W_max = max(d[2] for d in self.dims.values())
         self.shelf_front_y = float(shelf[1])
 
         # 북엔드: 1차 고정 칸마다 한 쌍 (세운 책이 스스로 넘어지는 것 방지 — 칸막이 교훈)
-        floor_z = self.shelf_floor_z = 0.355 * 1.4
+        floor_z = self.shelf_floor_z = SHELF_ROW_Z
         spine_final = self.shelf_front_y + SPINE_INSET
         UsdGeom.Scope.Define(st, "/World/bs_bookends")
         self.bookends = {}      # place_x → (왼쪽 translate op, 오른쪽 translate op, y, z)
@@ -223,6 +320,32 @@ class BookScene:
                 paths[side] = p
             self.bookends[round(px, 4)] = (paths["L"], paths["R"], (y0 + y1) / 2, floor_z + DIV_H / 2)
 
+        # 팔 구동 게인 — **옛** 에셋(강성 40~1135)은 위치 지령을 못 따라가서 올려야 했다.
+        # 지금 받은 에셋은 기본값이 2.3e3~6.5e4 라 덮어쓸 이유가 줄었고, 덮어쓰면 USD 의 도(°)
+        # 단위가 라디안으로 환산되며 57배가 되어 감쇠가 5.7e6 까지 올라간다 (2026-09-20 실측).
+        # ARM_DRIVE_STIFFNESS=0 으로 끄고 에셋 기본값을 쓸 수 있게 한다.
+        # 목표값 0 맞추기는 **게인과 무관하게 항상** 한다 — joint_3·joint_5 의 목표(90°)를
+        # 안 맞추면 재생 순간 팔이 85° 튀며 로봇이 흔들린다 (2026-09-18 실측).
+        _stiff = float(os.environ.get("ARM_DRIVE_STIFFNESS", BOT.drive_stiffness))
+        _damp = float(os.environ.get("ARM_DRIVE_DAMPING", BOT.drive_damping))
+        _tuned = []
+        for _p in Usd.PrimRange(st.GetPrimAtPath(R)):
+            if _p.GetName() not in set(ARM_JOINTS):
+                continue
+            _d = UsdPhysics.DriveAPI.Get(_p, "angular") or UsdPhysics.DriveAPI.Apply(_p, "angular")
+            if _stiff > 0:
+                _d.CreateTypeAttr().Set("force")
+                _d.CreateStiffnessAttr().Set(_stiff)
+                _d.CreateDampingAttr().Set(_damp)
+            _t = _d.GetTargetPositionAttr().Get()
+            if _t not in (None, 0.0):
+                _d.CreateTargetPositionAttr().Set(0.0)
+                _tuned.append(f"{_p.GetName()} 목표 {_t}°→0°")
+        say(("팔 구동 게인 설정: 강성 %.0e 감쇠 %.0e" % (_stiff, _damp)) if _stiff > 0
+            else "팔 구동 게인: **에셋 기본값 사용** (ARM_DRIVE_STIFFNESS=0)")
+        if _tuned:
+            say(f"  구동 목표 보정: {_tuned}")
+
         if before_reset is not None:
             before_reset(st)      # ROS 그래프 설정 보완 등 — 재생(초기화) 전에 해야 반영된다
         self.world.reset(); self.robot.initialize()
@@ -234,31 +357,55 @@ class BookScene:
         for _ in range(120):
             self.world.step(render=False)
 
-        l0p, l0q = SingleXFormPrim(R + "/panda_link0").get_world_pose()
+        l0p, l0q = SingleXFormPrim(BASE_LINK).get_world_pose()
         self.l0p = np.asarray(l0p, float); self.Rl0 = R_from_quat(np.asarray(l0q, float))
-        self.lula = LulaKinematicsSolver(**interface_config_loader.load_supported_lula_kinematics_solver_config("Franka"))
+        if BOT.lula[0] == "supported":
+            cfg = interface_config_loader.load_supported_lula_kinematics_solver_config(BOT.lula[1])
+        else:
+            # Isaac 기본 지원 목록에 Doosan 이 없다 — descriptor·URDF 를 직접 준다
+            cfg = {"robot_description_path": BOT.lula[1], "urdf_path": BOT.lula[2]}
+        self.lula = LulaKinematicsSolver(**cfg)
+        # 씨앗을 조금씩 흔들어 다른 해 가지를 찾아본다 (먼 해가 나왔을 때만 쓴다)
+        self._ik_nudges = []
+        for j in range(BOT.dof):
+            for d in (0.3, -0.3, 0.8, -0.8):
+                v = np.zeros(BOT.dof); v[j] = d
+                self._ik_nudges.append(v)
         self.lula.set_robot_base_pose(l0p, l0q)
-        self.ik = ArticulationKinematicsSolver(r, self.lula, "right_gripper")
+        self.ik = ArticulationKinematicsSolver(r, self.lula, BOT.ee_frame)
 
         ee_p, ee_R = self.ik.compute_end_effector_pose()
-        hand_p = np.array(SingleXFormPrim(R + "/panda_hand").get_world_pose()[0])
-        lf = np.array(SingleXFormPrim(R + "/panda_leftfinger").get_world_pose()[0])
-        rf = np.array(SingleXFormPrim(R + "/panda_rightfinger").get_world_pose()[0])
+        hand_p = np.array(SingleXFormPrim(HAND_LINK).get_world_pose()[0])
+        lf = np.array(SingleXFormPrim(R + "/" + BOT.finger_links[0]).get_world_pose()[0])
+        rf = np.array(SingleXFormPrim(R + "/" + BOT.finger_links[1]).get_world_pose()[0])
         self._a_loc = np.round(ee_R.T @ ((ee_p - hand_p) / np.linalg.norm(ee_p - hand_p)))
         self._c_loc = np.round(ee_R.T @ ((rf - lf) / (np.linalg.norm(rf - lf) or 1.0)))
-        self.DOWN = self.orientation([0, 0, -1], [1, 0, 0])
-        self.HORIZ = self.orientation([0, 1, 0], [1, 0, 0])
+        self.say(f"그리퍼 축: 접근축(손 기준) {np.round(self._a_loc, 3).tolist()}, "
+                 f"물림축 {np.round(self._c_loc, 3).tolist()}")
+        # **파지·삽입 자세는 팔이 놓인 방향을 따라야 한다.**
+        # 예전에는 월드 x/y 로 박혀 있었다. 로봇이 yaw 90° 로 서면 트레이 칸도 90° 돌아가
+        # 책 두께가 월드 y 를 향하는데, 손가락은 월드 x 로 물려 해가 없다 (2026-09-20 실측).
+        # 팔 기준 x(칸이 늘어선 방향)·y(서가 쪽)를 월드로 돌려 쓴다. yaw 0 이면 예전과 같다.
+        _cy, _sy = math.cos(self.tray_yaw), math.sin(self.tray_yaw)
+        _arm_x_w = [_cy, _sy, 0.0]          # 칸이 늘어선 방향
+        _arm_y_w = [-_sy, _cy, 0.0]         # 서가를 향하는 방향
+        self.DOWN = self.orientation([0, 0, -1], _arm_x_w)
+        self.HORIZ = self.orientation(_arm_y_w, _arm_x_w)
+        self.say(f"파지 자세 기준: 팔 yaw {math.degrees(self.tray_yaw):.1f}°, "
+                 f"물림축(월드) {np.round(_arm_x_w, 3).tolist()}")
 
-        conf = yaml.safe_load(open(os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "arm.yaml")))
-        conf["gripper"]["tolerance_m"] = 0.006; conf["tolerance"]["position_m"] = 0.008; conf["tolerance"]["joint_rad"] = 0.03
+        # 로봇마다 자세·그리퍼 값이 다르다. franka 는 arm.yaml(검증 완료), 나머지는 arm_<이름>.yaml
+        _cfg_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config")
+        _cfg = os.path.join(_cfg_dir, "arm.yaml" if BOT.name == "franka" else f"arm_{BOT.name}.yaml")
+        conf = yaml.safe_load(open(_cfg))
+        # (예전에는 여기서 tolerance 를 코드로 덮어썼다. yaml 이 무시돼 로봇별 조정이 안 됐다)
         self.conf = conf
         self.arm = ArmController(_Backend(self), conf)
 
         tray_top = DECK_Z + floor_top + self.W_max
-        self.home_tip = np.array([tray_center[0], tray_center[1], tray_top + 0.30])
+        self.home_tip = np.array([self.tray_center_w[0], self.tray_center_w[1], tray_top + 0.30])
         seed = r.get_joint_positions()[self.idx_arm].copy()
-        seed[0] = math.atan2(tray_center[1] - l0p[1], tray_center[0] - l0p[0])
+        seed[0] = math.atan2(self.tray_center_w[1] - l0p[1], self.tray_center_w[0] - l0p[0])
         self.q_home, ok = self.ik_joints(self.home_tip, self.DOWN, seed)
         self.open_tray = self.T_max / 2 + GRIP_CLEAR
         say(f"장면 준비: 트레이 칸 {nslots}개, 책 {len(self.books)}권, 원본 {len(sources)}종, 홈 IK {ok}")
@@ -304,6 +451,9 @@ class BookScene:
                 break
         return best
 
+    def _prim_valid(self, p):
+        return self.stage.GetPrimAtPath(p).IsValid() if getattr(self, "stage", None) else True
+
     def aabb(self, p):
         self._cache.Clear()
         return np.array(compute_aabb(self._cache, p, include_children=True), float)
@@ -311,6 +461,41 @@ class BookScene:
     def center(self, p):
         b = self.aabb(p)
         return (b[:3] + b[3:]) / 2
+
+    def clash_report(self):
+        """팔 관절 주변에 **실제 충돌체**가 무엇이 있는지 PhysX 로 묻는다.
+
+        왜: AABB 겹침은 쓸모가 없었다 — compute_aabb 는 Xform 에서 하위 트리를 늘 포함해서
+        "link_2 가 트레이와 겹친다(= 그 아래 달린 그리퍼가 트레이에 있다)" 는 당연한 답만 나왔다.
+        PhysX overlap 은 콜라이더 단위라 **무엇이 팔을 막고 있는지** 바로 나온다 (2026-09-20).
+        """
+        try:
+            from omni.physx import get_physx_scene_query_interface
+            sq = get_physx_scene_query_interface()
+        except Exception as e:
+            return f"[진단] PhysX 조회 불가: {e}"
+        hits = []
+        for i in range(1, 7):
+            lp = f"{R}/m0609/link_{i}"
+            if not self._prim_valid(lp):
+                continue
+            pos = np.asarray(SingleXFormPrim(lp).get_world_pose()[0], float)
+            found = set()
+
+            def _cb(h, _f=found):
+                _f.add(str(h.collision))
+                return True
+
+            try:
+                sq.overlap_sphere(0.18, [float(v) for v in pos], _cb, False)
+            except Exception as e:
+                return f"[진단] overlap 실패: {e}"
+            # **팔 자신만** 뺀다. 받침판·카터 몸체는 남긴다 —
+            # 이것들을 걸러냈다가 "팔 주변에 아무것도 없다" 는 잘못된 결론을 냈다 (2026-09-20).
+            out = sorted({f.split("/World/")[-1] for f in found if "/m0609/link_" not in f})
+            if out:
+                hits.append(f"link_{i} 반경18cm: " + ", ".join(x[:46] for x in out[:4]))
+        return ("[진단] 팔 주변 물체 — " + " | ".join(hits)) if hits else "[진단] 팔 주변에 바깥 물체 없음"
 
     def to_world(self, p_arm):
         return self.l0p + self.Rl0 @ np.asarray(p_arm, float)
@@ -324,9 +509,31 @@ class BookScene:
         return quat_from_R(Wm @ Lm.T)
 
     def ik_joints(self, target, ori, seed):
-        q, ok = self.lula.compute_inverse_kinematics("right_gripper", np.asarray(target, float), np.asarray(ori, float),
-                                                     np.asarray(seed, float), 0.004, 0.05)
-        return np.asarray(q, float), bool(ok)
+        """IK 해를 구하되 **씨앗 자세에서 너무 먼 해는 버린다.**
+
+        6축에서는 같은 손끝 자세에 팔을 통째로 뒤로 돌린 해가 같이 존재한다. 그 해를
+        고르면 경로가 로봇 자신(받침판·카터)을 통과해 어깨가 막힌다
+        (2026-09-20 M0609: joint_1 이 3.22 rad = 185° 로 나와 approach 에서 멈췄다).
+        Lula 가 씨앗을 주어도 먼 해를 돌려주므로, 여기서 걸러 다시 시도한다.
+        """
+        seed = np.asarray(seed, float)
+        lim = BOT.ik_seed_limit
+        best = None
+        for k, s0 in enumerate([seed] + [seed + d for d in self._ik_nudges]):
+            q, ok = self.lula.compute_inverse_kinematics(
+                BOT.ee_frame, np.asarray(target, float), np.asarray(ori, float),
+                np.asarray(s0, float), 0.004, 0.05)
+            if not ok:
+                continue
+            q = np.asarray(q, float)
+            d = float(np.max(np.abs(q[:len(seed)] - seed)))
+            if lim <= 0 or d <= lim:
+                return q, True
+            if best is None or d < best[1]:
+                best = (q, d)
+        if best is not None:
+            return best[0], True          # 전부 멀면 그중 가장 가까운 해를 쓴다
+        return np.asarray(seed, float), False
 
     def plan_path(self, waypoints, seed, step_m=0.005, step_rad=0.035):
         qs = [np.asarray(seed, float)]; prev_p = prev_q = None; worst = 0.0
@@ -345,8 +552,9 @@ class BookScene:
             prev_p, prev_q = p_, q_
         return qs, worst, ""
 
-    def book_on_tray_near(self, p_world, tol=0.03):
+    def book_on_tray_near(self, p_world, tol=None):
         """트레이 위에 있는 책 중 AABB 중심이 p_world 에서 tol 안인 것"""
+        tol = BOT.tray_match_tol if tol is None else tol
         best, dist = None, tol
         for b in self.books:
             c = self.center(b)
@@ -376,7 +584,11 @@ class BookScene:
             p_w, q_w = SingleXFormPrim(book).get_world_pose()
             top = np.asarray(p_w, float) + R_from_quat(np.asarray(q_w, float)) @ (c_loc + up_loc * hz)
             grasp = np.array([top[0], top[1], top[2] - TIP_DOWN])   # 책 자신의 윗면 중심에서 내려간다
-        pre = grasp + np.array([0, 0, 0.13]); lift = grasp + np.array([0, 0, 0.17])
+        # 파지 전 대기 높이와 들어올림 높이. 예전에는 0.13/0.17 이 코드에 박혀 있었는데,
+        # 6축은 그 높이에서 IK 가 안 풀린다 (2026-09-20 M0609 에서 접근 IK 실패) → 설정으로 뺀다.
+        _pre_h = float(self.conf["grasp"].get("pre_lift_m", 0.13))
+        _lift_h = float(self.conf["grasp"].get("carry_lift_m", 0.17))
+        pre = grasp + np.array([0, 0, _pre_h]); lift = grasp + np.array([0, 0, _lift_h])
         grip_z = floor_z + Lb / 2 + 0.004
         y_pre = y_front - (W - TIP_DOWN) - 0.03
         transfer = np.array([place_x, y_pre - 0.02, grip_z + 0.06]); pre_ins = np.array([place_x, y_pre, grip_z + 0.01])
@@ -480,10 +692,10 @@ class BookScene:
         if book in self.upright_q:
             p_now = SingleXFormPrim(book).get_world_pose()[0]
             SingleXFormPrim(book).set_world_pose(np.asarray(p_now, float), self.upright_q[book])
-        hp, hq = SingleXFormPrim(R + "/panda_hand").get_world_pose(); bp, bq = SingleXFormPrim(book).get_world_pose()
+        hp, hq = SingleXFormPrim(HAND_LINK).get_world_pose(); bp, bq = SingleXFormPrim(book).get_world_pose()
         Rh = R_from_quat(hq); rel_p = Rh.T @ (np.asarray(bp) - np.asarray(hp)); rel_q = quat_from_R(Rh.T @ R_from_quat(bq))
         j = UsdPhysics.FixedJoint.Define(self.stage, GRASP_JOINT)
-        j.CreateBody0Rel().SetTargets([R + "/panda_hand"]); j.CreateBody1Rel().SetTargets([book])
+        j.CreateBody0Rel().SetTargets([HAND_LINK]); j.CreateBody1Rel().SetTargets([book])
         j.CreateLocalPos0Attr().Set(Gf.Vec3f(*[float(v) for v in rel_p]))
         j.CreateLocalRot0Attr().Set(Gf.Quatf(float(rel_q[0]), Gf.Vec3f(*[float(v) for v in rel_q[1:]])))
         j.CreateLocalPos1Attr().Set(Gf.Vec3f(0, 0, 0)); j.CreateLocalRot1Attr().Set(Gf.Quatf(1, Gf.Vec3f(0, 0, 0)))
@@ -497,7 +709,7 @@ class BookScene:
         return np.asarray(SingleXFormPrim(b).get_world_pose()[0], float)
 
     def book_in_hand(self, b):
-        hp, hq = SingleXFormPrim(R + "/panda_hand").get_world_pose()
+        hp, hq = SingleXFormPrim(HAND_LINK).get_world_pose()
         return R_from_quat(hq).T @ (self.book_origin(b) - np.asarray(hp, float))
 
     def verify(self, plan):
@@ -512,6 +724,38 @@ class BookScene:
             "floor": abs(bb[2] - plan["floor_z"]) < 0.03,
         }
         return all(checks.values()), checks, bb
+
+    def survey(self):
+        """**장면 전체**의 책 상태를 본다 — 꽂은 책만 보면 놓친다.
+
+        왜: `verify()` 는 이번에 꽂기로 한 책 하나만 본다. 그래서
+        **다른 책이 쓰러지거나 떨어져도 "성공" 으로 보고된다.**
+        실제로 4권 4/4 라고 보고한 녹화에서 트레이에 누운 책이 보였다 (2026-09-20 지적).
+
+        판정: 세운 높이(가장 큰 변)가 z 축과 맞으면 '서 있음', 아니면 '누움'.
+        트레이 높이 근처면 트레이, 서가 높이 근처면 서가로 나눈다.
+        """
+        out = []
+        for b in self.books:
+            bb = self.aabb(b)
+            size = bb[3:] - bb[:3]
+            T, Lb, W = self.dims.get(b, (self.T, self.L, self.W))
+            z0 = float(bb[2])
+            where = ("서가" if abs(z0 - self.shelf_floor_z) < 0.05
+                     else "트레이" if abs(z0 - self.tray_floor_z) < 0.06
+                     else "바닥/기타")
+            # **자리마다 '바른 자세'가 다르다.**
+            #   트레이: 책등이 위 → **깊이(W)** 가 수직
+            #   서가  : 세워 꽂음 → **높이(L)** 가 수직
+            # 이걸 하나로 보면 트레이의 정상 자세를 '쓰러짐' 으로 잘못 읽는다 (2026-09-20).
+            want = W if where == "트레이" else Lb
+            ok_pose = abs(size[2] - want) < 0.025
+            out.append({"book": b.rsplit("/", 1)[-1], "바른자세": bool(ok_pose),
+                        "위치": where, "밑면z": round(z0, 4),
+                        "기대수직": round(float(want), 3),
+                        "크기": [round(float(v), 3) for v in size]})
+        bad = [o for o in out if not o["바른자세"] or o["위치"] == "바닥/기타"]
+        return out, bad
 
 
 class _Backend:
@@ -530,9 +774,22 @@ class _Backend:
         s = self.s
         q = s.robot.get_joint_positions().copy()
         if arm_q is not None:
-            q[s.idx_arm] = np.asarray(arm_q, float)[:7]
-        q[s.idx_fing] = self._grip; q[s.base_idx] = s.base_hold
-        s.robot.apply_action(ArticulationAction(joint_positions=q))
+            q[s.idx_arm] = np.asarray(arm_q, float)[:BOT.dof]
+        q[s.idx_fing] = BOT.grip_targets(self._grip); q[s.base_idx] = s.base_hold
+        # joint_indices 를 명시한다. 생략하면 일부 환경에서 지령이 반영되지 않아
+        # 팔이 제자리에 머문다 (2026-09-20 M0609 에서 approach 제한 시간 초과).
+        s.robot.apply_action(ArticulationAction(
+            joint_positions=q, joint_indices=np.arange(len(q))))
+
+    def say(self, m):
+        self.s.say(m)
+
+    def clash_report(self):
+        """팔 링크와 장면 물체의 겹침을 한 줄로 요약한다 (막힌 이유를 눈 없이 알아내려고)"""
+        try:
+            return self.s.clash_report()
+        except Exception as e:
+            return f"[진단] 겹침 검사 실패: {e}"
 
     def set_joint_targets(self, positions):
         self._apply(positions)
@@ -550,4 +807,4 @@ class _Backend:
         self._apply()
 
     def get_gripper_width(self):
-        return float(np.mean(self.s.robot.get_joint_positions()[self.s.idx_fing]))
+        return BOT.grip_width(self.s.robot.get_joint_positions()[self.s.idx_fing])

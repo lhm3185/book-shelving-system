@@ -23,7 +23,7 @@
 
 | 파일 | 대상 소유자 | 요청 |
 | --- | --- | --- |
-| `arm_frames.launch.py` | 이현민 (launch) | `panda_link0→arm_base_link`, `panda_hand→tool0`, `panda_hand→gripper_tcp` 정적 TF. PC B launch 에 포함 요청 |
+| `arm_frames.launch.py` | 이현민 (launch) | `<팔 베이스>→arm_base_link` 정적 TF. PC B launch 에 포함 요청. **부모 이름을 박지 말 것** — franka `panda_link0` / m0609 `base_link` 로 다르다 (2026-09-20 정정). `run_demo_pc.sh` 가 `robot_profiles` 에서 읽는 방식을 그대로 쓰면 된다 |
 
 ## 경로 대응
 

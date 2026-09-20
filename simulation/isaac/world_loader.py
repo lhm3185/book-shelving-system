@@ -4,31 +4,33 @@
 Isaac 설치 위치만 시스템마다 다르므로 `ISAAC_SIM_PATH` 환경변수로 받는다 (실행 스크립트가 쓴다).
 """
 import os
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_USD = REPO_ROOT / "simulation" / "assets" / "ing_library_env_v5-test.usd"
 DEFAULT_TRAY = ( REPO_ROOT / "simulation" / "assets" / "book_dataset" / "assets" / "tray" / "tray_v1.usdc" )
 
+# 로봇 prim 경로는 로봇마다 다르다 → 프로파일에서 가져온다 (config/robot_profiles.py)
+sys.path.insert(0, str(Path(__file__).resolve().parent / "config"))
+from robot_profiles import profile  # noqa: E402
+
+BOT = profile()
+
 # 통합 USD 에 있어야 하는 것들. 없으면 시작할 때 바로 알린다
 REQUIRED_PRIMS = {
-    "로봇(AMR+로봇팔)": "/World/Nova_Carter_ROS",
+    "로봇(AMR+로봇팔)": BOT.root,
     "서가": "/World/bookshelves",
     "책 원본": "/World/books",
 }
 
 OPTIONAL_PRIMS = {
-    "손목 카메라": (
-        "/World/Nova_Carter_ROS/m0609/onrobot_rg2ft/"
-        "angle_bracket/realsense_d455/RSD455/"
-        "Camera_OmniVision_OV9782_Color"
-    ),
-    "라이다": (
-        "/World/Nova_Carter_ROS/chassis_link/"
-        "sensors/XT_32/PandarXT_32_10hz"
-    ),
+    "손목 카메라": f"{BOT.root}/{BOT.camera_prim}",
+    "라이다": f"{BOT.root}/{BOT.lidar_prim}",
     "무인반납기": "/World/return_machine",
 }
+
+
 def resolve_usd(path=None):
     """USD 경로 결정: 인자 > 환경변수 SIM_USD > 저장소 기본값"""
     p = path or os.environ.get("SIM_USD") or str(DEFAULT_USD)

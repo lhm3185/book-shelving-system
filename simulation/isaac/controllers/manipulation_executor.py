@@ -102,8 +102,20 @@ class ManipulationExecutor:
         place_w = scene.to_world(cmd["place"]["center"])
         book, dist = scene.book_on_tray_near(pick_w)
         if book is None:
+            # **왜 못 찾았는지 숫자로 남긴다** — "책 없음" 만으로는 좌표 문제인지
+            # 책이 정말 없는지 못 가른다 (2026-09-20 M0609 에서 여기서 막혔다)
+            near = sorted(((float(np.linalg.norm(scene.center(b) - pick_w)), b) for b in scene.books))[:2]
+            detail = ", ".join(f"{b.rsplit('/',1)[-1]} {d*100:.1f}cm" for d, b in near)
+            self.say(f"트레이 칸 판정 실패: 찾는 곳(월드) {np.round(pick_w, 4).tolist()} "
+                     f"= 팔기준 {np.round(cmd['pick']['center'], 4).tolist()}")
+            self.say(f"    가장 가까운 책: {detail}")
+            for b in scene.books[:3]:
+                c = scene.center(b)
+                self.say(f"    {b.rsplit('/',1)[-1]} 월드 {np.round(c,3).tolist()} "
+                         f"팔기준 {np.round(scene.to_arm(c),4).tolist()}")
             return self.finish(SIM_FAILED, error_code=411,
-                               message=f"트레이 칸 {cmd['pick'].get('tray_slot')} 에 책 없음 (3cm 안)")
+                               message=f"트레이 칸 {cmd['pick'].get('tray_slot')} 에 책 없음 "
+                                       f"(가장 가까운 것 {near[0][0]*100:.1f}cm)")
         plan, code, err = scene.plan_job(book, place_w)
         if plan is None:
             return self.finish(SIM_FAILED, error_code=code, message=f"계획 실패 {err}")
@@ -176,10 +188,15 @@ class ManipulationExecutor:
                 job.watch["rel0"] = scene.book_in_hand(book)
             if name == "carry_rotate" and "z0" in job.watch and "rise" not in job.watch:
                 job.watch["rise"] = scene.center(book)[2] - job.watch["z0"]
-                if job.watch["rise"] < 0.08:
+                # 기대 상승량은 **실제 들어올림 높이**에 맞춰야 한다. 0.08 이 박혀 있어서
+                # carry_lift_m 을 0.06 으로 낮춘 M0609 는 원리상 통과할 수 없었다 (2026-09-20).
+                _need = float(scene.conf["grasp"].get("lift_check_m",
+                              max(0.03, scene.conf["grasp"].get("carry_lift_m", 0.17) * 0.5)))
+                if job.watch["rise"] < _need:
                     arm.cancel()
                     self.finish(SIM_FAILED, error_code=405,
-                                message=f"들어 올린 뒤 책 상승 {job.watch['rise'] * 100:.1f}cm")
+                                message=f"들어 올린 뒤 책 상승 {job.watch['rise'] * 100:.1f}cm "
+                                        f"(기대 {_need * 100:.1f}cm 이상)")
                 elif self.gate is not None and self.sensor_policy == "gated":
                     self.gate.all(False, f"— 파지 확인 (책 상승 {job.watch['rise'] * 100:.1f}cm), 작업 끝까지")
             if name in ("carry_rotate", "wedge") and "rel0" in job.watch \
@@ -207,7 +224,15 @@ class ManipulationExecutor:
                 for _ in range(60):
                     world.step(render=self.need_render())
                 ok, checks, bb = scene.verify(job.plan)
+                # **꽂은 책만 보면 놓친다** — 장면 전체를 훑어 쓰러진 책을 찾는다.
+                # 이게 없어서 "4권 4/4" 라고 보고한 녹화에 누운 책이 있었다 (2026-09-20).
+                states, fallen = scene.survey()
+                if fallen:
+                    self.say(f"**자세가 이상한 책 {len(fallen)}권** {[f['book'] for f in fallen]}")
+                    for f in fallen:
+                        self.say(f"    {f['book']} {f['위치']} 밑면z {f['밑면z']} 기대수직 {f['기대수직']} 크기 {f['크기']}")
                 extra = {"placement_verified": bool(ok), "checks": {k: bool(v) for k, v in checks.items()},
+                         "fallen_books": [f["book"] for f in fallen], "scene_books": states,
                          "book_aabb_center_arm": np.round(scene.to_arm((bb[:3] + bb[3:]) / 2), 4).tolist(),
                          "joint_peak_ratio": round(job.peak, 3), "joint_over80_steps": job.spikes}
                 if job.spikes:

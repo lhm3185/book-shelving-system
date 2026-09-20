@@ -94,7 +94,7 @@ class VisionManager(Node):
             'camera_frame', 'RSD455').value
         # 검출 좌표를 변환할 최종 로봇 frame 이름입니다.
         self.target_frame = self.declare_parameter(
-            'target_frame', 'base_link').value
+            'target_frame', 'arm_base_link').value
         # RGB와 Depth가 서로 정렬되어 있는지 나타내는 설정입니다.
         self.depth_registered = bool(self.declare_parameter(
             'depth_registered', True).value)
@@ -137,7 +137,7 @@ class VisionManager(Node):
             'shelf_depth_margin', 0.05).value)
         # 삽입 후보를 화면에 투영해 깊이를 읽을 때 사용할 로봇 기준 frame입니다.
         self.slot_position_frame = self.declare_parameter(
-            'slot_position_frame', 'base_link').value
+            'slot_position_frame', 'arm_base_link').value
         # x,y,z가 반복되는 평탄화된 삽입 후보 좌표 목록입니다.
         self.slot_positions = list(self.declare_parameter(
             'slot_positions', [
@@ -444,16 +444,24 @@ class VisionManager(Node):
         if not rgb_msg.header.frame_id or not depth_msg.header.frame_id:
             self.get_logger().warning('RGB or depth frame_id is empty')
             return
-        # 세 메시지가 예상한 카메라 frame에서 왔는지 확인합니다.
-        if (rgb_msg.header.frame_id != self.camera_frame
-                or depth_msg.header.frame_id != self.camera_frame
-                or camera_info_msg.header.frame_id != self.camera_frame):
+        # 설정값은 기본 카메라 frame 이름일 뿐, Isaac Sim이 실제로
+        # 발행한 frame_id와 다를 수 있습니다(예: RSD455 vs sim_camera).
+        # 변환 함수는 아래에서 RGB 메시지의 실제 frame_id를 사용하므로,
+        # 이름이 다르다는 이유만으로 유효한 프레임을 버리지 않습니다.
+        if rgb_msg.header.frame_id != self.camera_frame:
             self.get_logger().warning(
-                f'Expected camera optical frame {self.camera_frame}, got '
-                f'rgb={rgb_msg.header.frame_id}, '
-                f'depth={depth_msg.header.frame_id}, '
-                f'camera_info={camera_info_msg.header.frame_id}')
-            return
+                f'Configured camera frame is {self.camera_frame}, but RGB '
+                f'uses {rgb_msg.header.frame_id}; using the message frame.')
+        if depth_msg.header.frame_id != rgb_msg.header.frame_id:
+            self.get_logger().warning(
+                f'RGB/depth frames differ: rgb={rgb_msg.header.frame_id}, '
+                f'depth={depth_msg.header.frame_id}')
+        if camera_info_msg.header.frame_id not in (
+                '', rgb_msg.header.frame_id):
+            self.get_logger().warning(
+                f'CameraInfo frame differs: '
+                f'camera_info={camera_info_msg.header.frame_id}, '
+                f'rgb={rgb_msg.header.frame_id}')
         # RGB와 Depth frame이 다르면 registered depth 설정을 확인합니다.
         if (rgb_msg.header.frame_id != depth_msg.header.frame_id
                 and not self.depth_registered):

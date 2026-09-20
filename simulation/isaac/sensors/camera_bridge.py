@@ -11,12 +11,19 @@
 가로 화각 90.5°(학습 데이터와 같음), 640×480. 확정되면 MOUNT_* 만 바꾼다.
 """
 import math
+import os
+import sys
 
 import omni.graph.core as og
 import usdrt.Sdf
 from pxr import Gf, UsdGeom
 
-MOUNT_OFFSET = (0.06, 0.0, 0.0)     # panda_hand 좌표계 (m)
+# 로봇별 장착 위치는 프로파일에서 온다 (config/robot_profiles.py)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config"))
+from robot_profiles import profile  # noqa: E402
+
+BOT = profile()
+MOUNT_OFFSET = BOT.camera_offset    # 손목 링크 좌표계 (m)
 HFOV_DEG = 90.5
 RES = (640, 480)
 CAMERA_NAME = "wrist_camera"
@@ -24,7 +31,7 @@ OPTICAL_FRAME = "wrist_camera_optical_frame"
 
 
 def add_wrist_camera(stage, robot_path):
-    path = f"{robot_path}/panda_hand/{CAMERA_NAME}"
+    path = f"{robot_path}/{BOT.hand_link}/{CAMERA_NAME}"
     cam = UsdGeom.Camera.Define(stage, path)
     xf = UsdGeom.Xformable(cam)
     xf.ClearXformOpOrder()
@@ -65,7 +72,7 @@ def build_ros_graph(camera_path, robot_path, rgb="/rgb", depth="/depth", info="/
                 # 로봇 루트를 넣으면 ridgeback_franka 트리가 world→panda_link2→…→base_link→…→world 로 **고리**가 된다
                 # (2026-09-17 실측, tf2 "tree contains a loop"). 비전에 필요한 panda_link0→wrist_camera 만 낸다
                 ("TF.inputs:targetPrims", [usdrt.Sdf.Path(camera_path)]),
-                ("TF.inputs:parentPrim", [usdrt.Sdf.Path(f"{robot_path}/panda_link0")]),
+                ("TF.inputs:parentPrim", [usdrt.Sdf.Path(f"{robot_path}/{BOT.base_link}")]),
                 ("Clock.inputs:topicName", clock),
             ],
             keys.CONNECT: [
@@ -105,7 +112,7 @@ def build_supplement_graph(camera_path, robot_path, tf="/tf", clock="/clock", gr
             keys.SET_VALUES: [
                 ("TF.inputs:topicName", tf),
                 ("TF.inputs:targetPrims", [usdrt.Sdf.Path(camera_path)]),
-                ("TF.inputs:parentPrim", [usdrt.Sdf.Path(f"{robot_path}/panda_link0")]),
+                ("TF.inputs:parentPrim", [usdrt.Sdf.Path(f"{robot_path}/{BOT.base_link}")]),
                 ("Clock.inputs:topicName", clock),
             ],
             keys.CONNECT: [
@@ -144,7 +151,7 @@ def apply_amr_test_overrides(stage, robot_path, say=print):
     # → base_link 아래로 필요한 것만: panda_link0(팔·카메라 연결), Lidar(스캔)
     prim = stage.GetPrimAtPath(f"{robot_path}/ros2_odom_graph/TFRobot")
     if prim.IsValid():
-        targets = [Sdf.Path(f"{robot_path}/panda_link0")]
+        targets = [Sdf.Path(f"{robot_path}/{BOT.base_link}")]
         lidar = f"{robot_path}/front_laser/Lidar"
         if stage.GetPrimAtPath(lidar).IsValid():
             targets.append(Sdf.Path(lidar))
