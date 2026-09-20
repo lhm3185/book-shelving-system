@@ -126,6 +126,16 @@ scp -r rokey@10.10.0.2:~/Isaac_Sim_b-1 ~/
 Isaac 만 깔려 있으면 **저장소 도구로 재생성**된다.
 
 ```bash
+./scripts/regenerate_levels.sh --dry-run   # 무엇을 할지 먼저 확인
+./scripts/regenerate_levels.sh             # 실제 생성
+```
+
+사전 확인(Isaac·원본 레벨·참조 레이어)을 먼저 하고, 각 단계 산출물이 실제로 생겼는지
+검사한 뒤 넘어간다. 서가와 선반 높이를 바꾸려면 `--shelf` / `--row-z` 를 쓴다.
+
+아래는 그 스크립트가 실제로 부르는 명령이다 (직접 칠 일이 있을 때 참고).
+
+```bash
 cd ~/<저장소>
 LV=~/Desktop/Collected_ing_library_env_v5-firstFinal
 

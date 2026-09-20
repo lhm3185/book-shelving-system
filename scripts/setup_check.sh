@@ -105,7 +105,13 @@ if [ -f "$WL" ]; then
         warn "  FASTRTPS_DEFAULT_PROFILES_FILE 을 비우고 실행할 것"
     fi
 else
-    warn "화이트리스트 없음 — 한 PC 안에서만 쓸 거면 그래도 된다"
+    # "없음" 이라고만 하면 만들어야 하나 싶어진다. 연구실 밖에서는 **없는 게 정상**이다.
+    ok "화이트리스트 없음 — 연구실 밖(집·다른 망)에서는 이게 정상이다. 만들지 말 것"
+    note_wl=1
+fi
+if [ "${note_wl:-0}" = "1" ]; then
+    printf '  참고  이 파일은 연구실 유선망(10.10.0.x)만 허용하는 것이라, 그 망에 있을 때만 쓴다.\n'
+    printf '        집에서 만들면 ROS 통신이 전부 막힌다.\n'
 fi
 
 printf '\n'
