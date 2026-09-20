@@ -20,7 +20,10 @@ REPO_ROOT = HERE.parents[1]
 ap = argparse.ArgumentParser()
 ap.add_argument("--usd", default="", help="열 USD. 비우면 simulation/library_system.usd (환경변수 SIM_USD 도 가능)")
 ap.add_argument("--tray", default="", help="트레이 USD. 비우면 simulation/assets/tray.usd")
-ap.add_argument("--tray-center", type=float, nargs=2, default=[2.36, -2.94])
+# **팔 기준(arm_base_link) 좌표**다. 예전에는 월드 좌표(2.36, -2.94)였는데, 로봇이 다른
+# 자리로 가면 그대로 깨진다. 기본값은 book_profiles.yaml 의 트레이 칸 평균과 같다.
+ap.add_argument("--tray-center", type=float, nargs=2, default=[-0.4748, 0.0788],
+                help="트레이 중앙 (arm_base_link 기준 x y)")
 ap.add_argument("--books", type=int, default=6)
 ap.add_argument("--book-variants", default="", help="'mixed' 면 색·크기가 다른 기본 6종, 쉼표 목록도 가능")
 ap.add_argument("--place-dx", type=float, nargs="+", default=[-0.51, -0.43, -0.35, -0.27],

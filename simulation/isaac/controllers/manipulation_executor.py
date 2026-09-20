@@ -207,7 +207,15 @@ class ManipulationExecutor:
                 for _ in range(60):
                     world.step(render=self.need_render())
                 ok, checks, bb = scene.verify(job.plan)
+                # **꽂은 책만 보면 놓친다** — 장면 전체를 훑어 쓰러진 책을 찾는다.
+                # 이게 없어서 "4권 4/4" 라고 보고한 녹화에 누운 책이 있었다 (2026-09-20).
+                states, fallen = scene.survey()
+                if fallen:
+                    self.say(f"**자세가 이상한 책 {len(fallen)}권** {[f['book'] for f in fallen]}")
+                    for f in fallen:
+                        self.say(f"    {f['book']} {f['위치']} 밑면z {f['밑면z']} 기대수직 {f['기대수직']} 크기 {f['크기']}")
                 extra = {"placement_verified": bool(ok), "checks": {k: bool(v) for k, v in checks.items()},
+                         "fallen_books": [f["book"] for f in fallen], "scene_books": states,
                          "book_aabb_center_arm": np.round(scene.to_arm((bb[:3] + bb[3:]) / 2), 4).tolist(),
                          "joint_peak_ratio": round(job.peak, 3), "joint_over80_steps": job.spikes}
                 if job.spikes:

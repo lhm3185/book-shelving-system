@@ -25,7 +25,8 @@ import os
 
 class RobotProfile:
     def __init__(self, name, root, base_link, arm_joints, grip_joints, grip_open, grip_close,
-                 ee_frame, hand_link, finger_links, vel_limit, lula, camera_prim, camera_offset):
+                 ee_frame, hand_link, finger_links, vel_limit, lula, camera_prim, camera_offset,
+                 deck_z, drive_stiffness=0.0, drive_damping=0.0):
         self.name = name
         self.root = root                  # articulation root prim
         self.base_link = base_link        # IK·좌표의 기준 링크
@@ -40,6 +41,12 @@ class RobotProfile:
         self.lula = lula                  # ("supported", "Franka") 또는 ("files", descriptor, urdf)
         self.camera_prim = camera_prim
         self.camera_offset = camera_offset  # 손목 링크 기준 (x, y, z) m
+        # 트레이가 놓이는 면의 **월드 높이**. 로봇마다 다르다 — 예전에는 코드에 0.286 이
+        # 박혀 있어 새 로봇에서 트레이가 37 cm 아래에 놓였다 (2026-09-20).
+        self.deck_z = deck_z
+        # 실행 시점에 올릴 팔 구동 게인. 0 이면 손대지 않는다 (에셋 값을 그대로 쓴다).
+        self.drive_stiffness = drive_stiffness
+        self.drive_damping = drive_damping
 
     @property
     def dof(self):
@@ -85,6 +92,8 @@ FRANKA = RobotProfile(
     lula=("supported", "Franka"),
     camera_prim="panda_hand/rsd455/RSD455/Camera_OmniVision_OV9782_Color",
     camera_offset=(0.0, 0.0, 0.0),               # 기존 경로는 카메라 오프셋을 따로 쓰지 않는다
+    deck_z=0.286,                                # ridgeback 데크 윗면
+    # Franka 는 에셋 게인 그대로 4/4 가 나왔다 — 건드리지 않는다
 )
 
 M0609 = RobotProfile(
@@ -109,6 +118,11 @@ M0609 = RobotProfile(
           os.path.expanduser("~/Isaac_Sim_b-1/src_pra/M0609/doosan-robot2/urdf/m0609.urdf")),
     camera_prim="m0609/onrobot_rg2ft/angle_bracket/realsense_d455/RSD455/Camera_OmniVision_OV9782_Color",
     camera_offset=(0.0115, 0.0450, 0.0525),      # link_6 기준, 회전 X축 180° (2026-09-19 실측)
+    deck_z=0.655,                                # 받침판(Cube) 윗면 — 팔 베이스와 같은 높이
+    # 받은 에셋은 URDF 임포트 기본값(강성 40~1135)이라 위치 지령을 못 따라간다.
+    # 1e5 면 어깨·팔꿈치가 처지고 1e6 은 불안정했다 → 1e7/1e5 (2026-09-18 실측)
+    drive_stiffness=1.0e7,
+    drive_damping=1.0e5,
 )
 
 _ALL = {p.name: p for p in (FRANKA, M0609)}

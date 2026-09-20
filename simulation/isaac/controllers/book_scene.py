@@ -40,7 +40,7 @@ SHELF = "/World/bookshelves/shelf_brown__book_shelf_01"
 BOOK_SRC = "/World/books/book_encyclopedia_set_01_2k__book_encyclopedia_set_01_book15"
 ARM_JOINTS = BOT.arm_joints
 FINGERS = BOT.grip_joints
-DECK_Z = 0.286
+DECK_Z = BOT.deck_z          # 트레이가 놓이는 면의 월드 높이 (로봇별)
 TIP_DOWN = 0.035            # 책등 윗면에서 손끝이 내려가 잡는 깊이
 GRIP_CLEAR = 0.005
 SPINE_INSET = 0.02          # 계획상 최종 책등이 서가 앞면에서 들어가는 거리
@@ -114,6 +114,15 @@ class BookScene:
         # 책 원본: 기본은 한 종류, --book-variants 를 주면 레벨 /World/books 의 여러 종류를 돌려 쓴다
         sources = []
         for name in (book_variants or [BOOK_SRC]):
+            # **레벨이 평탄화(flatten)되어 있으면 책 prim 에 참조가 없다** (2026-09-20, 담당자
+            # Collected 레벨). 그때는 이름이 곧 원본 USD 인 것으로 보고 직접 읽는다.
+            if name.endswith((".usd", ".usda", ".usdc")):
+                src = os.path.expanduser(name)
+                if not os.path.exists(src):
+                    say(f"책 원본 파일 없음, 건너뜀: {src}")
+                    continue
+                sources.append((None, src, np.array([1.0, 0.0, 0.0, 0.0])))
+                continue
             path = name if name.startswith("/") else "/World/books/" + name
             prim = st.GetPrimAtPath(path)
             if not prim.IsValid():
@@ -132,15 +141,32 @@ class BookScene:
         if not sources:
             raise RuntimeError("쓸 수 있는 책 원본이 없다")
         shelf = self.aabb(SHELF)
-        for p in ([s[0] for s in sources]
+        for p in ([s[0] for s in sources if s[0] is not None]
                   + ([str(c.GetPath()) for c in st.GetPrimAtPath("/World/fixtures").GetChildren()]
                      if st.GetPrimAtPath("/World/fixtures").IsValid() else [])):
             st.GetPrimAtPath(p).SetActive(False)
 
         # 트레이
+        #
+        # 예전에는 월드 좌표(--tray-center)와 항등 자세로 놓았다. 로봇이 다른 자리·다른
+        # 방향으로 서는 순간 트레이가 엉뚱한 데 생긴다 (2026-09-20: 37 cm 아래 + 방향 90° 틀어짐).
+        # 좌표 계약이 `arm_base_link` 기준이므로 **트레이도 팔 기준으로 놓는다.**
+        _bl = SingleXFormPrim(BASE_LINK)
+        _bp, _bq = _bl.get_world_pose()
+        _bp = np.asarray(_bp, float)
+        _BR = R_from_quat(np.asarray(_bq, float))
+        # 팔 기준 트레이 중앙 — book_profiles.yaml 의 칸 좌표와 같은 값이어야 한다
+        _tray_rel = np.array([float(tray_center[0]), float(tray_center[1]), 0.0])
+        _tray_w = _bp + _BR @ _tray_rel
         self.tray = "/World/bs_tray"
         add_reference_to_stage(tray_usd, self.tray)
-        SingleXFormPrim(self.tray).set_world_pose(np.array([tray_center[0], tray_center[1], DECK_Z]), np.array([1.0, 0, 0, 0]))
+        SingleXFormPrim(self.tray).set_world_pose(
+            np.array([_tray_w[0], _tray_w[1], DECK_Z]), np.asarray(_bq, float))
+        # **월드 값을 따로 들고 있는다** — 아래 계산들은 월드 기준이라 팔 기준 값을 그대로
+        # 쓰면 x,y 는 팔 기준·z 는 월드인 잡종 좌표가 된다 (2026-09-20 실제로 IK 실패).
+        self.tray_center_w = _tray_w.copy()
+        say(f"트레이 배치: 팔 기준 {np.round(_tray_rel[:2], 4).tolist()} "
+            f"→ 월드 {np.round(_tray_w[:2], 3).tolist()}, 면 z {DECK_Z:.3f}")
         pitch = nslots = floor_top = None
         for p in Usd.PrimRange(st.GetPrimAtPath(self.tray)):
             if p.IsA(UsdGeom.Mesh):
@@ -150,7 +176,11 @@ class BookScene:
                 if n.endswith("tray_pitch"): pitch = float(a.Get())
                 if n.endswith("tray_slots"): nslots = int(a.Get())
                 if n.endswith("floor_top_z"): floor_top = float(a.Get())
-        slot_x = [tray_center[0] + (i + 0.5 - nslots / 2) * pitch for i in range(nslots)]
+        # 칸은 **팔 기준 x 축**을 따라 늘어선다 (월드 x 가 아니다)
+        slot_rel = [np.array([tray_center[0] + (i + 0.5 - nslots / 2) * pitch,
+                              tray_center[1], 0.0]) for i in range(nslots)]
+        slot_w = [_bp + _BR @ r for r in slot_rel]
+        slot_x = [float(w[0]) for w in slot_w]      # 호환용 (월드 x)
 
         # 책
         self.books = []
@@ -176,7 +206,8 @@ class BookScene:
             q_up = self.upright_quat(path, np.asarray(src_q, float), np.array([0.0, 0.0, 5.0 + i]))
             xf.set_world_pose(np.array([0.0, 0.0, 5.0 + i]), q_up)
             b = self.aabb(path); c = (b[:3] + b[3:]) / 2
-            target = np.array([slot_x[i], tray_center[1], DECK_Z + floor_top + (b[5] - b[2]) / 2 + 0.002])
+            target = np.array([slot_w[i][0], slot_w[i][1],
+                               DECK_Z + floor_top + (b[5] - b[2]) / 2 + 0.002])
             pos, q = xf.get_world_pose(); xf.set_world_pose(np.array(pos) + (target - c), q)
             self.books.append(path)
             self.slot_pose[path] = (target.copy(), None)   # 트레이 칸 자세 (자세는 아래에서 채운다)
@@ -202,7 +233,7 @@ class BookScene:
         link0_x = float(SingleXFormPrim(BASE_LINK).get_world_pose()[0][0])
         self.tray_floor_z = DECK_Z + floor_top
         self.slot_x = slot_x
-        self.tray_y = float(tray_center[1])
+        self.tray_y = float(self.tray_center_w[1])      # 월드 y
         self.T, self.L, self.W = self.dims[self.books[0]]   # 기본값 (홈 자세·여러 종류일 때의 대표값)
         self.T_max = max(d[0] for d in self.dims.values())
         self.W_max = max(d[2] for d in self.dims.values())
@@ -230,6 +261,26 @@ class BookScene:
                 UsdPhysics.RigidBodyAPI.Apply(cube.GetPrim()).CreateKinematicEnabledAttr().Set(True)
                 paths[side] = p
             self.bookends[round(px, 4)] = (paths["L"], paths["R"], (y0 + y1) / 2, floor_z + DIV_H / 2)
+
+        # 팔 구동 게인 — URDF 임포트 기본값(강성 40~1135)으로는 위치 지령을 못 따라간다.
+        # 받은 에셋이 그 상태라 홈 이동부터 시간 초과가 났다 (2026-09-20 실측).
+        # **에셋을 고치지 않고 실행 시점에 올린다.** joint_3·joint_5 의 목표(90°)도 0 으로 맞춘다
+        # — 안 맞추면 재생 순간 팔이 85° 튀며 로봇이 흔들린다 (2026-09-18 실측).
+        _tuned = []
+        for _p in (Usd.PrimRange(st.GetPrimAtPath(R)) if BOT.drive_stiffness > 0 else []):
+            if _p.GetName() not in set(ARM_JOINTS):
+                continue
+            _d = UsdPhysics.DriveAPI.Get(_p, "angular") or UsdPhysics.DriveAPI.Apply(_p, "angular")
+            _d.CreateTypeAttr().Set("force")
+            _d.CreateStiffnessAttr().Set(float(BOT.drive_stiffness))
+            _d.CreateDampingAttr().Set(float(BOT.drive_damping))
+            _t = _d.GetTargetPositionAttr().Get()
+            if _t not in (None, 0.0):
+                _d.CreateTargetPositionAttr().Set(0.0)
+                _tuned.append(f"{_p.GetName()} 목표 {_t}°→0°")
+        if BOT.drive_stiffness > 0:
+            say(f"팔 구동 게인 설정: 강성 {BOT.drive_stiffness:.0e} 감쇠 {BOT.drive_damping:.0e}"
+                + (f", {_tuned}" if _tuned else ""))
 
         if before_reset is not None:
             before_reset(st)      # ROS 그래프 설정 보완 등 — 재생(초기화) 전에 해야 반영된다
@@ -271,9 +322,9 @@ class BookScene:
         self.arm = ArmController(_Backend(self), conf)
 
         tray_top = DECK_Z + floor_top + self.W_max
-        self.home_tip = np.array([tray_center[0], tray_center[1], tray_top + 0.30])
+        self.home_tip = np.array([self.tray_center_w[0], self.tray_center_w[1], tray_top + 0.30])
         seed = r.get_joint_positions()[self.idx_arm].copy()
-        seed[0] = math.atan2(tray_center[1] - l0p[1], tray_center[0] - l0p[0])
+        seed[0] = math.atan2(self.tray_center_w[1] - l0p[1], self.tray_center_w[0] - l0p[0])
         self.q_home, ok = self.ik_joints(self.home_tip, self.DOWN, seed)
         self.open_tray = self.T_max / 2 + GRIP_CLEAR
         say(f"장면 준비: 트레이 칸 {nslots}개, 책 {len(self.books)}권, 원본 {len(sources)}종, 홈 IK {ok}")
@@ -527,6 +578,38 @@ class BookScene:
             "floor": abs(bb[2] - plan["floor_z"]) < 0.03,
         }
         return all(checks.values()), checks, bb
+
+    def survey(self):
+        """**장면 전체**의 책 상태를 본다 — 꽂은 책만 보면 놓친다.
+
+        왜: `verify()` 는 이번에 꽂기로 한 책 하나만 본다. 그래서
+        **다른 책이 쓰러지거나 떨어져도 "성공" 으로 보고된다.**
+        실제로 4권 4/4 라고 보고한 녹화에서 트레이에 누운 책이 보였다 (2026-09-20 지적).
+
+        판정: 세운 높이(가장 큰 변)가 z 축과 맞으면 '서 있음', 아니면 '누움'.
+        트레이 높이 근처면 트레이, 서가 높이 근처면 서가로 나눈다.
+        """
+        out = []
+        for b in self.books:
+            bb = self.aabb(b)
+            size = bb[3:] - bb[:3]
+            T, Lb, W = self.dims.get(b, (self.T, self.L, self.W))
+            z0 = float(bb[2])
+            where = ("서가" if abs(z0 - self.shelf_floor_z) < 0.05
+                     else "트레이" if abs(z0 - self.tray_floor_z) < 0.06
+                     else "바닥/기타")
+            # **자리마다 '바른 자세'가 다르다.**
+            #   트레이: 책등이 위 → **깊이(W)** 가 수직
+            #   서가  : 세워 꽂음 → **높이(L)** 가 수직
+            # 이걸 하나로 보면 트레이의 정상 자세를 '쓰러짐' 으로 잘못 읽는다 (2026-09-20).
+            want = W if where == "트레이" else Lb
+            ok_pose = abs(size[2] - want) < 0.025
+            out.append({"book": b.rsplit("/", 1)[-1], "바른자세": bool(ok_pose),
+                        "위치": where, "밑면z": round(z0, 4),
+                        "기대수직": round(float(want), 3),
+                        "크기": [round(float(v), 3) for v in size]})
+        bad = [o for o in out if not o["바른자세"] or o["위치"] == "바닥/기타"]
+        return out, bad
 
 
 class _Backend:
