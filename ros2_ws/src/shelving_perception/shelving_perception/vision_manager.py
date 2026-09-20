@@ -28,12 +28,14 @@ from ultralytics import YOLO
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 # action 실행 콜백과 센서 콜백을 함께 처리할 수 있는 콜백 그룹입니다.
 from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.clock import ClockType
 # task_manager_node와 주고받는 검출 action 인터페이스입니다.
 from shelving_interfaces.action import DetectTargetSlot
 # 향후 선반 슬롯 메시지에 사용할 타입입니다.
 from shelving_interfaces.msg import TargetSlot
 # ROS 2 노드의 기본 클래스입니다.
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 # RGB/Depth 영상과 카메라 내부 파라미터 메시지입니다.
 from sensor_msgs.msg import Image, CameraInfo
 # 책 위치와 책 pose를 발행할 메시지입니다.
@@ -86,10 +88,10 @@ class VisionManager(Node):
             'wait_for_trigger', True).value)
         # RGB·Depth·CameraInfo가 촬영된 카메라 frame 이름입니다.
         self.camera_frame = self.declare_parameter(
-            'camera_frame', 'sim_camera').value
+            'camera_frame', 'RSD455').value
         # 검출 좌표를 변환할 최종 로봇 frame 이름입니다.
         self.target_frame = self.declare_parameter(
-            'target_frame', 'arm_base_link').value
+            'target_frame', 'base_link').value
         # RGB와 Depth가 서로 정렬되어 있는지 나타내는 설정입니다.
         self.depth_registered = bool(self.declare_parameter(
             'depth_registered', True).value)
@@ -97,7 +99,7 @@ class VisionManager(Node):
         self.depth_scale = float(self.declare_parameter(
             'depth_scale', 0.0).value)
         # 세 센서 메시지를 같은 프레임으로 인정할 최대 시간 차이입니다.
-        self.sync_slop = float(self.declare_parameter('sync_slop', 0.1).value)
+        self.sync_slop = float(self.declare_parameter('sync_slop', 0.5).value)
         # 책의 3차원 점을 발행할 토픽입니다.
         self.book_topic = self.declare_parameter(
             'book_topic', '/perception/books').value
@@ -111,8 +113,9 @@ class VisionManager(Node):
         self.empty_slot_topic = self.declare_parameter(
             'empty_slot_topic', '/perception/empty_shelf_position').value
         # True이면 vision_manager가 실행 중인 PC에 OpenCV 검출 창을 표시합니다.
+        # OpenCV 5의 Qt 백엔드 호환성 문제로 기본값은 창을 표시하지 않습니다.
         self.show_debug_window = bool(self.declare_parameter(
-            'show_debug_window', True).value)
+            'show_debug_window', False).value)
         # 책장 segmentation 모델의 경로입니다.
         self.shelf_model_path = self.declare_parameter(
             'shelf_model_path',
@@ -129,7 +132,7 @@ class VisionManager(Node):
             'shelf_depth_margin', 0.05).value)
         # 삽입 후보를 화면에 투영해 깊이를 읽을 때 사용할 로봇 기준 frame입니다.
         self.slot_position_frame = self.declare_parameter(
-            'slot_position_frame', 'arm_base_link').value
+            'slot_position_frame', 'base_link').value
         # x,y,z가 반복되는 평탄화된 삽입 후보 좌표 목록입니다.
         self.slot_positions = list(self.declare_parameter(
             'slot_positions', [
@@ -189,7 +192,7 @@ class VisionManager(Node):
         # 실행할 학습된 YOLO weight 파일 경로입니다.
         self.model_path = self.declare_parameter(
             'model_path',
-            '/home/rokey/도서관/260918_bag_vision/model/book_tray_best.pt',
+            '/home/rokey/livrary_datas/260918_train/book_tray_best.pt',
         ).value
         # self.target_topic = self.declare_parameter(
         #     'target_topic', '/perception/empty_shelf_position').value
@@ -278,18 +281,18 @@ class VisionManager(Node):
         # trigger를 기다리는 설정이면 False, 아니면 즉시 처리 가능하게 합니다.
         self.pending_detection = not self.wait_for_trigger
 
-        # RGB 토픽을 message_filters subscriber로 연결합니다.
-        rgb_sub = message_filters.Subscriber(self, Image, self.rgb_topic)
-        # Depth 토픽을 message_filters subscriber로 연결합니다.
-        depth_sub = message_filters.Subscriber(self, Image, self.depth_topic)
-        # CameraInfo 토픽을 message_filters subscriber로 연결합니다.
-        camera_info_sub = message_filters.Subscriber(
-            self, CameraInfo, self.camera_info_topic)
-        # 세 메시지의 timestamp가 가까운 것끼리 묶는 동기화기를 만듭니다.
-        self.image_sync = message_filters.ApproximateTimeSynchronizer(
-            [rgb_sub, depth_sub, camera_info_sub], 10, self.sync_slop)
-        # 동기화된 세 메시지가 들어오면 rgb_callback을 실행합니다.
-        self.image_sync.registerCallback(self.rgb_callback)
+        # Isaac Sim Replicator가 RGB·Depth·CameraInfo에 서로 다른
+        # simulation timestamp를 넣을 수 있으므로 message_filters의
+        # 엄격한 timestamp 동기화는 사용하지 않습니다.
+        self.latest_depth_msg = None
+        self.latest_camera_info_msg = None
+        self.depth_sub = self.create_subscription(
+            Image, self.depth_topic, self._depth_stream_callback, 10)
+        self.camera_info_sub = self.create_subscription(
+            CameraInfo, self.camera_info_topic,
+            self._camera_info_stream_callback, 10)
+        self.rgb_sub = self.create_subscription(
+            Image, self.rgb_topic, self._rgb_stream_callback, 10)
 
         # 현재 연결된 센서·action 설정을 로그로 출력합니다.
         self.get_logger().info(
@@ -402,6 +405,30 @@ class VisionManager(Node):
         # True 요청일 때만 다음 센서 프레임을 처리하도록 활성화합니다.
         if msg.data:
             self.pending_detection = True
+            self.get_logger().info(
+                'Detection request received; waiting for synchronized frame')
+
+    def _depth_stream_callback(self, msg):
+        """가장 최근 Depth 메시지를 저장합니다."""
+        self.latest_depth_msg = msg
+
+    def _camera_info_stream_callback(self, msg):
+        """가장 최근 CameraInfo 메시지를 저장합니다."""
+        self.latest_camera_info_msg = msg
+
+    def _rgb_stream_callback(self, rgb_msg):
+        """요청이 있을 때 최신 RGB·Depth·CameraInfo로 한 프레임을 처리합니다."""
+        if not self.pending_detection:
+            return
+        if self.latest_depth_msg is None or self.latest_camera_info_msg is None:
+            self.get_logger().warning(
+                'Detection requested, but Depth or CameraInfo has not arrived')
+            return
+        self.rgb_callback(
+            rgb_msg,
+            self.latest_depth_msg,
+            self.latest_camera_info_msg,
+        )
 
     def rgb_callback(self, rgb_msg, depth_msg, camera_info_msg):
         # action 또는 수동 trigger가 없으면 현재 프레임을 처리하지 않습니다.
@@ -464,6 +491,14 @@ class VisionManager(Node):
         try:
             # RGB 이미지에서 YOLO 책 검출 결과를 계산합니다.
             detections = self._detect_books(rgb_image)
+            self.get_logger().info(
+                f'Synchronized frame received: rgb={rgb_image.shape}, '
+                f'depth={depth_image.shape}, '
+                f'book_detections={len(detections)}')
+            if not detections:
+                self.get_logger().warning(
+                    'No book detected in the requested frame; check camera '
+                    'view, model confidence, and lighting.')
             # 검출 상자와 Depth로 각 책의 카메라 기준 3D 위치를 계산합니다.
             detected_targets = self.book_detector.process(
                 detections,
@@ -624,12 +659,8 @@ class VisionManager(Node):
         """로봇 기준 삽입 후보 좌표를 현재 카메라 기준으로 변환합니다."""
         # 카메라 시각에 맞는 TF를 한 번만 조회합니다.
         try:
-            transform = self.tf_buffer.lookup_transform(
-                camera_frame,
-                self.slot_position_frame,
-                rclpy.time.Time.from_msg(stamp),
-                timeout=rclpy.duration.Duration(seconds=0.2),
-            )
+            transform = self._lookup_transform_with_latest_fallback(
+                camera_frame, self.slot_position_frame, stamp)
         except TransformException as error:
             # 카메라와 슬롯 frame의 TF가 없으면 모든 후보를 건너뜁니다.
             self.get_logger().warning(
@@ -683,12 +714,8 @@ class VisionManager(Node):
         point.point.x, point.point.y, point.point.z = xyz
         try:
             # target_frame에서 source_frame으로 가는 TF를 해당 시각에 조회합니다.
-            transform = self.tf_buffer.lookup_transform(
-                self.target_frame,
-                source_frame,
-                rclpy.time.Time.from_msg(stamp),
-                timeout=rclpy.duration.Duration(seconds=0.2),
-            )
+            transform = self._lookup_transform_with_latest_fallback(
+                self.target_frame, source_frame, stamp)
             # 조회한 TF를 점에 적용해 target_frame 기준 점을 반환합니다.
             return do_transform_point(point, transform)
         except TransformException as error:
@@ -697,6 +724,34 @@ class VisionManager(Node):
                 f'Could not transform {source_frame} to '
                 f'{self.target_frame}: {error}')
             return None
+
+    def _lookup_transform_with_latest_fallback(self, target_frame,
+                                               source_frame, stamp):
+        """센서 timestamp와 무관하게 현재 TF를 조회합니다.
+
+        Isaac Sim의 센서와 TF publisher가 서로 다른 simulation timestamp를
+        발행하는 경우가 있어, 센서 timestamp로 조회하면 extrapolation이
+        발생합니다. 이 노드의 슬롯/카메라 extrinsic 변환은 현재 TF를
+        사용하는 편이 안정적입니다.
+        """
+        try:
+            return self.tf_buffer.lookup_transform(
+                target_frame,
+                source_frame,
+                # ROS time 0은 TF 버퍼에서 가장 최신 변환을 의미합니다.
+                # Isaac Sim simulation time과 섞이지 않도록 clock type을
+                # 명시합니다.
+                rclpy.time.Time(
+                    nanoseconds=0,
+                    clock_type=ClockType.ROS_TIME,
+                ),
+                timeout=rclpy.duration.Duration(seconds=0.5),
+            )
+        except TransformException as error:
+            self.get_logger().warning(
+                f'Could not get latest TF for {source_frame} -> '
+                f'{target_frame}: {error}')
+            raise
 
     def _publish_debug_image(
         self,
@@ -770,7 +825,20 @@ class VisionManager(Node):
                 cv2.LINE_AA,
             )
         # OpenCV BGR 영상을 ROS Image 메시지로 변환합니다.
-        debug_msg = self.bridge.cv2_to_imgmsg(debug_image, encoding='bgr8')
+        #
+        # 현재 환경의 OpenCV 5에서는 cv_bridge가 사용하는 OpenCV 타입
+        # 상수와 Jazzy의 cv_bridge 확장 모듈이 서로 다른 값을 반환할 수
+        # 있어, 명시적인 ``bgr8`` 변환이 KeyError(16)를 발생시킵니다.
+        # ``passthrough``는 배열의 실제 타입(8UC3)을 그대로 사용하므로
+        # 같은 BGR 바이트 형식을 유지하면서 이 호환성 문제를 피합니다.
+        debug_msg = self.bridge.cv2_to_imgmsg(
+            np.ascontiguousarray(debug_image),
+            encoding='passthrough',
+        )
+        # 실제 바이트 형식은 BGR 8-bit 3채널이므로 ROS 표기는 bgr8로
+        # 유지합니다. 위 변환 단계에서만 cv_bridge의 OpenCV 5 호환성
+        # 문제를 우회합니다.
+        debug_msg.encoding = 'bgr8'
         # 원본 RGB와 같은 timestamp/frame을 유지합니다.
         debug_msg.header = header
         # 다른 PC의 rqt_image_view가 구독할 수 있도록 발행합니다.
@@ -809,12 +877,8 @@ class VisionManager(Node):
         pose.pose.orientation.w = quaternion[3]
         try:
             # pose timestamp에 맞는 카메라→로봇 TF를 조회합니다.
-            transform = self.tf_buffer.lookup_transform(
-                self.target_frame,
-                source_frame,
-                rclpy.time.Time.from_msg(stamp),
-                timeout=rclpy.duration.Duration(seconds=0.2),
-            )
+            transform = self._lookup_transform_with_latest_fallback(
+                self.target_frame, source_frame, stamp)
             # Jazzy API에 맞는 PoseStamped용 TF 변환 함수를 호출합니다.
             return do_transform_pose_stamped(pose, transform)
         except TransformException as error:
