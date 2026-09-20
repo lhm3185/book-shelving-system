@@ -188,10 +188,15 @@ class ManipulationExecutor:
                 job.watch["rel0"] = scene.book_in_hand(book)
             if name == "carry_rotate" and "z0" in job.watch and "rise" not in job.watch:
                 job.watch["rise"] = scene.center(book)[2] - job.watch["z0"]
-                if job.watch["rise"] < 0.08:
+                # 기대 상승량은 **실제 들어올림 높이**에 맞춰야 한다. 0.08 이 박혀 있어서
+                # carry_lift_m 을 0.06 으로 낮춘 M0609 는 원리상 통과할 수 없었다 (2026-09-20).
+                _need = float(scene.conf["grasp"].get("lift_check_m",
+                              max(0.03, scene.conf["grasp"].get("carry_lift_m", 0.17) * 0.5)))
+                if job.watch["rise"] < _need:
                     arm.cancel()
                     self.finish(SIM_FAILED, error_code=405,
-                                message=f"들어 올린 뒤 책 상승 {job.watch['rise'] * 100:.1f}cm")
+                                message=f"들어 올린 뒤 책 상승 {job.watch['rise'] * 100:.1f}cm "
+                                        f"(기대 {_need * 100:.1f}cm 이상)")
                 elif self.gate is not None and self.sensor_policy == "gated":
                     self.gate.all(False, f"— 파지 확인 (책 상승 {job.watch['rise'] * 100:.1f}cm), 작업 끝까지")
             if name in ("carry_rotate", "wedge") and "rel0" in job.watch \
