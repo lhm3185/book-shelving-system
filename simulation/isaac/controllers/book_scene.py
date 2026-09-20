@@ -82,9 +82,14 @@ class JointPath(Primitive):
             else:
                 self._target = self._target + (nxt - self._target) * (budget / gap); budget = 0.0
         ctx.backend.set_joint_targets(self._target)
-        if self._i >= len(self._pts) - 1 and \
-                float(np.max(np.abs(ctx.backend.get_joint_positions() - self._pts[-1]))) <= 0.02:
+        # 도착 판정은 **설정의 허용 오차**를 쓴다. 예전에는 0.02 가 박혀 있어서
+        # 정착 오차가 그보다 큰 로봇(M0609 는 0.06)에서는 영원히 도착하지 못하고
+        # 제한 시간 초과(M404)가 났다 (2026-09-20 실측).
+        tol = ctx.cfg("tolerance", "joint_rad", default=0.02)
+        err = float(np.max(np.abs(ctx.backend.get_joint_positions() - self._pts[-1])))
+        if self._i >= len(self._pts) - 1 and err <= tol:
             return Status.SUCCEEDED
+        self._last_err = err
         return Status.RUNNING
 
 
@@ -661,7 +666,10 @@ class _Backend:
         if arm_q is not None:
             q[s.idx_arm] = np.asarray(arm_q, float)[:BOT.dof]
         q[s.idx_fing] = BOT.grip_targets(self._grip); q[s.base_idx] = s.base_hold
-        s.robot.apply_action(ArticulationAction(joint_positions=q))
+        # joint_indices 를 명시한다. 생략하면 일부 환경에서 지령이 반영되지 않아
+        # 팔이 제자리에 머문다 (2026-09-20 M0609 에서 approach 제한 시간 초과).
+        s.robot.apply_action(ArticulationAction(
+            joint_positions=q, joint_indices=np.arange(len(q))))
 
     def set_joint_targets(self, positions):
         self._apply(positions)
