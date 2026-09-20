@@ -477,9 +477,9 @@ class BookScene:
                 sq.overlap_sphere(0.18, [float(v) for v in pos], _cb, False)
             except Exception as e:
                 return f"[진단] overlap 실패: {e}"
-            # 팔 자신과 로봇 몸체는 빼고, 바깥 물체만 남긴다
-            out = sorted({f.split("/World/")[-1] for f in found
-                          if "/m0609/" not in f and not f.startswith(R)})
+            # **팔 자신만** 뺀다. 받침판·카터 몸체는 남긴다 —
+            # 이것들을 걸러냈다가 "팔 주변에 아무것도 없다" 는 잘못된 결론을 냈다 (2026-09-20).
+            out = sorted({f.split("/World/")[-1] for f in found if "/m0609/link_" not in f})
             if out:
                 hits.append(f"link_{i} 반경18cm: " + ", ".join(x[:46] for x in out[:4]))
         return ("[진단] 팔 주변 물체 — " + " | ".join(hits)) if hits else "[진단] 팔 주변에 바깥 물체 없음"
