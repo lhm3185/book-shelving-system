@@ -19,7 +19,9 @@ ros2 bag record -o "$OUT" --compression-mode file --compression-format zstd \
 BAG_PID=$!
 sleep 4
 
-ros2 run tf2_ros static_transform_publisher --frame-id panda_link0 --child-frame-id arm_base_link \
+# 부모 프레임은 로봇마다 다르다 (franka=panda_link0, m0609=base_link).
+# ARM_BASE_FRAME 로 바꾼다 — 기본은 현재 쓰는 M0609 (2026-09-20)
+ros2 run tf2_ros static_transform_publisher --frame-id "${ARM_BASE_FRAME:-base_link}" --child-frame-id arm_base_link \
     --ros-args -p use_sim_time:=true > /tmp/bag_tf_arm.log 2>&1 &
 TF1=$!
 # Isaac 카메라 prim TF 는 이미 광학 규약이라 이미지 frame(sim_camera) 과는 항등 변환이다

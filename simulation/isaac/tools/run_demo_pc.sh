@@ -22,8 +22,16 @@ pids=()
 cleanup() { echo; echo "종료 중..."; kill "${pids[@]}" 2>/dev/null; wait 2>/dev/null; echo "종료"; }
 trap cleanup INT TERM EXIT
 
-# 팀 프레임 별칭: 로봇팔 기준 좌표
-ros2 run tf2_ros static_transform_publisher --frame-id panda_link0 --child-frame-id arm_base_link \
+# 팀 프레임 별칭: 로봇팔 기준 좌표.
+# **부모 프레임은 로봇마다 다르다.** Isaac 은 팔 베이스 prim 의 **이름**을 TF frame 으로 낸다
+#   franka → panda_link0 / m0609 → base_link
+# 예전에는 panda_link0 이 박혀 있어서 M0609 에서는 이 별칭이 트리에 안 붙었고,
+# `arm_base_link` 로 TF 조회가 실패했다 (2026-09-20. 비전 쪽이 그래서 base_link 를 직접 쓰게 바꿨다).
+ARM_BASE_FRAME="${ARM_BASE_FRAME:-$(ARM_ROBOT="${ARM_ROBOT:-m0609}" python3 -c \
+    "import sys; sys.path.insert(0, '$REPO_ROOT/simulation/isaac/config'); \
+     from robot_profiles import profile; print(profile().base_link.split('/')[-1])")}"
+echo "팔 기준 프레임: $ARM_BASE_FRAME → arm_base_link (ARM_ROBOT=${ARM_ROBOT:-m0609})"
+ros2 run tf2_ros static_transform_publisher --frame-id "$ARM_BASE_FRAME" --child-frame-id arm_base_link \
     --ros-args -p use_sim_time:=true > "$LOG/tf_arm.log" 2>&1 & pids+=($!)
 # 카메라 prim TF(Isaac, 광학 규약) → 이미지 frame sim_camera (항등)
 ros2 run tf2_ros static_transform_publisher --frame-id "$CAMERA_PRIM_FRAME" --child-frame-id sim_camera \

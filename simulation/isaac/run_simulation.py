@@ -126,7 +126,10 @@ if args.camera_prim:
         say(f"카메라 prim 없음: {args.camera_prim}")
     camera_bridge.build_supplement_graph(args.camera_prim, R)
     world.play()
-    say(f"기존 카메라 사용 {args.camera_prim} → TF panda_link0→{args.camera_prim.split('/')[-1]}, /clock 추가")
+    # 부모 프레임 이름은 로봇마다 다르다 (Isaac 은 prim **이름**을 frame 으로 낸다).
+    # 예전엔 panda_link0 이 문구에 박혀 있어 M0609 에서 로그가 거짓말을 했다 (2026-09-20).
+    _parent = world_loader.BOT.base_link.split("/")[-1]
+    say(f"기존 카메라 사용 {args.camera_prim} → TF {_parent}→{args.camera_prim.split('/')[-1]}, /clock 추가")
 elif args.camera:
     cam_path = camera_bridge.add_wrist_camera(scene.stage, R)
     _ns = args.camera_ns.rstrip("/")
