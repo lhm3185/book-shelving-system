@@ -425,8 +425,9 @@ class BookScene:
             prev_p, prev_q = p_, q_
         return qs, worst, ""
 
-    def book_on_tray_near(self, p_world, tol=0.03):
+    def book_on_tray_near(self, p_world, tol=None):
         """트레이 위에 있는 책 중 AABB 중심이 p_world 에서 tol 안인 것"""
+        tol = BOT.tray_match_tol if tol is None else tol
         best, dist = None, tol
         for b in self.books:
             c = self.center(b)

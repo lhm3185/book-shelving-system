@@ -26,7 +26,8 @@ import os
 class RobotProfile:
     def __init__(self, name, root, base_link, arm_joints, grip_joints, grip_open, grip_close,
                  ee_frame, hand_link, finger_links, vel_limit, lula, camera_prim, camera_offset,
-                 deck_z, drive_stiffness=0.0, drive_damping=0.0, art_root=""):
+                 deck_z, drive_stiffness=0.0, drive_damping=0.0, art_root="",
+                 tray_match_tol=0.03):
         self.name = name
         self.root = root                  # articulation root prim
         self.base_link = base_link        # IK·좌표의 기준 링크
@@ -50,6 +51,9 @@ class RobotProfile:
         # **articulation root 가 로봇 루트와 다를 수 있다.** 받은 에셋은 chassis_link 가 root 라
         # 루트 prim 으로 SingleArticulation 을 만들면 관절 명령이 안 먹는다 (2026-09-20).
         self._art_root = art_root
+        # 트레이 칸에서 책을 찾을 때 허용 거리. **파지는 찾은 책의 실제 중심으로 하므로**
+        # 이 값은 정밀도가 아니라 "그 칸에 책이 있나" 를 보는 기준이다.
+        self.tray_match_tol = tray_match_tol
 
     @property
     def articulation_root(self):
@@ -131,6 +135,9 @@ M0609 = RobotProfile(
     drive_stiffness=1.0e7,
     drive_damping=1.0e5,
     art_root="chassis_link",                     # 받은 에셋의 articulation root
+    # 받침판 위 트레이에서 책이 칸 중심에서 3.5 cm 까지 벗어난다 (2026-09-20 실측).
+    # 물리적으로 자리를 잡는 위치와 계산한 칸 중심이 약간 다르다.
+    tray_match_tol=0.06,
 )
 
 _ALL = {p.name: p for p in (FRANKA, M0609)}
