@@ -12,7 +12,31 @@ MODEL_PATH="${MODEL_PATH:-${VISION_MODEL:-$HOME/ws_cobot_pjt/arm/models/book_tra
 SHELF_MODEL="${SHELF_MODEL:-$HOME/ws_cobot_pjt/arm/models/shelf_best.pt}"
 CAMERA_PRIM_FRAME="${CAMERA_PRIM_FRAME:-Camera_OmniVision_OV9782_Color}"
 LOG="${LOG:-/tmp/b1_demo}"; mkdir -p "$LOG"
-export FASTRTPS_DEFAULT_PROFILES_FILE="${FASTRTPS_DEFAULT_PROFILES_FILE:-$HOME/.ros/fastdds_whitelist.xml}"
+# ":-" 가 아니라 "-" 다. ":-" 는 빈 값도 기본값으로 바꿔서,
+# FASTRTPS_DEFAULT_PROFILES_FILE= 로 끄려 해도 도로 켜진다 (2026-09-20 실측).
+export FASTRTPS_DEFAULT_PROFILES_FILE="${FASTRTPS_DEFAULT_PROFILES_FILE-$HOME/.ros/fastdds_whitelist.xml}"
+# 화이트리스트는 **연구실 유선망(10.10.0.x)만** 허용하도록 만든 파일이다. 다른 망에서 그대로
+# 쓰면 DDS 가 전부 막혀 "노드는 떴는데 토픽이 안 보인다" 가 된다. 조용히 실패하지 않게 막는다.
+# (2026-09-20 집 와이파이 172.30.x 에서 실제로 걸렸다)
+if [ -f "$FASTRTPS_DEFAULT_PROFILES_FILE" ]; then
+    _wl=$(grep -oE '<address>[0-9.]+</address>' "$FASTRTPS_DEFAULT_PROFILES_FILE" | grep -oE '[0-9.]+')
+    _hit=0
+    for _a in $_wl; do
+        for _m in $(hostname -I 2>/dev/null); do [ "$_a" = "$_m" ] && _hit=1; done
+    done
+    if [ "$_hit" -eq 0 ]; then
+        echo "경고: 이 PC 주소($(hostname -I 2>/dev/null))가 DDS 화이트리스트에 없다."
+        echo "  $FASTRTPS_DEFAULT_PROFILES_FILE  허용: $(echo $_wl | tr '\n' ' ')"
+        if [ -n "${ALLOW_WHITELIST_MISMATCH:-}" ]; then
+            echo "  ALLOW_WHITELIST_MISMATCH 가 설정되어 그대로 진행한다"
+        else
+            echo "  → 한 PC 안에서만 쓸 거면:  FASTRTPS_DEFAULT_PROFILES_FILE= $0"
+            echo "  → 여러 PC 면 이 주소를 <interfaceWhiteList> 에 추가할 것"
+            echo "  (그래도 진행하려면 ALLOW_WHITELIST_MISMATCH=1)"
+            exit 1
+        fi
+    fi
+fi
 set +u; source /opt/ros/jazzy/setup.bash
 source "$WS/install/setup.bash"; set -u
 # 비전 패키지가 모델을 동봉하게 되었다 (origin/vision 33650a0, LFS). 개인 경로가 없으면
