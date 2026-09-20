@@ -50,10 +50,19 @@ ap.add_argument("--camera", action="store_true", help="레벨에 카메라가 �
 ap.add_argument("--camera-prim", default="", help="레벨 로봇에 이미 있는 카메라 prim 경로")
 ap.add_argument("--camera-hz", type=float, default=10.0)
 ap.add_argument("--sensor-policy", choices=["gated", "always"], default="gated")
+
+
 ap.add_argument("--amr-test-overrides", action="store_true",
                 help="AMR 에셋의 라이다 fullScan·TF 네임스페이스를 실행에서만 보완 (파일 미수정)")
+ap.add_argument(
+    "--clear-nav-obstacles",
+    action="store_true",
+    help="1차 통합시험에서 /World/books와 경찰 캐릭터를 런타임에 비활성화",
+)
 ap.add_argument("--start-home", choices=["move", "snap"], default="move",
                 help="move: 접은 채 홈으로 이동(검증된 경로). snap 은 첫 작업이 M406 으로 실패한다")
+
+
 ap.add_argument("--max-seconds", type=float, default=0.0, help="0 이면 계속 실행")
 ap.add_argument("--no-manipulation", action="store_true", help="로봇팔 실행기를 붙이지 않는다 (월드만 확인)")
 args = ap.parse_args()
@@ -103,6 +112,47 @@ MIXED_BOOKS = [
 ]
 
 
+def _before_scene(stage):
+    """트레이와 책을 만들기 전에 AMR 시작 위치를 적용한다."""
+    from pxr import Gf, UsdGeom
+
+    robot_path = "/World/Nova_Carter_ROS"
+    robot_prim = stage.GetPrimAtPath(robot_path)
+
+    if not robot_prim.IsValid():
+        raise RuntimeError(f"AMR Prim을 찾을 수 없음: {robot_path}")
+
+    robot_xform = UsdGeom.Xformable(robot_prim)
+    xform_ops = {
+        op.GetOpName(): op
+        for op in robot_xform.GetOrderedXformOps()
+    }
+
+    translate_op = xform_ops.get("xformOp:translate")
+    orient_op = xform_ops.get("xformOp:orient")
+
+    if translate_op is None or orient_op is None:
+        raise RuntimeError(
+            f"AMR translate/orient 연산을 찾을 수 없음: {robot_path}"
+        )
+
+    translate_op.Set(Gf.Vec3d(
+        0.06556940078735352,
+        -4.773948669433594,
+        0.0,
+    ))
+
+    orient_op.Set(Gf.Quatd(
+        1.0,
+        Gf.Vec3d(0.0, 0.0, 0.0),
+    ))
+
+    say(
+        "AMR 시작 위치 선적용: "
+        "x=0.065569, y=-4.773949, yaw=0.0°"
+    )
+
+
 def _before_reset(stage):
     """재생 전에 AMR 물리 상태와 ROS 그래프를 준비한다."""
     from pxr import UsdPhysics
@@ -139,6 +189,23 @@ def _before_reset(stage):
     if args.amr_test_overrides:
         camera_bridge.apply_amr_test_overrides(stage, R, say)
 
+    if args.clear_nav_obstacles:
+        obstacle_paths = (
+            "/World/books",
+            "/World/female_adult_police_02",
+            "/World/bs_bookends",
+        )
+
+        for prim_path in obstacle_paths:
+            prim = stage.GetPrimAtPath(prim_path)
+
+            if not prim.IsValid():
+                say(f"통합시험 장애물 Prim 없음: {prim_path}")
+                continue
+
+            prim.SetActive(False)
+            say(f"통합시험 장애물 비활성화: {prim_path}")
+
 
 variants = (MIXED_BOOKS if args.book_variants.strip() == "mixed"
             else [v.strip() for v in args.book_variants.split(",") if v.strip()] or None)
@@ -146,8 +213,18 @@ variants = (MIXED_BOOKS if args.book_variants.strip() == "mixed"
 # 월드: USD 를 열고 Prim 을 검사한 뒤 트레이·책·로봇팔을 준비한다
 stage0 = world_loader.open_world(app, usd, say)
 world_loader.check_prims(stage0, say)
-scene = BookScene(app, usd, tray, args.tray_center, args.books, args.place_dx, say,
-                  before_reset=_before_reset, book_variants=variants)
+scene = BookScene(
+    app,
+    usd,
+    tray,
+    args.tray_center,
+    args.books,
+    args.place_dx,
+    say,
+    before_reset=_before_reset,
+    book_variants=variants,
+    before_scene=_before_scene,
+)
 world = scene.world
 
 # 센서

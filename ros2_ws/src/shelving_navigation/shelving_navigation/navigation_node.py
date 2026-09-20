@@ -8,7 +8,7 @@ action server driving the Isaac Sim Nova Carter AMR. Feedback and result are
 mapped back to the shelving action types.
 """
 
-import asyncio
+import time
 import math
 import threading
 from pathlib import Path
@@ -256,7 +256,7 @@ class NavigationNode(Node):
                         error_code=self.ERROR_NAVIGATION_REJECTED,
                         message="Navigation was canceled.",
                     )
-                await asyncio.sleep(0.1)
+                time.sleep(0.1)
 
             response = result_future.result()
             nav2_result = response.result
@@ -336,11 +336,18 @@ class NavigationNode(Node):
         """
         Resolve the pose to navigate to.
 
-        Fixed coordinates declared in the waypoint file take priority.
-        Otherwise the pose attached to the action goal is used.
+        A valid pose attached to the action goal takes priority.
+        The local waypoint file is used only as a fallback when
+        the action goal does not contain a frame_id.
         """
+        target_pose = request.target_pose
+
+        if target_pose.header.frame_id:
+            return target_pose
+
         for key in (request.target_id, request.target_type):
             waypoint = self._waypoints.lookup(key)
+
             if waypoint is None:
                 continue
 
@@ -351,9 +358,15 @@ class NavigationNode(Node):
             pose.header.frame_id = str(
                 waypoint.get("frame_id", self._frame_id)
             )
-            pose.pose.position.x = float(position.get("x", 0.0))
-            pose.pose.position.y = float(position.get("y", 0.0))
-            pose.pose.position.z = float(position.get("z", 0.0))
+            pose.pose.position.x = float(
+                position.get("x", 0.0)
+            )
+            pose.pose.position.y = float(
+                position.get("y", 0.0)
+            )
+            pose.pose.position.z = float(
+                position.get("z", 0.0)
+            )
             pose.pose.orientation.x = float(
                 orientation.get("x", 0.0)
             )
@@ -366,11 +379,8 @@ class NavigationNode(Node):
             pose.pose.orientation.w = float(
                 orientation.get("w", 1.0)
             )
-            return pose
 
-        target_pose = request.target_pose
-        if target_pose.header.frame_id:
-            return target_pose
+            return pose
 
         return None
 

@@ -9,8 +9,8 @@ calibration_required: true
 locations:
   home:
     position:
-      x: 0.0
-      y: 0.0
+      x: 0.06556940078735352
+      y: -4.773948669433594
       z: 0.0
     orientation:
       x: 0.0
@@ -20,14 +20,14 @@ locations:
 
   return_station:
     position:
-      x: 1.0
+      x: -6.0
       y: 0.0
       z: 0.0
     orientation:
       x: 0.0
       y: 0.0
-      z: 0.0
-      w: 1.0
+      z: 0.7071068
+      w: 0.7071068
 
 shelves:
   shelf_01:
@@ -42,14 +42,14 @@ shelves:
 
     observation_pose:
       position:
-        x: 3.0
-        y: 1.0
+        x: 2.229003667831421
+        y: -3.0101053714752197
         z: 0.0
       orientation:
         x: 0.0
         y: 0.0
-        z: 0.0
-        w: 1.0
+        z: 0.7071068
+        w: 0.7071068
 
   shelf_02:
     name: "분류 500~999 서가"
@@ -63,11 +63,11 @@ shelves:
 
     observation_pose:
       position:
-        x: 5.0
-        y: 1.0
+        x: 3.0
+        y: 2.0
         z: 0.0
       orientation:
         x: 0.0
         y: 0.0
-        z: 1.0
-        w: 0.0
+        z: 0.7071068
+        w: 0.7071068

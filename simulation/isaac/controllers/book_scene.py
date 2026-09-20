@@ -139,12 +139,14 @@ class BookScene:
     """레벨 + 트레이 + 책 N권 + 북엔드. 로봇·IK·팔 제어기까지 준비한다"""
 
     def __init__(self, app, usd, tray_usd, tray_center, n_books, place_dx, say, before_reset=None,
-                 book_variants=None):
+                 book_variants=None, before_scene=None):
         self.app, self.say = app, say
         open_stage(usd); app.update()
         while is_stage_loading():
             app.update()
         st = self.stage = get_current_stage()
+        if before_scene is not None:
+            before_scene(st)
         self._cache = create_bbox_cache()
 
         # 책 원본: 기본은 한 종류, --book-variants 를 주면 레벨 /World/books 의 여러 종류를 돌려 쓴다
@@ -223,14 +225,58 @@ class BookScene:
         _tray_coll = os.environ.get("SIM_TRAY_COLLIDER", "1") != "0"
         if not _tray_coll:
             say("**트레이 콜라이더 없음** (SIM_TRAY_COLLIDER=0) — 진단 전용, 시연에 쓰지 말 것")
-        for p in Usd.PrimRange(st.GetPrimAtPath(self.tray)):
-            if p.IsA(UsdGeom.Mesh) and _tray_coll:
-                UsdPhysics.CollisionAPI.Apply(p); UsdPhysics.MeshCollisionAPI.Apply(p).CreateApproximationAttr().Set("none")
+        tray_prim = st.GetPrimAtPath(self.tray)
+
+        for p in Usd.PrimRange(tray_prim):
+            # 바닥과 높은 칸막이가 합쳐진 Mesh 전체를 충돌체로 쓰면
+            # 칸막이 꼭대기까지 막힌 충돌 형상으로 처리될 수 있다.
+            if p.IsA(UsdGeom.Mesh):
+                if p.HasAPI(UsdPhysics.MeshCollisionAPI):
+                    p.RemoveAPI(UsdPhysics.MeshCollisionAPI)
+                if p.HasAPI(UsdPhysics.CollisionAPI):
+                    p.RemoveAPI(UsdPhysics.CollisionAPI)
+
             for a in p.GetAttributes():
                 n = a.GetName()
-                if n.endswith("tray_pitch"): pitch = float(a.Get())
-                if n.endswith("tray_slots"): nslots = int(a.Get())
-                if n.endswith("floor_top_z"): floor_top = float(a.Get())
+                if n.endswith("tray_pitch"):
+                    pitch = float(a.Get())
+                if n.endswith("tray_slots"):
+                    nslots = int(a.Get())
+                if n.endswith("floor_top_z"):
+                    floor_top = float(a.Get())
+        if _tray_coll:
+            # 트레이 전체의 로컬 X/Y 크기는 사용하되,
+            # 충돌체 높이는 실제 바닥판 두께만 사용한다.
+            local_bound = self._cache.ComputeLocalBound(tray_prim).GetRange()
+            bound_min = np.asarray(local_bound.GetMin(), dtype=float)
+            bound_max = np.asarray(local_bound.GetMax(), dtype=float)
+
+            floor_center_x = float((bound_min[0] + bound_max[0]) / 2.0)
+            floor_center_y = float((bound_min[1] + bound_max[1]) / 2.0)
+            floor_size_x = float(bound_max[0] - bound_min[0])
+            floor_size_y = float(bound_max[1] - bound_min[1])
+
+            floor_path = f"{self.tray}/floor_collider"
+            floor_cube = UsdGeom.Cube.Define(st, floor_path)
+            floor_cube.CreateSizeAttr(1.0)
+            floor_cube.AddTranslateOp().Set(Gf.Vec3d(
+                floor_center_x,
+                floor_center_y,
+                floor_top / 2.0,
+            ))
+            floor_cube.AddScaleOp().Set(Gf.Vec3f(
+                floor_size_x,
+                floor_size_y,
+                floor_top,
+            ))
+            floor_cube.CreateVisibilityAttr().Set(UsdGeom.Tokens.invisible)
+            UsdPhysics.CollisionAPI.Apply(floor_cube.GetPrim())
+
+            say(
+                "트레이 바닥 전용 콜라이더 생성: "
+                f"{floor_size_x:.3f} x {floor_size_y:.3f} x {floor_top:.3f} m"
+            )
+
         # 칸은 **팔 기준 x 축**을 따라 늘어선다 (월드 x 가 아니다)
         slot_rel = [np.array([tray_center[0] + (i + 0.5 - nslots / 2) * pitch,
                               tray_center[1], 0.0]) for i in range(nslots)]
@@ -261,7 +307,12 @@ class BookScene:
             xf = SingleXFormPrim(path); xf.set_world_pose(np.array([0.0, 0.0, 5.0 + i]), src_q)
             # 에셋마다 원본이 놓인 방향이 달라서(눕힌 것도 있다) 트레이 기준으로 세운다:
             # x = 두께(가장 작은 변), y = 세운 높이(가장 큰 변), z = 깊이(중간)
-            q_up = self.upright_quat(path, np.asarray(src_q, float), np.array([0.0, 0.0, 5.0 + i]))
+            q_up = self.upright_quat(
+                path,
+                np.asarray(src_q, float),
+                np.array([0.0, 0.0, 5.0 + i]),
+                tray_yaw=_yaw,
+            )
             xf.set_world_pose(np.array([0.0, 0.0, 5.0 + i]), q_up)
             b = self.aabb(path); c = (b[:3] + b[3:]) / 2
             target = np.array([slot_w[i][0], slot_w[i][1],
@@ -279,10 +330,25 @@ class BookScene:
             self.grasp_local[path] = (Rw.T @ (c - np.asarray(pos_w, float)),
                                       Rw.T @ np.array([0.0, 0.0, 1.0]),
                                       (b[5] - b[2]) / 2)
-            d = (b[3] - b[0], b[4] - b[1], b[5] - b[2])
-            if min(d) < 0.005:
-                raise RuntimeError(f"책 {src_path} 의 치수가 비었다 {d} — 참조 파일 확인: {book_ref}")
-            self.dims[path] = d
+            extents = np.array([
+                b[3] - b[0],
+                b[4] - b[1],
+                b[5] - b[2],
+            ], dtype=float)
+
+            if float(extents.min()) < 0.005:
+                raise RuntimeError(
+                    f"책 {src_path} 의 치수가 비었다 {extents.tolist()} "
+                    f"— 참조 파일 확인: {book_ref}"
+                )
+
+            # 책의 의미상 치수는 월드축 방향과 무관하게 정한다.
+            # 가장 짧은 변 = 두께, 가장 긴 변 = 책 높이, 중간 변 = 책 깊이
+            ordered = np.sort(extents)
+            thickness = float(ordered[0])
+            depth = float(ordered[1])
+            height = float(ordered[2])
+            self.dims[path] = (thickness, height, depth)
 
         # 트레이 칸막이는 두지 않는다: 칸 간격 0.075 m 안에서는 손가락이 지나갈 폭이 남지 않아
         # 칸막이를 세우면 파지 경로를 막는다 (실측: down 단계 시간 초과). 대신 책 충돌을 상자로 근사해 세워 둔다.
@@ -403,10 +469,25 @@ class BookScene:
         self.arm = ArmController(_Backend(self), conf)
 
         tray_top = DECK_Z + floor_top + self.W_max
-        self.home_tip = np.array([self.tray_center_w[0], self.tray_center_w[1], tray_top + 0.30])
-        seed = r.get_joint_positions()[self.idx_arm].copy()
-        seed[0] = math.atan2(self.tray_center_w[1] - l0p[1], self.tray_center_w[0] - l0p[0])
-        self.q_home, ok = self.ik_joints(self.home_tip, self.DOWN, seed)
+        self.home_tip = np.array([
+            self.tray_center_w[0],
+            self.tray_center_w[1],
+            tray_top + 0.30,
+        ])
+
+        # 시작 홈 자세는 검증된 관절각을 그대로 사용한다.
+        # IK를 실행하면 다른 해가 선택되어 팔이 트레이를 가로지를 수 있다.
+        self.q_home = np.asarray(
+            conf["poses"]["home"],
+            dtype=float,
+        ).copy()
+        ok = True
+
+        say(
+            "시작 홈 관절각 적용: "
+            f"{np.round(self.q_home, 4).tolist()} rad / "
+            f"{np.round(np.degrees(self.q_home), 1).tolist()} deg"
+        )
         self.open_tray = self.T_max / 2 + GRIP_CLEAR
         say(f"장면 준비: 트레이 칸 {nslots}개, 책 {len(self.books)}권, 원본 {len(sources)}종, 홈 IK {ok}")
         for b in self.books:
@@ -414,7 +495,7 @@ class BookScene:
             say(f"  {b.rsplit('/', 1)[1]}: 두께 {t:.3f} 세운높이 {ln:.3f} 깊이 {w:.3f}")
 
     # ---------------------------------------------------------------- 도구
-    def upright_quat(self, path, q0, pos):
+    def upright_quat(self, path, q0, pos, tray_yaw=0.0):
         """책을 트레이 기준 자세로 돌리는 쿼터니언을 찾는다.
 
         에셋마다 원본 자세가 다르므로 90° 회전 조합(24가지)을 시험해
@@ -449,7 +530,15 @@ class BookScene:
                 best, best_score = q, score
             if score < 1e-4:
                 break
-        return best
+        # upright_quat의 탐색 결과는 월드 X/Y축 기준이다.
+        # 트레이가 회전했다면 책도 트레이의 로컬 X/Y축에 맞춰 같이 회전시킨다.
+        q_yaw = np.array([
+            math.cos(tray_yaw / 2.0),
+            0.0,
+            0.0,
+            math.sin(tray_yaw / 2.0),
+        ])
+        return mul(q_yaw, best)
 
     def _prim_valid(self, p):
         return self.stage.GetPrimAtPath(p).IsValid() if getattr(self, "stage", None) else True

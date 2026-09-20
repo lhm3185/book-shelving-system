@@ -29,7 +29,7 @@ amcl:
     robot_model_type: "nav2_amcl::DifferentialMotionModel"
     save_pose_rate: 0.5
     sigma_hit: 0.2
-    tf_broadcast: true
+    tf_broadcast: false
     transform_tolerance: 1.0
     update_min_a: 0.2
     update_min_d: 0.25
@@ -43,10 +43,10 @@ amcl:
     always_reset_initial_pose: false
     first_map_only: false
     initial_pose:
-      x: -6.0
-      y: 1.0
+      x: 0.06556940078735352
+      y: -4.773948669433594
       z: 0.0
-      yaw: 3.14159
+      yaw: 0.0
 
 amcl_map_client:
   ros__parameters:
@@ -181,8 +181,8 @@ controller_server:
     general_goal_checker:
       stateful: True
       plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 0.25
-      yaw_goal_tolerance: 0.25
+      xy_goal_tolerance: 0.10
+      yaw_goal_tolerance: 0.10
   # DWB parameters
     FollowPath:
       plugin: "dwb_core::DWBLocalPlanner"
@@ -208,7 +208,7 @@ controller_server:
       linear_granularity: 0.05
       angular_granularity: 0.025
       transform_tolerance: 0.2
-      xy_goal_tolerance: 0.25
+      xy_goal_tolerance: 0.10
       trans_stopped_velocity: 0.25
       short_circuit_trajectory_evaluation: True
       stateful: True
@@ -336,7 +336,7 @@ collision_monitor:
       simulation_time_step: 0.1
       min_points: 4
       visualize: False
-      enabled: True
+      enabled: False
     observation_sources: ["scan"]
     scan:
       type: "scan"
