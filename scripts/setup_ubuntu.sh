@@ -4,11 +4,10 @@
 #   ./scripts/setup_ubuntu.sh --dry-run    # 무엇을 할지 보기만 한다 (권장: 먼저 이것부터)
 #   ./scripts/setup_ubuntu.sh              # 실제 설치
 #   ./scripts/setup_ubuntu.sh ros          # 한 단계만
+#   ./scripts/setup_ubuntu.sh isaac        # Isaac Sim 내려받기 (8.8GB — 기본에 안 들어간다)
 #
-# 단계: base | ros | py | ws   (인자 없으면 전부)
-#
-# **Isaac Sim 은 여기서 안 깐다.** NVIDIA 로그인이 필요한 수동 내려받기라, 설치 여부만 확인하고
-# 안내한다. 나머지(ROS 2 Jazzy, 빌드 도구, 파이썬 의존, 워크스페이스 빌드)는 자동이다.
+# 단계: base | ros | py | ws   (인자 없으면 이 넷)
+#       isaac                              (8.8GB 내려받기라 **직접 지정할 때만** 한다)
 #
 # sudo 를 쓰는 곳은 실행 전에 화면에 그대로 찍는다. 되돌릴 수 없는 일은 하지 않는다.
 set -u
@@ -18,8 +17,8 @@ STEPS=()
 for a in "$@"; do
     case "$a" in
         --dry-run|-n) DRY=1 ;;
-        base|ros|py|ws) STEPS+=("$a") ;;
-        *) echo "모르는 인자: $a  (base | ros | py | ws | --dry-run)"; exit 2 ;;
+        base|ros|py|ws|isaac) STEPS+=("$a") ;;
+        *) echo "모르는 인자: $a  (base | ros | py | ws | isaac | --dry-run)"; exit 2 ;;
     esac
 done
 [ "${#STEPS[@]}" -gt 0 ] || STEPS=(base ros py ws)
@@ -45,8 +44,20 @@ if [ "${VERSION_ID:-}" != "24.04" ]; then
     note "계속하려면 Ctrl+C 로 멈추고 상황을 먼저 확인할 것."
     [ "$DRY" -eq 1 ] || exit 1
 fi
-has nvidia-smi && nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader \
-    | sed 's/^/   GPU     /' || note "GPU     nvidia-smi 없음 — 드라이버부터 설치할 것"
+if has nvidia-smi; then
+    if _gpu=$(nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader 2>&1) \
+       && [ -n "$_gpu" ] && ! printf '%s' "$_gpu" | grep -qi "failed\|error"; then
+        printf '%s\n' "$_gpu" | sed 's/^/   GPU     /'
+    elif printf '%s' "$_gpu" | grep -qi "version mismatch"; then
+        # apt 가 드라이버를 올렸는데 커널 모듈이 아직 구버전일 때. 재부팅이면 끝난다
+        note "GPU     **드라이버/라이브러리 버전 불일치 — 재부팅하면 해소된다**"
+        note "        ($_gpu)"
+    else
+        note "GPU     nvidia-smi 실패: $_gpu"
+    fi
+else
+    note "GPU     nvidia-smi 없음 — 드라이버부터 설치할 것"
+fi
 
 # --------------------------------------------------------------- base
 if [[ " ${STEPS[*]} " == *" base "* ]]; then
@@ -135,13 +146,37 @@ if [[ " ${STEPS[*]} " == *" ws "* ]]; then
     fi
 fi
 
-# --------------------------------------------------------------- Isaac 안내
-say "5. Isaac Sim 5.1.0 — 수동 설치"
+# --------------------------------------------------------------- isaac
 ISAAC="${ISAAC_SIM_PATH:-$HOME/isaacsim}"
+ISAAC_URL="https://download.isaacsim.omniverse.nvidia.com/isaac-sim-standalone-5.1.0-linux-x86_64.zip"
+if [[ " ${STEPS[*]} " == *" isaac "* ]]; then
+    say "5. Isaac Sim 5.1.0 내려받기"
+    if [ -x "$ISAAC/python.sh" ]; then
+        note "이미 있다: $ISAAC — 건너뛴다"
+    else
+        note "약 8.8 GB 다. 인증은 필요 없다 (2026-09-20 확인: HTTP 200, application/zip)."
+        note "받는 곳: $ISAAC_URL"
+        _zip="$HOME/isaac-sim-standalone-5.1.0-linux-x86_64.zip"
+        # -C - 로 이어받는다. 중간에 끊겨도 처음부터 다시 받지 않는다
+        run curl -fL -C - -o "$_zip" "$ISAAC_URL"
+        run mkdir -p "$ISAAC"
+        run unzip -q -o "$_zip" -d "$ISAAC"
+        # 바이너리 배포본은 푼 뒤 post_install 을 한 번 돌려야 한다
+        if [ "$DRY" -eq 0 ] && [ -x "$ISAAC/post_install.sh" ]; then
+            run bash -c "cd '$ISAAC' && ./post_install.sh"
+        else
+            note '$ cd ~/isaacsim && ./post_install.sh'
+        fi
+        note "zip 은 지우지 않았다: $_zip (설치 확인 후 직접 지울 것)"
+    fi
+fi
+
+# --------------------------------------------------------------- Isaac 상태 안내
+say "Isaac Sim 상태"
 if [ -x "$ISAAC/python.sh" ]; then
     note "설치돼 있다: $ISAAC"
 else
-    note "아직 없다. NVIDIA 에서 **Isaac Sim 5.1.0 리눅스 바이너리(zip)** 를 받아 푼다."
+    note "아직 없다.  ./scripts/setup_ubuntu.sh isaac  으로 받을 수 있다 (8.8 GB)"
     note "  - 기본 위치는 ~/isaacsim (다르면 ISAAC_SIM_PATH 로 알려준다)"
     note "  - \$ISAAC_SIM_PATH/python.sh 가 있어야 우리 스크립트가 동작한다"
     note "  - 문서 검증 드라이버: 595.58.03 / 최소 요건 VRAM 16GB · RAM 32GB · 저장공간 50GB"
@@ -149,7 +184,7 @@ else
 fi
 
 say "다음 순서"
-note "1) Isaac Sim 설치 (위 5번)"
+note "1) Isaac Sim 설치 — ./scripts/setup_ubuntu.sh isaac"
 note "2) 레벨 USD 복원 + 파생 레벨 생성  → docs/doyoon-kim/manipulation/SETUP_NEW_PC.md §5"
 note "3) ./scripts/setup_check.sh   — 빠진 것 확인"
 note "4) ./scripts/run_tests.sh     — Isaac 없이 도는 테스트 100개"

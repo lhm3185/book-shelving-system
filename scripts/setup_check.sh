@@ -39,12 +39,18 @@ else
 fi
 # `A && B | sed || bad` 는 파이프라인 종료코드가 sed 것이라 **드라이버가 깨져도 통과**한다
 # (커널 모듈 불일치가 시연 당일 아침에 실제로 생길 수 있는 상태다). if 로 명확히 가른다.
-if command -v nvidia-smi >/dev/null \
-   && _gpu=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null) \
-   && [ -n "$_gpu" ]; then
-    printf '%s\n' "$_gpu" | sed 's/^/  OK    GPU /'
+if command -v nvidia-smi >/dev/null; then
+    _gpu=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>&1)
+    if [ -n "$_gpu" ] && ! printf '%s' "$_gpu" | grep -qi "failed\|error"; then
+        printf '%s\n' "$_gpu" | sed 's/^/  OK    GPU /'
+    elif printf '%s' "$_gpu" | grep -qi "version mismatch"; then
+        # apt 가 드라이버를 올렸는데 커널 모듈이 구버전일 때. 설치 실패가 아니라 **재부팅** 건이다
+        bad "GPU 드라이버/라이브러리 버전 불일치 — **재부팅하면 해소된다**"
+    else
+        bad "nvidia-smi 실패: $_gpu"
+    fi
 else
-    bad "nvidia-smi — NVIDIA 드라이버 (Isaac 은 RTX 계열이 필요하다)"
+    bad "nvidia-smi 없음 — NVIDIA 드라이버 (Isaac 은 RTX 계열이 필요하다)"
 fi
 
 head_ "4. 저장소 빌드"
