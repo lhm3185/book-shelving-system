@@ -176,6 +176,7 @@ class BookScene:
         # **월드 값을 따로 들고 있는다** — 아래 계산들은 월드 기준이라 팔 기준 값을 그대로
         # 쓰면 x,y 는 팔 기준·z 는 월드인 잡종 좌표가 된다 (2026-09-20 실제로 IK 실패).
         self.tray_center_w = _tray_w.copy()
+        self.tray_yaw = float(_yaw0)      # 파지·삽입 자세의 기준 방향
         say(f"트레이 배치: 팔 기준 {np.round(_tray_rel[:2], 4).tolist()} "
             f"→ 월드 {np.round(_tray_w[:2], 3).tolist()}, 면 z {DECK_Z:.3f}")
         pitch = nslots = floor_top = None
@@ -324,8 +325,19 @@ class BookScene:
         rf = np.array(SingleXFormPrim(R + "/" + BOT.finger_links[1]).get_world_pose()[0])
         self._a_loc = np.round(ee_R.T @ ((ee_p - hand_p) / np.linalg.norm(ee_p - hand_p)))
         self._c_loc = np.round(ee_R.T @ ((rf - lf) / (np.linalg.norm(rf - lf) or 1.0)))
-        self.DOWN = self.orientation([0, 0, -1], [1, 0, 0])
-        self.HORIZ = self.orientation([0, 1, 0], [1, 0, 0])
+        self.say(f"그리퍼 축: 접근축(손 기준) {np.round(self._a_loc, 3).tolist()}, "
+                 f"물림축 {np.round(self._c_loc, 3).tolist()}")
+        # **파지·삽입 자세는 팔이 놓인 방향을 따라야 한다.**
+        # 예전에는 월드 x/y 로 박혀 있었다. 로봇이 yaw 90° 로 서면 트레이 칸도 90° 돌아가
+        # 책 두께가 월드 y 를 향하는데, 손가락은 월드 x 로 물려 해가 없다 (2026-09-20 실측).
+        # 팔 기준 x(칸이 늘어선 방향)·y(서가 쪽)를 월드로 돌려 쓴다. yaw 0 이면 예전과 같다.
+        _cy, _sy = math.cos(self.tray_yaw), math.sin(self.tray_yaw)
+        _arm_x_w = [_cy, _sy, 0.0]          # 칸이 늘어선 방향
+        _arm_y_w = [-_sy, _cy, 0.0]         # 서가를 향하는 방향
+        self.DOWN = self.orientation([0, 0, -1], _arm_x_w)
+        self.HORIZ = self.orientation(_arm_y_w, _arm_x_w)
+        self.say(f"파지 자세 기준: 팔 yaw {math.degrees(self.tray_yaw):.1f}°, "
+                 f"물림축(월드) {np.round(_arm_x_w, 3).tolist()}")
 
         # 로봇마다 자세·그리퍼 값이 다르다. franka 는 arm.yaml(검증 완료), 나머지는 arm_<이름>.yaml
         _cfg_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config")
