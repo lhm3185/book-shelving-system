@@ -313,25 +313,31 @@ class BookScene:
                 paths[side] = p
             self.bookends[round(px, 4)] = (paths["L"], paths["R"], (y0 + y1) / 2, floor_z + DIV_H / 2)
 
-        # 팔 구동 게인 — URDF 임포트 기본값(강성 40~1135)으로는 위치 지령을 못 따라간다.
-        # 받은 에셋이 그 상태라 홈 이동부터 시간 초과가 났다 (2026-09-20 실측).
-        # **에셋을 고치지 않고 실행 시점에 올린다.** joint_3·joint_5 의 목표(90°)도 0 으로 맞춘다
-        # — 안 맞추면 재생 순간 팔이 85° 튀며 로봇이 흔들린다 (2026-09-18 실측).
+        # 팔 구동 게인 — **옛** 에셋(강성 40~1135)은 위치 지령을 못 따라가서 올려야 했다.
+        # 지금 받은 에셋은 기본값이 2.3e3~6.5e4 라 덮어쓸 이유가 줄었고, 덮어쓰면 USD 의 도(°)
+        # 단위가 라디안으로 환산되며 57배가 되어 감쇠가 5.7e6 까지 올라간다 (2026-09-20 실측).
+        # ARM_DRIVE_STIFFNESS=0 으로 끄고 에셋 기본값을 쓸 수 있게 한다.
+        # 목표값 0 맞추기는 **게인과 무관하게 항상** 한다 — joint_3·joint_5 의 목표(90°)를
+        # 안 맞추면 재생 순간 팔이 85° 튀며 로봇이 흔들린다 (2026-09-18 실측).
+        _stiff = float(os.environ.get("ARM_DRIVE_STIFFNESS", BOT.drive_stiffness))
+        _damp = float(os.environ.get("ARM_DRIVE_DAMPING", BOT.drive_damping))
         _tuned = []
-        for _p in (Usd.PrimRange(st.GetPrimAtPath(R)) if BOT.drive_stiffness > 0 else []):
+        for _p in Usd.PrimRange(st.GetPrimAtPath(R)):
             if _p.GetName() not in set(ARM_JOINTS):
                 continue
             _d = UsdPhysics.DriveAPI.Get(_p, "angular") or UsdPhysics.DriveAPI.Apply(_p, "angular")
-            _d.CreateTypeAttr().Set("force")
-            _d.CreateStiffnessAttr().Set(float(BOT.drive_stiffness))
-            _d.CreateDampingAttr().Set(float(BOT.drive_damping))
+            if _stiff > 0:
+                _d.CreateTypeAttr().Set("force")
+                _d.CreateStiffnessAttr().Set(_stiff)
+                _d.CreateDampingAttr().Set(_damp)
             _t = _d.GetTargetPositionAttr().Get()
             if _t not in (None, 0.0):
                 _d.CreateTargetPositionAttr().Set(0.0)
                 _tuned.append(f"{_p.GetName()} 목표 {_t}°→0°")
-        if BOT.drive_stiffness > 0:
-            say(f"팔 구동 게인 설정: 강성 {BOT.drive_stiffness:.0e} 감쇠 {BOT.drive_damping:.0e}"
-                + (f", {_tuned}" if _tuned else ""))
+        say(("팔 구동 게인 설정: 강성 %.0e 감쇠 %.0e" % (_stiff, _damp)) if _stiff > 0
+            else "팔 구동 게인: **에셋 기본값 사용** (ARM_DRIVE_STIFFNESS=0)")
+        if _tuned:
+            say(f"  구동 목표 보정: {_tuned}")
 
         if before_reset is not None:
             before_reset(st)      # ROS 그래프 설정 보완 등 — 재생(초기화) 전에 해야 반영된다
