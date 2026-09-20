@@ -62,6 +62,7 @@ class JointPath(Primitive):
 
     def __init__(self, name, qs, speed=0.35):
         length = sum(float(np.max(np.abs(b - a))) for a, b in zip(qs[:-1], qs[1:]))
+        self._plan_len = length
         super().__init__(max(4.0, length / speed * 2.0 + 3.0))
         self.name = name
         self.qs = [np.asarray(q, float) for q in qs]
@@ -71,6 +72,16 @@ class JointPath(Primitive):
         self._pts = [ctx.backend.get_joint_positions()] + self.qs
         self._i = 0
         self._target = self._pts[0].copy()
+        # 제한 시간은 만들 때 **계획된 경유점만으로** 계산했다. 실제로는 현재 자세에서
+        # 첫 경유점까지의 간격이 더 붙는데, IK 가 먼 해를 고르면 그 간격이 3 rad 를 넘는다
+        # (2026-09-20 M0609: 경로 길이 0.7 rad 인데 첫 간격만 3.4 rad → 제한 시간 초과).
+        # 실제 경로 길이로 다시 잡는다.
+        real = sum(float(np.max(np.abs(b - a))) for a, b in zip(self._pts[:-1], self._pts[1:]))
+        need = max(4.0, real / self.speed * 2.0 + 3.0)
+        self._limit = max(getattr(self, "_limit", 0), ctx.steps_for(need))
+        if real > 1.5:
+            ctx.backend.say(f"[진단] {self.name}: 실제 경로 {real:.2f} rad "
+                            f"(계획 {self._plan_len:.2f}), 제한 {need:.0f}초로 확장")
 
     def on_update(self, ctx):
         budget = self.speed * ctx.backend.dt
@@ -330,6 +341,12 @@ class BookScene:
             # Isaac 기본 지원 목록에 Doosan 이 없다 — descriptor·URDF 를 직접 준다
             cfg = {"robot_description_path": BOT.lula[1], "urdf_path": BOT.lula[2]}
         self.lula = LulaKinematicsSolver(**cfg)
+        # 씨앗을 조금씩 흔들어 다른 해 가지를 찾아본다 (먼 해가 나왔을 때만 쓴다)
+        self._ik_nudges = []
+        for j in range(BOT.dof):
+            for d in (0.3, -0.3, 0.8, -0.8):
+                v = np.zeros(BOT.dof); v[j] = d
+                self._ik_nudges.append(v)
         self.lula.set_robot_base_pose(l0p, l0q)
         self.ik = ArticulationKinematicsSolver(r, self.lula, BOT.ee_frame)
 
@@ -430,9 +447,31 @@ class BookScene:
         return quat_from_R(Wm @ Lm.T)
 
     def ik_joints(self, target, ori, seed):
-        q, ok = self.lula.compute_inverse_kinematics(BOT.ee_frame, np.asarray(target, float), np.asarray(ori, float),
-                                                     np.asarray(seed, float), 0.004, 0.05)
-        return np.asarray(q, float), bool(ok)
+        """IK 해를 구하되 **씨앗 자세에서 너무 먼 해는 버린다.**
+
+        6축에서는 같은 손끝 자세에 팔을 통째로 뒤로 돌린 해가 같이 존재한다. 그 해를
+        고르면 경로가 로봇 자신(받침판·카터)을 통과해 어깨가 막힌다
+        (2026-09-20 M0609: joint_1 이 3.22 rad = 185° 로 나와 approach 에서 멈췄다).
+        Lula 가 씨앗을 주어도 먼 해를 돌려주므로, 여기서 걸러 다시 시도한다.
+        """
+        seed = np.asarray(seed, float)
+        lim = BOT.ik_seed_limit
+        best = None
+        for k, s0 in enumerate([seed] + [seed + d for d in self._ik_nudges]):
+            q, ok = self.lula.compute_inverse_kinematics(
+                BOT.ee_frame, np.asarray(target, float), np.asarray(ori, float),
+                np.asarray(s0, float), 0.004, 0.05)
+            if not ok:
+                continue
+            q = np.asarray(q, float)
+            d = float(np.max(np.abs(q[:len(seed)] - seed)))
+            if lim <= 0 or d <= lim:
+                return q, True
+            if best is None or d < best[1]:
+                best = (q, d)
+        if best is not None:
+            return best[0], True          # 전부 멀면 그중 가장 가까운 해를 쓴다
+        return np.asarray(seed, float), False
 
     def plan_path(self, waypoints, seed, step_m=0.005, step_rad=0.035):
         qs = [np.asarray(seed, float)]; prev_p = prev_q = None; worst = 0.0

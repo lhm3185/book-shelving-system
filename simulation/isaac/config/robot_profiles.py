@@ -27,7 +27,7 @@ class RobotProfile:
     def __init__(self, name, root, base_link, arm_joints, grip_joints, grip_open, grip_close,
                  ee_frame, hand_link, finger_links, vel_limit, lula, camera_prim, camera_offset,
                  deck_z, drive_stiffness=0.0, drive_damping=0.0, art_root="",
-                 tray_match_tol=0.03):
+                 tray_match_tol=0.03, ik_seed_limit=0.0):
         self.name = name
         self.root = root                  # articulation root prim
         self.base_link = base_link        # IK·좌표의 기준 링크
@@ -54,6 +54,9 @@ class RobotProfile:
         # 트레이 칸에서 책을 찾을 때 허용 거리. **파지는 찾은 책의 실제 중심으로 하므로**
         # 이 값은 정밀도가 아니라 "그 칸에 책이 있나" 를 보는 기준이다.
         self.tray_match_tol = tray_match_tol
+        # IK 해가 씨앗 자세에서 이보다 멀면 버리고 다시 찾는다 (rad). 0 이면 끄기.
+        # 6축은 팔을 통째로 뒤로 돌린 해가 같이 존재해, 그걸 고르면 자기 몸에 막힌다.
+        self.ik_seed_limit = ik_seed_limit
 
     @property
     def articulation_root(self):
@@ -138,6 +141,7 @@ M0609 = RobotProfile(
     # 받침판 위 트레이에서 책이 칸 중심에서 3.5 cm 까지 벗어난다 (2026-09-20 실측).
     # 물리적으로 자리를 잡는 위치와 계산한 칸 중심이 약간 다르다.
     tray_match_tol=0.06,
+    ik_seed_limit=1.6,                           # 약 92° — 이보다 크게 튀는 해는 다른 가지다
 )
 
 _ALL = {p.name: p for p in (FRANKA, M0609)}
