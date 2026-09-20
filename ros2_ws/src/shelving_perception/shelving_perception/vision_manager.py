@@ -94,7 +94,7 @@ class VisionManager(Node):
             'camera_frame', 'RSD455').value
         # 검출 좌표를 변환할 최종 로봇 frame 이름입니다.
         self.target_frame = self.declare_parameter(
-            'target_frame', 'base_link').value
+            'target_frame', 'arm_base_link').value
         # RGB와 Depth가 서로 정렬되어 있는지 나타내는 설정입니다.
         self.depth_registered = bool(self.declare_parameter(
             'depth_registered', True).value)
@@ -137,7 +137,7 @@ class VisionManager(Node):
             'shelf_depth_margin', 0.05).value)
         # 삽입 후보를 화면에 투영해 깊이를 읽을 때 사용할 로봇 기준 frame입니다.
         self.slot_position_frame = self.declare_parameter(
-            'slot_position_frame', 'base_link').value
+            'slot_position_frame', 'arm_base_link').value
         # x,y,z가 반복되는 평탄화된 삽입 후보 좌표 목록입니다.
         self.slot_positions = list(self.declare_parameter(
             'slot_positions', [

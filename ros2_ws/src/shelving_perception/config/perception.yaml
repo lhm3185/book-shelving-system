@@ -8,7 +8,7 @@ vision_manager:
     perception_action: /detect_target_slot
     wait_for_trigger: true
     camera_frame: RSD455
-    target_frame: base_link
+    target_frame: arm_base_link
     depth_registered: true
     depth_scale: 0.0
     sync_slop: 0.5
@@ -26,7 +26,7 @@ vision_manager:
     # 책 표면과 빈 공간의 깊이 차이 기준(m)입니다.
     shelf_depth_margin: 0.05
     # 삽입 후보 좌표가 정의된 기준 frame입니다.
-    slot_position_frame: base_link
+    slot_position_frame: arm_base_link
     # 검증된 4개 삽입 후보의 x,y,z 좌표를 평탄화해 기록합니다.
     slot_positions: [-0.3497, 0.5495, 0.3399, -0.4297, 0.5495, 0.3399, -0.5097, 0.5495, 0.3399, -0.2697, 0.5495, 0.3399]
     # 후보 중심 주변에서 깊이를 읽을 픽셀 반경입니다.
