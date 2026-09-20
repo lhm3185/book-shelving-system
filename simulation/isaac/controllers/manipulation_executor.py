@@ -102,8 +102,20 @@ class ManipulationExecutor:
         place_w = scene.to_world(cmd["place"]["center"])
         book, dist = scene.book_on_tray_near(pick_w)
         if book is None:
+            # **왜 못 찾았는지 숫자로 남긴다** — "책 없음" 만으로는 좌표 문제인지
+            # 책이 정말 없는지 못 가른다 (2026-09-20 M0609 에서 여기서 막혔다)
+            near = sorted(((float(np.linalg.norm(scene.center(b) - pick_w)), b) for b in scene.books))[:2]
+            detail = ", ".join(f"{b.rsplit('/',1)[-1]} {d*100:.1f}cm" for d, b in near)
+            self.say(f"트레이 칸 판정 실패: 찾는 곳(월드) {np.round(pick_w, 4).tolist()} "
+                     f"= 팔기준 {np.round(cmd['pick']['center'], 4).tolist()}")
+            self.say(f"    가장 가까운 책: {detail}")
+            for b in scene.books[:3]:
+                c = scene.center(b)
+                self.say(f"    {b.rsplit('/',1)[-1]} 월드 {np.round(c,3).tolist()} "
+                         f"팔기준 {np.round(scene.to_arm(c),4).tolist()}")
             return self.finish(SIM_FAILED, error_code=411,
-                               message=f"트레이 칸 {cmd['pick'].get('tray_slot')} 에 책 없음 (3cm 안)")
+                               message=f"트레이 칸 {cmd['pick'].get('tray_slot')} 에 책 없음 "
+                                       f"(가장 가까운 것 {near[0][0]*100:.1f}cm)")
         plan, code, err = scene.plan_job(book, place_w)
         if plan is None:
             return self.finish(SIM_FAILED, error_code=code, message=f"계획 실패 {err}")
