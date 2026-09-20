@@ -15,8 +15,15 @@ LOG="${LOG:-/tmp/b1_demo}"; mkdir -p "$LOG"
 export FASTRTPS_DEFAULT_PROFILES_FILE="${FASTRTPS_DEFAULT_PROFILES_FILE:-$HOME/.ros/fastdds_whitelist.xml}"
 set +u; source /opt/ros/jazzy/setup.bash
 source "$WS/install/setup.bash"; set -u
-[ -f "$MODEL_PATH" ] || { echo "책 모델 없음: $MODEL_PATH"; exit 1; }
-[ -f "$SHELF_MODEL" ] || { echo "책장 모델 없음: $SHELF_MODEL"; exit 1; }
+# 비전 패키지가 모델을 동봉하게 되었다 (origin/vision 33650a0, LFS). 개인 경로가 없으면
+# 동봉본으로 넘어간다 — 예전에는 여기서 그냥 죽어서 "토픽이 안 나온다" 로만 보였다 (2026-09-18).
+BUNDLED="$WS/install/shelving_perception/share/shelving_perception/resource"
+[ -f "$MODEL_PATH" ]  || { [ -f "$BUNDLED/book_tray_best.pt" ] && MODEL_PATH="$BUNDLED/book_tray_best.pt" \
+    && echo "책 모델: 개인 경로에 없어 패키지 동봉본을 쓴다"; }
+[ -f "$SHELF_MODEL" ] || { [ -f "$BUNDLED/best.pt" ] && SHELF_MODEL="$BUNDLED/best.pt" \
+    && echo "책장 모델: 개인 경로에 없어 패키지 동봉본을 쓴다"; }
+[ -f "$MODEL_PATH" ] || { echo "책 모델 없음: $MODEL_PATH (동봉본도 없다 — colcon build 후 git lfs pull)"; exit 1; }
+[ -f "$SHELF_MODEL" ] || { echo "책장 모델 없음: $SHELF_MODEL (동봉본도 없다 — colcon build 후 git lfs pull)"; exit 1; }
 
 pids=()
 cleanup() { echo; echo "종료 중..."; kill "${pids[@]}" 2>/dev/null; wait 2>/dev/null; echo "종료"; }
