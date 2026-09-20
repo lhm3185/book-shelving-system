@@ -450,36 +450,39 @@ class BookScene:
         return (b[:3] + b[3:]) / 2
 
     def clash_report(self):
-        """팔 링크가 무엇과 겹치는지 보고한다.
+        """팔 관절 주변에 **실제 충돌체**가 무엇이 있는지 PhysX 로 묻는다.
 
-        왜: 관절이 목표에 못 가면 로그에는 숫자만 남아 **무엇에 막혔는지 알 수 없다.**
-        AABB 겹침은 정확하지는 않지만 '어느 물체를 의심할지' 를 바로 좁혀 준다.
+        왜: AABB 겹침은 쓸모가 없었다 — compute_aabb 는 Xform 에서 하위 트리를 늘 포함해서
+        "link_2 가 트레이와 겹친다(= 그 아래 달린 그리퍼가 트레이에 있다)" 는 당연한 답만 나왔다.
+        PhysX overlap 은 콜라이더 단위라 **무엇이 팔을 막고 있는지** 바로 나온다 (2026-09-20).
         """
-        # **자식을 빼고** 링크 자체만 본다. 자식을 넣으면 link_2 안에 그리퍼까지 들어가서
-        # "link_2 가 트레이와 겹친다" 는 당연한(그리고 쓸모없는) 결과가 나온다 (2026-09-20).
-        links = [f"{R}/m0609/link_{i}" for i in range(1, 7)]
-        links += [f"{R}/m0609/onrobot_rg2ft/{n}" for n in
-                  ("base_link", "left_inner_finger", "right_inner_finger")]
-        links = [p for p in links if self._prim_valid(p)]
-        obstacles = [("트레이", self.tray), ("서가", SHELF)]
-        obstacles += [(f"책 {os.path.basename(b)}", b) for b in self.books]
-        obstacles += [("받침판", f"{R}/Cube")]
+        try:
+            from omni.physx import get_physx_scene_query_interface
+            sq = get_physx_scene_query_interface()
+        except Exception as e:
+            return f"[진단] PhysX 조회 불가: {e}"
         hits = []
-        for ln in links:
-            try:
-                self._cache.Clear()
-                lb = np.array(compute_aabb(self._cache, ln, include_children=False), float)
-            except Exception:
+        for i in range(1, 7):
+            lp = f"{R}/m0609/link_{i}"
+            if not self._prim_valid(lp):
                 continue
-            for label, ob in obstacles:
-                try:
-                    obb = self.aabb(ob)
-                except Exception:
-                    continue
-                ov = np.minimum(lb[3:], obb[3:]) - np.maximum(lb[:3], obb[:3])
-                if np.all(ov > 0):
-                    hits.append(f"{os.path.basename(ln)}↔{label} {np.round(ov, 3).tolist()}")
-        return ("[진단] 겹침: " + ", ".join(hits)) if hits else "[진단] 겹침 없음 (AABB 기준)"
+            pos = np.asarray(SingleXFormPrim(lp).get_world_pose()[0], float)
+            found = set()
+
+            def _cb(h, _f=found):
+                _f.add(str(h.collision))
+                return True
+
+            try:
+                sq.overlap_sphere(0.18, [float(v) for v in pos], _cb, False)
+            except Exception as e:
+                return f"[진단] overlap 실패: {e}"
+            # 팔 자신과 로봇 몸체는 빼고, 바깥 물체만 남긴다
+            out = sorted({f.split("/World/")[-1] for f in found
+                          if "/m0609/" not in f and not f.startswith(R)})
+            if out:
+                hits.append(f"link_{i} 반경18cm: " + ", ".join(x[:46] for x in out[:4]))
+        return ("[진단] 팔 주변 물체 — " + " | ".join(hits)) if hits else "[진단] 팔 주변에 바깥 물체 없음"
 
     def to_world(self, p_arm):
         return self.l0p + self.Rl0 @ np.asarray(p_arm, float)
