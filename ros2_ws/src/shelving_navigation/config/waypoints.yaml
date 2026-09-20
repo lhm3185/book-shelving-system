@@ -1,1 +1,49 @@
+# 고정 좌표 내비게이션 waypoint
+# 현재 서가·반납구 좌표는 임시 고정값이다.
+# Isaac Sim 통합 후 실제 prim 위치로 calibration 한 값을 넣으면 된다.
+frame_id: map
 
+waypoints:
+  home:
+    position:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+    orientation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+
+  return_station:
+    position:
+      x: -6.0
+      y: 0.0
+      z: 0.0
+    orientation:
+      x: 0.0
+      y: 0.0
+      z: 0.7071068
+      w: 0.7071068
+
+  shelf_01:
+    position:
+      x: -3.0
+      y: 2.0
+      z: 0.0
+    orientation:
+      x: 0.0
+      y: 0.0
+      z: 0.7071068
+      w: 0.7071068
+
+  shelf_02:
+    position:
+      x: 3.0
+      y: 2.0
+      z: 0.0
+    orientation:
+      x: 0.0
+      y: 0.0
+      z: 0.7071068
+      w: 0.7071068

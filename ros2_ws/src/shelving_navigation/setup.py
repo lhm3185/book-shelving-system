@@ -14,10 +14,7 @@ setup(
             'share/ament_index/resource_index/packages',
             ['resource/' + package_name],
         ),
-        (
-            'share/' + package_name,
-            ['package.xml'],
-        ),
+        ('share/' + package_name, ['package.xml']),
         (
             os.path.join('share', package_name, 'launch'),
             glob('launch/*.launch.py'),
@@ -41,6 +38,11 @@ setup(
     maintainer_email='lhm6582@gmail.com',
     description='AMR navigation and docking for return-station and shelf targets.',
     license='Apache-2.0',
+    extras_require={
+        'test': [
+            'pytest',
+        ],
+    },
     entry_points={
         'console_scripts': [
             (
