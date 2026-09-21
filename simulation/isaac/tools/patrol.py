@@ -47,9 +47,18 @@ def main():
     ap.add_argument("--waypoints", default=WAYPOINTS)
     ap.add_argument("--timeout", type=float, default=300.0)
     ap.add_argument("--dry-run", action="store_true", help="보내지 않고 경로만 보여준다")
+    ap.add_argument("--zero", action="store_true",
+                    help="0 m 주행 — 경로의 모든 점을 출발점으로. 주행 **코드 경로**는 그대로 타고 "
+                         "실제 이동만 없앤다 (M406 이 거리 탓인지 코드 탓인지 가른다)")
     a = ap.parse_args()
 
     route = load_route(a.waypoints, a.route)
+    if a.zero:
+        # **첫 점으로 전부 바꾼다.** 구간 수와 명령 형태는 그대로라 실행기의 상태 기계·
+        # 복귀 보정·트레이 추종이 똑같이 돈다. 달라지는 것은 이동 거리뿐이다
+        _, sx, sy = route[0]
+        route = [(f"{n}(0m)", sx, sy) for n, _, _ in route]
+        print("**0 m 주행** — 모든 점을 출발점으로 바꿨다 (코드 경로는 그대로)")
     pts = [(x, y) for _, x, y in route]
     total = sum(math.dist(p, q) for p, q in zip(pts, pts[1:]))
     print(f"경로 '{a.route}' — {len(route)}개 점, 총 {total:.2f} m, {a.speed} m/s "

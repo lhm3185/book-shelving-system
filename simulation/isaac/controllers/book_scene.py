@@ -596,7 +596,8 @@ class BookScene:
             # 물리 콜백에 물리면 어디서 돌리든 한 번씩만 불린다.
             try:
                 self.world.add_physics_callback(
-                    "bs_tray_follow", lambda _dt: (self.follow_hand(), self.follow_tray()))
+                    "bs_tray_follow",
+                    lambda _dt: (self.follow_hand(), self.follow_tray(), self.diag_attach_tick()))
             except Exception as exc:     # noqa: BLE001
                 self.say(f"[경고] 트레이 추종 콜백 등록 실패 — 주행하면 트레이가 뒤에 남는다: {exc}")
 
@@ -1274,6 +1275,31 @@ class BookScene:
         self.say(f"  [{tag}] {book.rsplit('/', 1)[1]} 중심 {np.round(c, 3).tolist()} "
                  f"크기 {np.round([b[3] - b[0], b[4] - b[1], b[5] - b[2]], 3).tolist()}")
 
+    def diag_attach_tick(self):
+        """`attach()` **한 스텝 뒤** 앵커 기대값과 실제 책 자세의 차이를 손 기준으로 적는다.
+
+        왜 한 스텝 뒤인가: `attach()` 는 USD 에 세운 자세를 쓰고 **그 값을 되읽어** 앵커를
+        만든다. PhysX 는 자기 상태를 따로 갖고 있어, 한 스텝 돌려야 실제 값이 드러난다.
+        이 차이가 M406(운반 중 어긋남)과 같이 움직이면 가설 H-b 가 맞는 것이다.
+
+        SIM_DIAG_M406=1 일 때만 돈다. **아무 것도 바꾸지 않는다.**
+        """
+        pending = getattr(self, "_diag_attach", None)
+        if pending is None or os.environ.get("SIM_DIAG_M406") != "1":
+            return
+        self._diag_attach = None
+        book, want_rel = pending
+        try:
+            hp, hq = SingleXFormPrim(HAND_LINK).get_world_pose()
+            bp, _ = SingleXFormPrim(book).get_world_pose()
+            got_rel = R_from_quat(np.asarray(hq, float)).T @ (
+                np.asarray(bp, float) - np.asarray(hp, float))
+            d = got_rel - want_rel
+            self.say(f"[DIAG] attach_offset_hand={np.round(d, 5).tolist()} "
+                     f"크기 {float(np.linalg.norm(d))*1000:.2f} mm ({book.rsplit('/', 1)[-1]})")
+        except Exception as exc:      # noqa: BLE001 - 계측이 작업을 막으면 안 된다
+            self.say(f"[DIAG] attach_offset 못 쟀다: {type(exc).__name__}: {exc}")
+
     def rebase_tray_to(self, world_p, world_q):
         """다음 스텝에 **트레이를 이 월드 자세에 그대로 두고**, 앵커와의 관계만 다시 잡는다.
 
@@ -1378,6 +1404,7 @@ class BookScene:
             UsdPhysics.RigidBodyAPI.Apply(
                 self.stage.GetPrimAtPath(book)).CreateKinematicEnabledAttr().Set(True)
             self._held_rel = (rel_p, Rh.T @ R_from_quat(np.asarray(bq, float)))
+            self._diag_attach = (book, np.asarray(rel_p, float))
             return
         j = UsdPhysics.FixedJoint.Define(self.stage, GRASP_JOINT)
         j.CreateBody0Rel().SetTargets([HAND_LINK]); j.CreateBody1Rel().SetTargets([book])
@@ -1385,6 +1412,10 @@ class BookScene:
         j.CreateLocalRot0Attr().Set(Gf.Quatf(float(rel_q[0]), Gf.Vec3f(*[float(v) for v in rel_q[1:]])))
         j.CreateLocalPos1Attr().Set(Gf.Vec3f(0, 0, 0)); j.CreateLocalRot1Attr().Set(Gf.Quatf(1, Gf.Vec3f(0, 0, 0)))
         j.CreateExcludeFromArticulationAttr().Set(True)
+        # **앵커가 기대한 관계**를 적어 둔다. 다음 스텝에 실제와 비교하면
+        # "USD 에 쓴 자세와 PhysX 가 가진 자세가 다른가"(가설 H-b)를 숫자로 알 수 있다.
+        # 여기 rel_p 는 바로 위에서 **USD 에 세운 자세를 쓴 직후 되읽은** 값이다
+        self._diag_attach = (book, np.asarray(rel_p, float))
 
     def detach(self):
         book = self._held_book

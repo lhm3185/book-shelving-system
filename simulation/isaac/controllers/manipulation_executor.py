@@ -83,6 +83,11 @@ class ManipulationExecutor:
     def finish(self, status, **extra):
         if self.gate is not None and self.sensor_policy == "gated":
             self.gate.all(True, "— 작업 끝, 관측 대기")
+        if os.environ.get("SIM_DIAG_M406") == "1":
+            # **작업 중에 루트를 몇 번 옮겼나** (가설 H-a). 0 이 아니면 손 안의 책이
+            # 밀릴 수 있다 — 주행 실행기의 _write_root 가 센다
+            self.say(f"[DIAG] root_writes_after_job="
+                     f"{getattr(self.scene, 'root_writes_after_job', 0)}")
         self.scene.job_active = False    # 다시 주행해도 책이 따라오게 한다
         extra = dict(extra, sim_steps=self.job.steps, render_steps=self.job.render_steps)
         self.job.state = dict(self.job.state, status=status, **extra)
@@ -102,6 +107,7 @@ class ManipulationExecutor:
         # **좌표를 월드로 바꾸기 전에** 팔 베이스 자세를 다시 읽는다. 주행한 뒤라면
         # 시작할 때 읽은 값이 그만큼 낡아 있어 pick/place 가 통째로 어긋난다 (2026-09-21).
         scene.job_active = True          # follow_tray 가 책을 건드리지 않게 한다
+        scene.root_writes_after_job = 0   # 계측용 — 이 작업 동안의 루트 쓰기만 센다
         _moved = scene.refresh_base()
         if _moved > 0.01:
             self.say(f"팔 베이스가 {_moved*100:.1f}cm 움직였다 — 좌표 기준을 다시 잡았다")

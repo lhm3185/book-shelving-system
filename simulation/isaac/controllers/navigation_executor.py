@@ -41,6 +41,7 @@ ARRIVE_TOL_M = 0.05          # 이 안에 들면 그 점은 도착으로 본다
 DEFAULT_SPEED = 0.4          # m/s. Nav2 기본 속도대
 RETURN_SNAP_M = 0.30         # 이 안쪽이면 '제자리로 돌아온 것' 으로 보고 팔 베이스를 맞춘다
 SETTLE_STEPS = 60            # 도착 뒤 기다리는 스텝 수 (그 사이에 여러 번 나눠 맞춘다)
+DIAG = os.environ.get("SIM_DIAG_M406") == "1"   # 계측만 켠다 — 동작은 바뀌지 않는다
 REALIGN_EVERY = 12           # 이 스텝마다 남은 차이를 다시 잰다 → 60/12 = 5회
 REALIGN_DONE_M = 0.001       # 이 안쪽이면 맞은 것으로 본다
 
@@ -157,6 +158,21 @@ class NavigationExecutor:
                  f"속도 {self.speed} m/s (제한 {self.limit} 스텝)")
         self.publish(message="시작", total_m=round(total, 3))
 
+    # ---------------------------------------------------------------- 루트 쓰기
+    def _write_root(self, pos, quat, why):
+        """루트 XForm 자세를 쓰는 **유일한 통로**.
+
+        작업(파지·운반) 중에 루트를 옮기면 손 안의 책이 밀린다. 그런 쓰기가
+        실제로 일어나는지 세려면 쓰기가 한 곳을 지나야 한다 (계측 H-a).
+        """
+        if getattr(self.scene, "job_active", False):
+            self.scene.root_writes_after_job = getattr(
+                self.scene, "root_writes_after_job", 0) + 1
+            if DIAG:
+                self.say(f"[DIAG] 작업 중 루트 쓰기: {why} "
+                         f"(누적 {self.scene.root_writes_after_job})")
+        self.root.set_world_pose(pos, quat)
+
     # ---------------------------------------------------------------- 진단
     def _snapshot(self, tag):
         """트레이와 책이 팔 기준 어디에 있는지 찍는다 (복귀 보정 추적용).
@@ -227,7 +243,7 @@ class NavigationExecutor:
         root_p = np.asarray(root_p, float)
         root_q = np.asarray(root_q, float)
         if abs(dyaw) > 1e-4:
-            self.root.set_world_pose(root_p, _quat_mul(_yaw_quat(dyaw), root_q))
+            self._write_root(root_p, _quat_mul(_yaw_quat(dyaw), root_q), "복귀 보정(자세)")
             # 회전은 루트를 중심으로 돌기 때문에 팔 베이스 위치가 함께 움직인다.
             # 남은 위치 차이는 회전을 반영해 다시 계산한다
             arm_off = cur_p[:2] - root_p[:2]
@@ -239,9 +255,17 @@ class NavigationExecutor:
             root_p = np.asarray(root_p, float)
         root_p[0] += off[0]
         root_p[1] += off[1]
-        self.root.set_world_pose(root_p, np.asarray(root_q, float))
+        self._write_root(root_p, np.asarray(root_q, float), "복귀 보정(위치)")
         self.say(f"[주행] 팔 베이스 복귀 보정: 위치 {drift*100:.1f}cm, "
                  f"자세 {math.degrees(dyaw):+.2f}° — 파지 기준을 출발 때와 같게 맞췄다")
+        if DIAG:
+            # **보정 뒤 실제로 얼마가 남았는지.** 보정량이 아니라 잔차를 적는다 —
+            # 팔 베이스(panda_link0) 기준이며 루트가 아니다
+            _p, _q = self.arm_base.get_world_pose()
+            _res = self.home_arm[:2] - np.asarray(_p, float)[:2]
+            _ryaw = _yaw(self.home_arm_q) - _yaw(np.asarray(_q, float))
+            self.say(f"[DIAG] return_residual=[{float(np.hypot(*_res)):.5f}, "
+                     f"{math.degrees(math.atan2(math.sin(_ryaw), math.cos(_ryaw))):+.3f}]")
         self._snapshot("보정직후")
 
     # ---------------------------------------------------------------- 매 스텝
@@ -296,7 +320,7 @@ class NavigationExecutor:
             # 그대로 전달돼 삽입을 깨뜨린다 (2026-09-21: 4.5 cm 남고 배치 검증 실패).
             # 여기서는 자세를 직접 쓰므로 정확히 맞추는 데 드는 비용이 없다.
             pos[0], pos[1] = tx, ty
-            self.root.set_world_pose(pos, quat)
+            self._write_root(pos, quat, "경유점 정렬")
             self.route.pop(0)
             done = self.legs - len(self.route)
             if not self.route:
@@ -319,7 +343,7 @@ class NavigationExecutor:
         step = min(self.speed * dt, dist)
         pos[0] += dx / dist * step
         pos[1] += dy / dist * step
-        self.root.set_world_pose(pos, quat)
+        self._write_root(pos, quat, "주행")
 
         # 1초에 한 번쯤 상태를 낸다 (매 스텝 내면 토픽이 넘친다)
         now = time.time()
