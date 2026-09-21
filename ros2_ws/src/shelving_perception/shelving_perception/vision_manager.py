@@ -46,8 +46,8 @@ from sensor_msgs.msg import Image, CameraInfo
 from geometry_msgs.msg import PointStamped, PoseStamped
 # 수동 검출 요청 토픽의 Boolean 메시지입니다.
 from std_msgs.msg import Bool
-# ROS Image 메시지를 OpenCV 영상으로 바꾸는 브리지입니다.
-from cv_bridge import CvBridge, CvBridgeError
+# **cv_bridge 를 쓰지 않습니다.** 이 파일 위쪽의 _imgmsg_to_* / _bgr8_to_imgmsg 로 대신합니다.
+# cv_bridge 의 컴파일된 부분이 NumPy 1.x 로 빌드돼 있어 NumPy 2.x PC 에서 죽습니다.
 # 카메라 좌표를 로봇 좌표로 변환하는 함수입니다.
 from tf2_geometry_msgs import (
     do_transform_point,
@@ -62,6 +62,72 @@ from .book_detector import BookDetector
 from .target_detector import TargetDetector
 
 
+# sensor_msgs/Image 의 encoding → (numpy 자료형, 채널 수).
+# cv_bridge 가 하던 일이지만, 여기 것은 순수 파이썬이라 OpenCV·NumPy 판과 무관합니다.
+_ENCODINGS = {
+    'rgb8': (np.uint8, 3), 'bgr8': (np.uint8, 3),
+    'rgba8': (np.uint8, 4), 'bgra8': (np.uint8, 4),
+    'mono8': (np.uint8, 1), '8UC1': (np.uint8, 1), '8UC3': (np.uint8, 3),
+    'mono16': (np.uint16, 1), '16UC1': (np.uint16, 1),
+    '32FC1': (np.float32, 1), '64FC1': (np.float64, 1),
+}
+
+
+def _imgmsg_to_array(msg):
+    """sensor_msgs/Image → numpy 배열. **cv_bridge 를 거치지 않습니다**.
+
+    `.1` 의 cv_bridge 는 컴파일된 `cvtColor2` 가 NumPy 1.x 로 빌드돼 있어,
+    NumPy 2.x 환경에서 imgmsg_to_cv2 를 부르면 **세그폴트로 죽습니다**
+    (2026-09-21 10.10.0.1, numpy 2.5.3). 바이트를 직접 해석하면 그 의존이 사라집니다.
+    """
+    entry = _ENCODINGS.get(msg.encoding)
+    if entry is None:
+        raise ValueError(f'모르는 encoding: {msg.encoding}')
+    dtype, channels = entry
+    dtype = np.dtype(dtype).newbyteorder('>' if msg.is_bigendian else '<')
+    array = np.frombuffer(bytearray(msg.data), dtype=dtype)
+    # step 은 한 줄의 바이트 수입니다. 줄 끝 padding 이 있을 수 있으므로 step 으로 자릅니다
+    array = array.reshape(msg.height, msg.step // dtype.itemsize)
+    array = array[:, :msg.width * channels]
+    return array.reshape(msg.height, msg.width) if channels == 1 \
+        else array.reshape(msg.height, msg.width, channels)
+
+
+def _imgmsg_to_bgr(msg):
+    """sensor_msgs/Image → BGR 3채널 uint8. 색 변환은 cv2 로 합니다."""
+    array = _imgmsg_to_array(msg)
+    if msg.encoding == 'rgb8':
+        return cv2.cvtColor(array, cv2.COLOR_RGB2BGR)
+    if msg.encoding == 'rgba8':
+        return cv2.cvtColor(array, cv2.COLOR_RGBA2BGR)
+    if msg.encoding == 'bgra8':
+        return cv2.cvtColor(array, cv2.COLOR_BGRA2BGR)
+    if msg.encoding in ('mono8', '8UC1'):
+        return cv2.cvtColor(array, cv2.COLOR_GRAY2BGR)
+    if msg.encoding in ('bgr8', '8UC3'):
+        return array
+    raise ValueError(f'BGR 로 바꿀 수 없는 encoding: {msg.encoding}')
+
+
+def _bgr8_to_imgmsg(image):
+    """BGR numpy 배열 → sensor_msgs/Image. **cv_bridge 를 거치지 않습니다.**
+
+    cv_bridge.cv2_to_imgmsg 는 OpenCV 5 에서 KeyError 로 죽습니다. OpenCV 5 가
+    CV_CN_SHIFT 를 3 에서 5 로 바꿔, cv_bridge 가 만든 타입 표(CV_8UC3 = 64)와
+    자체 계산값(16)이 어긋나기 때문입니다. bgr8 은 메모리 배치가 그대로이므로
+    직접 채우면 OpenCV 판 번호와 무관하게 동작합니다.
+    """
+    image = np.ascontiguousarray(image, dtype=np.uint8)
+    height, width = image.shape[:2]
+    msg = Image()
+    msg.height = int(height)
+    msg.width = int(width)
+    msg.encoding = 'bgr8'
+    msg.is_bigendian = 0
+    msg.step = int(width * 3)
+    msg.data = image.tobytes()
+    return msg
+
 
 class VisionManager(Node):
     """카메라 영상을 받아 책을 검출하고 ROS 결과로 변환하는 노드입니다."""
@@ -70,8 +136,6 @@ class VisionManager(Node):
         # 노드 이름을 vision_manager로 등록합니다.
         super().__init__('vision_manager')
 
-        # ROS Image와 OpenCV 이미지 사이의 변환 도구를 생성합니다.
-        self.bridge = CvBridge()
         # RGB 영상이 들어오는 토픽 이름을 파라미터에서 읽습니다.
         self.rgb_topic = self.declare_parameter(
             'rgb_topic', '/rgb').value
@@ -445,12 +509,10 @@ class VisionManager(Node):
 
         try:
             # ROS RGB 메시지를 OpenCV BGR 이미지로 변환합니다.
-            rgb_image = self.bridge.imgmsg_to_cv2(
-                rgb_msg, desired_encoding='bgr8')
+            rgb_image = _imgmsg_to_bgr(rgb_msg)
             # Depth 메시지는 원래 숫자 encoding을 유지한 채 변환합니다.
-            depth_image = self.bridge.imgmsg_to_cv2(
-                depth_msg, desired_encoding='passthrough')
-        except CvBridgeError as error:
+            depth_image = _imgmsg_to_array(depth_msg)
+        except ValueError as error:
             self.get_logger().error(f'Image conversion failed: {error}')
             return
 
@@ -803,7 +865,21 @@ class VisionManager(Node):
                 f'{self.target_frame}: {error}')
             return None
 
-    def _publish_debug_image(
+    def _publish_debug_image(self, *args, **kwargs):
+        """디버그 영상을 발행합니다. **그리다 실패해도 검출을 멈추지 않습니다**.
+
+        화면 표시는 곁가지인데, 여기서 난 예외가 노드를 통째로 내려버린 적이 있습니다
+        (2026-09-21 GPU PC: KeyError 'row_index' → vision_manager 종료 → 파지 중단).
+        검출·좌표 발행은 화면과 무관하게 계속되어야 합니다.
+        """
+        try:
+            self._draw_and_publish_debug_image(*args, **kwargs)
+        except Exception as error:       # noqa: BLE001 - 화면 때문에 노드가 죽으면 안 됩니다
+            self.get_logger().warning(
+                f'디버그 영상 표시 실패(검출은 계속합니다): {type(error).__name__}: {error}',
+                throttle_duration_sec=10.0)
+
+    def _draw_and_publish_debug_image(
         self,
         rgb_image,
         header,
@@ -893,12 +969,19 @@ class VisionManager(Node):
                 cv2.LINE_AA,
             )
         # 빈 단의 중심 픽셀을 빨간색 원으로 표시합니다.
+        # **없는 열쇠에 죽지 않습니다.** 빈 단 정보의 구성은 경로마다 다른데,
+        # 그림을 그리다 KeyError 로 노드 전체가 내려간 적이 있습니다
+        # (2026-09-21 GPU PC: KeyError 'row_index' 로 vision_manager 종료 → 파지 중단).
         for empty_slot in empty_slots or []:
-            u, v = empty_slot['pixel']
+            pixel = empty_slot.get('pixel')
+            if pixel is None:
+                continue
+            u, v = pixel
+            row_index = empty_slot.get('row_index', '?')
             cv2.circle(debug_image, (u, v), 8, (0, 0, 255), -1)
             cv2.putText(
                 debug_image,
-                f"empty row {empty_slot['row_index']}",
+                f"empty row {row_index}",
                 (u + 10, v),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
@@ -907,7 +990,11 @@ class VisionManager(Node):
                 cv2.LINE_AA,
             )
         # OpenCV BGR 영상을 ROS Image 메시지로 변환합니다.
-        debug_msg = self.bridge.cv2_to_imgmsg(debug_image, encoding='bgr8')
+        # **cv_bridge 를 쓰지 않습니다.** OpenCV 5 에서 CV_CN_SHIFT 가 3→5 로 바뀌어,
+        # cv_bridge 의 타입 표(키 32..36)와 자체 계산값(16)이 어긋나 cv2_to_imgmsg 가
+        # KeyError 로 죽습니다 (2026-09-21 GPU PC 10.10.0.1, cv2 5.0.0 에서 확인).
+        # bgr8 은 바이트를 그대로 옮기면 되므로 직접 만듭니다 — OpenCV 판 번호와 무관합니다.
+        debug_msg = _bgr8_to_imgmsg(debug_image)
         # 원본 RGB와 같은 timestamp/frame을 유지합니다.
         debug_msg.header = header
         # 다른 PC의 rqt_image_view가 구독할 수 있도록 발행합니다.

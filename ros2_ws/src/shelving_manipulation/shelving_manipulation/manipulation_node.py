@@ -33,7 +33,7 @@ from .book_placer import (cancel_command, decode, encode, error_name, MockSimExe
                           PlaceTracker)
 from .grasp_planner import (build_place_command, DEFAULT_LIMITS, GraspGoal, parse_profile,
                             parse_tray, PlaceGoal, resolve_book, select_tray_slot, SlotGoal,
-                            validate_goal, validate_grasp)
+                            snap_grasp_to_slot, validate_goal, validate_grasp)
 
 # 진행 중 이 단계 이후에 실패하면 책이 이미 트레이를 떠났다고 본다
 LEFT_TRAY_PHASES = ('MOVING_TO_PRE_INSERT', 'INSERTING', 'RELEASING', 'RETREATING', 'VERIFYING')
@@ -227,7 +227,13 @@ class ManipulationNode(Node):
         if check.ok:
             check = validate_goal(goal, book, self.limits)
         if check.ok:
+            # **검사 전에** 비전 x 를 칸 중심에 맞춘다 — 트레이는 좌표를 아는 고정 지그다.
+            # 비전이 정하는 것은 몇 번 칸인가이고, 그 칸의 x 는 지그가 이미 안다
+            goal, note = snap_grasp_to_slot(goal, self.tray_slots)
+            if note:
+                self.get_logger().info(note)
             # 계약 §5 — 틀린 점을 경계에서 잡는다. 특히 "윗면 높이가 책 규격과 맞는가"
+            # 위에서 맞췄어도 이 검사는 그대로 둔다 (마지막 안전선이다)
             check = validate_grasp(goal, self.tray_slots, self.limits)
             if not check.ok:
                 self.get_logger().warning(f'파지 관측 거절: {check.message}')

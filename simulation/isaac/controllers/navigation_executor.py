@@ -38,6 +38,29 @@ BOT = profile()
 
 ARRIVE_TOL_M = 0.05          # 이 안에 들면 그 점은 도착으로 본다
 DEFAULT_SPEED = 0.4          # m/s. Nav2 기본 속도대
+RETURN_SNAP_M = 0.30         # 이 안쪽이면 '제자리로 돌아온 것' 으로 보고 팔 베이스를 맞춘다
+SETTLE_STEPS = 60            # 도착 뒤 기다리는 스텝 수 (앞 절반은 물리 안정, 뒤 절반은 트레이 추종)
+
+
+def _yaw(q):
+    """Isaac 쿼터니언 (w, x, y, z) 에서 yaw(rad) 를 뽑는다."""
+    w, x, y, z = (float(v) for v in q)
+    return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+
+
+def _yaw_quat(yaw):
+    """z 축 회전만 담은 쿼터니언 (w, x, y, z)."""
+    return np.array([math.cos(yaw / 2.0), 0.0, 0.0, math.sin(yaw / 2.0)])
+
+
+def _quat_mul(a, b):
+    """쿼터니언 곱 a*b — 둘 다 (w, x, y, z)."""
+    aw, ax, ay, az = (float(v) for v in a)
+    bw, bx, by, bz = (float(v) for v in b)
+    return np.array([aw * bw - ax * bx - ay * by - az * bz,
+                     aw * bx + ax * bw + ay * bz - az * by,
+                     aw * by - ax * bz + ay * bw + az * bx,
+                     aw * bz + ax * by - ay * bx + az * bw])
 
 
 class NavigationExecutor:
@@ -62,11 +85,23 @@ class NavigationExecutor:
         self.status = "idle"
         self.steps = 0
         self.limit = 0
+        self.settle = 0
         self._last_report = 0.0
+
+        # **팔 베이스의 출발 자리를 기억해 둔다.** 파지·삽입 좌표는 모두 팔 기준이라,
+        # 돌아왔을 때 맞아야 하는 것은 루트 XForm 이 아니라 **팔 베이스**다.
+        # 루트를 순간이동시켜도 관절로 붙은 몸통은 그대로 따라오지 않아, 한 바퀴 뒤
+        # 둘 사이가 벌어진다 (2026-09-21: 루트는 제자리인데 꽂는 x 가 8.8 cm 밀렸다).
+        self.arm_base = SingleXFormPrim(f"{BOT.root}/{BOT.base_link}")
+        _hp, _hq = self.arm_base.get_world_pose()
+        self.home_arm = np.asarray(_hp, float).copy()
+        self.home_arm_q = np.asarray(_hq, float).copy()
 
         p, _ = self.root.get_world_pose()
         self.say(f"주행 실행기 준비: {BOT.root} 현재 위치 "
                  f"({float(p[0]):+.3f}, {float(p[1]):+.3f}), 속도 {self.speed} m/s")
+        self.say(f"  팔 베이스 출발 자리 ({self.home_arm[0]:+.4f}, {self.home_arm[1]:+.4f}) "
+                 f"— 돌아왔을 때 여기로 맞춘다")
 
     # ---------------------------------------------------------------- 발행
     def publish(self, **extra):
@@ -118,6 +153,56 @@ class NavigationExecutor:
                  f"속도 {self.speed} m/s (제한 {self.limit} 스텝)")
         self.publish(message="시작", total_m=round(total, 3))
 
+    # ---------------------------------------------------------------- 복귀 보정
+    def _realign_arm_base(self):
+        """제자리로 돌아왔으면 **팔 베이스**를 출발 자리에 정확히 맞춘다.
+
+        왜 필요한가: 파지·삽입 좌표는 전부 팔 기준이고, 그 좌표를 월드로 바꾸는 기준이
+        팔 베이스다. 루트 XForm 을 목표점에 정확히 올려놔도, 관절로 매달린 몸통은
+        그만큼 따라오지 않아 팔 베이스가 밀린 채 남는다. 그 밀림이 그대로
+        파지·삽입 오차가 된다 (2026-09-21 실측: 루트는 제자리, 꽂는 x 는 8.8 cm 밀림
+        → 책이 선반에 못 들어가고 바닥으로 떨어졌다).
+
+        **출발 자리 근처로 돌아온 경우에만** 맞춘다. 다른 곳으로 가는 주행까지
+        출발점으로 당기면 그게 더 큰 사고다.
+        """
+        cur_p, cur_q = self.arm_base.get_world_pose()
+        cur_p = np.asarray(cur_p, float)
+        off = self.home_arm[:2] - cur_p[:2]
+        drift = float(np.hypot(off[0], off[1]))
+        dyaw = _yaw(self.home_arm_q) - _yaw(np.asarray(cur_q, float))
+        dyaw = math.atan2(math.sin(dyaw), math.cos(dyaw))
+        if drift < 1e-3 and abs(dyaw) < 1e-4:
+            return
+        if drift > RETURN_SNAP_M:
+            self.say(f"[주행] 팔 베이스가 출발 자리에서 {drift*100:.1f}cm 떨어져 있다 "
+                     f"— {RETURN_SNAP_M*100:.0f}cm 를 넘어 손대지 않는다 (제자리 복귀가 아니다)")
+            return
+
+        # **자세까지 되돌린다.** 위치만 맞추면 팔 기준 좌표계가 돌아간 채로 남아,
+        # 칸마다 다른 만큼 어긋난다 (2026-09-21 실측: 책들은 월드에서 y 가 모두 같은데
+        # 팔 기준 y 는 0.0916→0.1030 으로 벌어졌다 = 팔 베이스가 4.3° 돌아감).
+        # 루트를 dyaw 만큼 돌린 뒤, 돌아간 상태에서 남는 위치 차이를 다시 메운다.
+        root_p, root_q = self.root.get_world_pose()
+        root_p = np.asarray(root_p, float)
+        root_q = np.asarray(root_q, float)
+        if abs(dyaw) > 1e-4:
+            self.root.set_world_pose(root_p, _quat_mul(_yaw_quat(dyaw), root_q))
+            # 회전은 루트를 중심으로 돌기 때문에 팔 베이스 위치가 함께 움직인다.
+            # 남은 위치 차이는 회전을 반영해 다시 계산한다
+            arm_off = cur_p[:2] - root_p[:2]
+            c, sn = math.cos(dyaw), math.sin(dyaw)
+            turned = np.array([c * arm_off[0] - sn * arm_off[1],
+                               sn * arm_off[0] + c * arm_off[1]])
+            off = self.home_arm[:2] - (root_p[:2] + turned)
+            root_p, root_q = self.root.get_world_pose()
+            root_p = np.asarray(root_p, float)
+        root_p[0] += off[0]
+        root_p[1] += off[1]
+        self.root.set_world_pose(root_p, np.asarray(root_q, float))
+        self.say(f"[주행] 팔 베이스 복귀 보정: 위치 {drift*100:.1f}cm, "
+                 f"자세 {math.degrees(dyaw):+.2f}° — 파지 기준을 출발 때와 같게 맞췄다")
+
     # ---------------------------------------------------------------- 매 스텝
     def spin(self):
         """한 시뮬 스텝. **world.step() 은 부르지 않는다.**"""
@@ -125,6 +210,21 @@ class NavigationExecutor:
         rclpy.spin_once(self.node, timeout_sec=0.0)
         while self.inbox:
             self.handle(self.inbox.pop(0))
+
+        if self.status == "settling":
+            self.settle -= 1
+            # 절반쯤에서 보정한다. **보정 뒤에도 스텝이 남아야 한다** — 트레이와 책은
+            # follow_tray 가 매 스텝 따라 붙이는데, 보정하자마자 '도착' 을 알리면
+            # 파지가 시작되며 job_active 로 추종이 멈춰, 트레이가 밀린 채 굳는다
+            # (2026-09-21 실측: 책이 기준보다 2.9 cm 남아 운반 중 3.1 cm 미끄러짐).
+            if self.settle == SETTLE_STEPS // 2:
+                self._realign_arm_base()
+            if self.settle <= 0:
+                self.status = "succeeded"
+                p, _ = self.root.get_world_pose()
+                self.say(f"[주행] 도착 ({float(p[0]):+.3f}, {float(p[1]):+.3f})")
+                self.publish(message="도착")
+            return
 
         if self.status != "running" or not self.route:
             return
@@ -144,13 +244,23 @@ class NavigationExecutor:
         dist = math.hypot(dx, dy)
 
         if dist <= ARRIVE_TOL_M:
+            # **목표점에 정확히 올려놓고 넘어간다.** 허용 오차 안이라고 그냥 멈추면
+            # 최대 5 cm 가 남는데, 그 오차는 베이스 기준 좌표를 쓰는 로봇팔에
+            # 그대로 전달돼 삽입을 깨뜨린다 (2026-09-21: 4.5 cm 남고 배치 검증 실패).
+            # 여기서는 자세를 직접 쓰므로 정확히 맞추는 데 드는 비용이 없다.
+            pos[0], pos[1] = tx, ty
+            self.root.set_world_pose(pos, quat)
             self.route.pop(0)
             done = self.legs - len(self.route)
             if not self.route:
-                self.status = "succeeded"
-                self.say(f"[주행] 도착 ({done}/{self.legs}) "
-                         f"({pos[0]:+.3f}, {pos[1]:+.3f})")
-                self.publish(message="도착")
+                # **바로 '도착' 이라고 하지 않는다.** 루트를 방금 옮겼을 뿐이라
+                # 관절로 매달린 몸통(=팔 베이스)은 아직 따라오지 않았다. 지금 읽으면
+                # 낡은 값으로 보정하게 된다. 몇 스텝 가라앉힌 뒤 맞추고 알린다 —
+                # 파지는 '도착' 을 보고 시작하므로 보정이 먼저 끝나야 한다.
+                self.status = "settling"
+                self.settle = SETTLE_STEPS
+                self.say(f"[주행] 마지막 점 도달 ({done}/{self.legs}) "
+                         f"({pos[0]:+.3f}, {pos[1]:+.3f}) — 자세가 가라앉기를 기다린다")
             else:
                 self.say(f"[주행] 경유점 {done}/{self.legs} 통과 "
                          f"({pos[0]:+.3f}, {pos[1]:+.3f})")

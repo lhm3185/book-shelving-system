@@ -15,7 +15,7 @@ PlaceBook 목표 검사와 시뮬 작업 명령 생성. ROS 에 의존하지 않
 1차 전제: 트레이 칸 좌표는 설정값(book_profiles.yaml)이다. 비전은 그림자 모드(동작에 쓰지 않음).
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -218,6 +218,40 @@ def validate_grasp(goal: PlaceGoal, tray_slots, limits: Optional[dict] = None) -
                          f'(칸 간격 {pitch*1000:.0f} mm, 손가락 바깥면 '
                          f'{finger_outer*1000:.1f} mm)')
     return Check(OK, '')
+
+
+def snap_grasp_to_slot(goal: PlaceGoal, tray_slots):
+    """
+    비전이 준 x 를 가장 가까운 트레이 칸 중심에 맞춘다 → (새 goal, 알린 글 또는 '').
+
+    왜 이렇게 하나: 트레이는 좌표를 **아는** 고정 지그다. 비전이 정할 것은
+    "몇 번 칸에 있는 책인가"이고, 그 칸의 정확한 x 는 지그 형상이 이미 알고 있다.
+    비전 x 는 실측에서 한 판마다 20 mm 까지 흔들렸는데(2026-09-21, 같은 장면에서
+    -0.3620 → -0.3424), 손가락 여유는 8.3 mm 뿐이라 그대로 쓰면 옆 책을 친다.
+
+    **칸 간격의 절반을 넘게 벗어나면 손대지 않는다.** 그때는 어느 칸인지 알 수 없고,
+    엉뚱한 칸으로 당겨 붙이면 옆 책을 집으러 간다 — validate_grasp 가 거절하게 둔다.
+    y·z 는 건드리지 않는다 — 칸을 가르는 축은 x 뿐이고, 설정의 칸 y 는 실제와 어긋난다.
+    """
+    g = goal.grasp
+    if g is None or not tray_slots or len(tray_slots) < 2:
+        return goal, ''
+    centers = sorted(sl.center[0] for sl in tray_slots)
+    pitch = min(b - a for a, b in zip(centers, centers[1:]))
+    slot = min(tray_slots, key=lambda sl: abs(sl.center[0] - g.top_center[0]))
+    dx = g.top_center[0] - slot.center[0]
+    if abs(dx) >= pitch / 2.0:
+        return goal, ''
+
+    # **y 는 건드리지 않는다.** 설정에 적힌 칸 중심 y 는 실제 책 위치와 1.3~2.4 cm
+    # 어긋나 있었고(2026-09-21 실측: 설정 0.0788, 실제 책 0.092~0.103), 거기로 당겼더니
+    # 그 자리에 책이 없다고 거절당했다(411). 이 축은 비전 쪽이 실제에 더 가깝다.
+    if abs(dx) < 1e-6:
+        return goal, ''
+    snapped = replace(g, top_center=(slot.center[0], g.top_center[1], g.top_center[2]))
+    return (replace(goal, grasp=snapped),
+            f'파지 x 를 칸 중심에 맞췄다: {g.top_center[0]:+.4f} → {slot.center[0]:+.4f} '
+            f'({dx * 1000:+.1f} mm, 칸 간격 {pitch * 1000:.0f} mm)')
 
 
 def grasp_pick_center(goal: PlaceGoal):

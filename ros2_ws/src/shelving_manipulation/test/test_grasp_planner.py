@@ -188,3 +188,61 @@ def test_command_contains_contract_fields():
     assert cmd['place']['center'] == list(VERIFIED)
     assert cmd['place']['yaw'] == pytest.approx(math.pi / 2)
     assert cmd['grip']['open_per_finger'] == pytest.approx(BOOK.thickness / 2 + 0.005)
+
+
+def _obs_goal(x):
+    """트레이 6칸 위에 선 책을 x 에서 봤다는 관측을 담은 목표."""
+    from shelving_manipulation.grasp_planner import GraspGoal
+    g = goal(book_width=BOOK.width, book_height=BOOK.height, book_thickness=BOOK.thickness)
+    slots = [TraySlot(i, (-0.6623 + 0.075 * i, 0.0788, 0.1119)) for i in range(6)]
+    top_z = 0.1119 + g.book_width / 2
+    return replace(g, grasp=GraspGoal(
+        frame_id='arm_base_link', top_center=(x, 0.0788, top_z),
+        spine_yaw=0.0, thickness=g.book_thickness, width=g.book_width,
+        confidence=0.9)), slots
+
+
+def test_snap_pulls_vision_x_onto_slot_centre():
+    """여유(8.3 mm)를 넘는 어긋남도 칸 중심으로 당겨 붙인다 — 트레이는 좌표를 아는 지그다."""
+    from shelving_manipulation.grasp_planner import snap_grasp_to_slot, validate_grasp
+    g, slots = _obs_goal(-0.3424)                    # 2026-09-21 실측, 칸 중심에서 19.9 mm
+    assert not validate_grasp(g, slots).ok           # 보정 전에는 거절당한다
+    fixed, note = snap_grasp_to_slot(g, slots)
+    assert fixed.grasp.top_center[0] == pytest.approx(-0.3623, abs=1e-9)
+    assert validate_grasp(fixed, slots).ok           # 보정 후에는 통과한다
+    assert '19.9 mm' in note
+
+
+def test_snap_leaves_y_and_z_alone():
+    """**y 는 건드리지 않는다.** 설정의 칸 y 는 실제 책 위치와 1.3~2.4 cm 어긋나 있었다.
+
+    거기로 당겼더니 "그 자리에 책이 없다"(411) 로 거절당했다 (2026-09-21 GPU PC).
+    이 축은 비전 관측이 실제에 더 가깝다.
+    """
+    from shelving_manipulation.grasp_planner import snap_grasp_to_slot
+    g, slots = _obs_goal(-0.3424)
+    off = replace(g, grasp=replace(g.grasp, top_center=(
+        -0.3424, 0.0788 + 0.044, g.grasp.top_center[2])))
+    fixed, _ = snap_grasp_to_slot(off, slots)
+    assert fixed.grasp.top_center[1:] == off.grasp.top_center[1:]
+
+
+def test_snap_does_not_move_beyond_half_pitch():
+    """**칸 간격 절반을 넘으면 손대지 않는다** — 어느 칸인지 알 수 없다.
+
+    엉뚱한 칸으로 당겨 붙이면 옆 책을 집으러 간다. 그때는 검사가 거절하게 둔다.
+    """
+    from shelving_manipulation.grasp_planner import snap_grasp_to_slot, validate_grasp
+    g, slots = _obs_goal(-0.5123 + 0.0375)           # 정확히 두 칸 사이
+    fixed, note = snap_grasp_to_slot(g, slots)
+    assert fixed is g and note == ''
+    assert not validate_grasp(fixed, slots).ok
+
+
+def test_snap_is_noop_without_observation():
+    """비전 관측이 없으면 아무 일도 하지 않는다 (1차 고정 칸 경로)."""
+    from shelving_manipulation.grasp_planner import snap_grasp_to_slot
+    g = goal()
+    slots = [TraySlot(i, (-0.6623 + 0.075 * i, 0.0788, 0.1119)) for i in range(6)]
+    assert snap_grasp_to_slot(g, slots) == (g, '')
+    assert snap_grasp_to_slot(g, []) == (g, '')
