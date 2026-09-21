@@ -15,7 +15,6 @@ from rclpy.qos import (
 )
 
 from shelving_interfaces.action import (
-    DetectTargetSlot,
     NavigateToTarget,
     PlaceBook,
 )
@@ -46,12 +45,6 @@ class TaskManagerNode(Node):
     ERROR_NAVIGATION_FAILED = 2003
     ERROR_NAVIGATION_RESULT = 2004
 
-    ERROR_PERCEPTION_SERVER = 3001
-    ERROR_PERCEPTION_REJECTED = 3002
-    ERROR_PERCEPTION_FAILED = 3003
-    ERROR_PERCEPTION_RESULT = 3004
-    ERROR_LOW_SLOT_CONFIDENCE = 3005
-
     ERROR_MANIPULATION_SERVER = 4001
     ERROR_MANIPULATION_REJECTED = 4002
     ERROR_MANIPULATION_FAILED = 4003
@@ -69,11 +62,7 @@ class TaskManagerNode(Node):
 
         self.declare_parameter("navigation_action", "/navigate_to_target")
 
-        self.declare_parameter('perception_action', '/detect_target_slot')
-        self.declare_parameter('minimum_slot_confidence', 0.70)
-
         self.declare_parameter('manipulation_action', '/place_book')
-        self.declare_parameter('insertion_speed',0.03)
 
         self.declare_parameter(
             "navigation_server_timeout_sec",
@@ -110,7 +99,6 @@ class TaskManagerNode(Node):
             self.get_parameter("navigation_action").value
         )
 
-        perception_action = str(self.get_parameter('perception_action').value)
         manipulation_action = str(self.get_parameter('manipulation_action').value)
 
         qos_profile = QoSProfile(
@@ -140,10 +128,6 @@ class TaskManagerNode(Node):
             navigation_action,
         )
         self._navigation_goal_handle = None
-
-        self._perception_client = ActionClient(self, DetectTargetSlot, perception_action)
-        self._perception_goal_handle = None
-        self._detected_target_slot = None
 
         self._manipulation_client = ActionClient(self, PlaceBook, manipulation_action)
         self._manipulation_goal_handle = None
@@ -190,10 +174,6 @@ class TaskManagerNode(Node):
         self.get_logger().info(
             "Navigation action client configured for "
             f"'{navigation_action}'."
-        )
-        self.get_logger().info(
-            "Perception action client configured for "
-            f"'{perception_action}'."
         )
         self.get_logger().info(
             "Manipulation action client configured for "
@@ -255,7 +235,6 @@ class TaskManagerNode(Node):
         self._current_plan = plan
         self._current_task_index = 0
         self._completed_book_ids.clear()
-        self._detected_target_slot = None
         self._active_job_id = plan.job_id
         self._accepted_job_ids.add(plan.job_id)
 
@@ -731,7 +710,6 @@ class TaskManagerNode(Node):
         self._current_plan = None
         self._current_task_index = 0
         self._completed_book_ids.clear()
-        self._detected_target_slot = None
         self._active_navigation_target_type = ""
         self._active_navigation_target_id = ""
 
@@ -760,266 +738,19 @@ class TaskManagerNode(Node):
             )
             return
 
-        self._fsm.transition(
-            SystemState.DETECT_TARGET_SLOT
-        )
+        self._fsm.transition(SystemState.PLACE_BOOK)
         self._status_message = (
             f"Arrived at shelf "
             f"'{self._active_navigation_target_id}'. "
-            "Waiting for empty-slot detection."
+            "Starting book placement."
         )
         self._publish_status()
 
         self.get_logger().info(
             "FSM transition completed: "
-            "NAV_TO_SHELF -> DETECT_TARGET_SLOT"
+            "NAV_TO_SHELF -> PLACE_BOOK"
         )
 
-        self._send_detect_target_slot_goal()
-
-    def _send_detect_target_slot_goal(self) -> None:
-        """Request empty-slot detection for the current book."""
-        if self._current_plan is None:
-            self._fail_perception(
-                error_code=self.ERROR_PERCEPTION_RESULT,
-                message="Current job plan does not exist.",
-            )
-            return
-
-        if self._current_task_index >= len(
-            self._current_plan.tasks
-        ):
-            self._fail_perception(
-                error_code=self.ERROR_PERCEPTION_RESULT,
-                message="No current book task is available.",
-            )
-            return
-
-        timeout_sec = self._data_manager.get_timeout(
-            "perception"
-        )
-
-        self.get_logger().info(
-            "Waiting for perception action server."
-        )
-
-        if not self._perception_client.wait_for_server(
-            timeout_sec=timeout_sec
-        ):
-            self._fail_perception(
-                error_code=self.ERROR_PERCEPTION_SERVER,
-                message=(
-                    "Perception action server is not "
-                    "available."
-                ),
-            )
-            return
-
-        task = self._current_plan.tasks[
-            self._current_task_index
-        ]
-        profile = task.book_profile
-
-        goal = DetectTargetSlot.Goal()
-        goal.job_id = task.job_id
-        goal.book_id = task.book_id
-        goal.shelf_id = task.shelf_id
-        goal.book_width = float(profile["width"])
-        goal.book_height = float(profile["height"])
-        goal.book_thickness = float(
-            profile["thickness"]
-        )
-        goal.safety_margin = float(
-            profile["safety_margin"]
-        )
-        goal.max_recaptures = (
-            self._data_manager.get_retry_limit(
-                "perception"
-            )
-        )
-
-        self.get_logger().info(
-            "Sending empty-slot detection goal: "
-            f"job_id={goal.job_id}, "
-            f"book_id={goal.book_id}, "
-            f"shelf_id={goal.shelf_id}, "
-            f"book_width={goal.book_width:.3f}, "
-            f"book_height={goal.book_height:.3f}, "
-            f"book_thickness={goal.book_thickness:.3f}"
-        )
-
-        send_goal_future = (
-            self._perception_client.send_goal_async(
-                goal,
-                feedback_callback=(
-                    self._handle_perception_feedback
-                ),
-            )
-        )
-        send_goal_future.add_done_callback(
-            self._handle_perception_goal_response
-        )
-
-    def _handle_perception_goal_response(
-        self,
-        future,
-    ) -> None:
-        """Handle acceptance of an empty-slot goal."""
-        try:
-            goal_handle = future.result()
-        except Exception as error:
-            self._fail_perception(
-                error_code=self.ERROR_PERCEPTION_RESULT,
-                message=(
-                    "Failed to send perception goal: "
-                    f"{error}"
-                ),
-            )
-            return
-
-        if goal_handle is None or not goal_handle.accepted:
-            self._fail_perception(
-                error_code=self.ERROR_PERCEPTION_REJECTED,
-                message=(
-                    "Perception action server rejected "
-                    "the goal."
-                ),
-            )
-            return
-
-        self._perception_goal_handle = goal_handle
-
-        self.get_logger().info(
-            "Empty-slot detection goal was accepted."
-        )
-
-        result_future = goal_handle.get_result_async()
-        result_future.add_done_callback(
-            self._handle_perception_result
-        )
-
-    def _handle_perception_feedback(
-        self,
-        feedback_message,
-    ) -> None:
-        """Handle empty-slot detection feedback."""
-        feedback = feedback_message.feedback
-
-        self._status_message = (
-            "Detecting empty slot: "
-            f"phase={feedback.phase}, "
-            f"candidates={feedback.candidate_count}, "
-            f"confidence={feedback.best_confidence:.2f}"
-        )
-        self._publish_status()
-
-        self.get_logger().info(
-            "Perception feedback: "
-            f"phase={feedback.phase}, "
-            f"candidate_count="
-            f"{feedback.candidate_count}, "
-            f"best_confidence="
-            f"{feedback.best_confidence:.2f}"
-        )
-
-    def _handle_perception_result(
-        self,
-        future,
-    ) -> None:
-        """Handle the detected target-slot result."""
-        try:
-            wrapped_result = future.result()
-            result = wrapped_result.result
-        except Exception as error:
-            self._fail_perception(
-                error_code=self.ERROR_PERCEPTION_RESULT,
-                message=(
-                    "Failed to receive perception result: "
-                    f"{error}"
-                ),
-            )
-            return
-
-        if not result.success:
-            error_code = int(result.error_code)
-
-            if error_code == 0:
-                error_code = self.ERROR_PERCEPTION_FAILED
-
-            self._fail_perception(
-                error_code=error_code,
-                message=(
-                    result.message
-                    or "Empty-slot detection failed."
-                ),
-            )
-            return
-
-        minimum_confidence = float(
-            self.get_parameter(
-                "minimum_slot_confidence"
-            ).value
-        )
-        confidence = float(
-            result.target_slot.confidence
-        )
-
-        if confidence < minimum_confidence:
-            self._fail_perception(
-                error_code=(
-                    self.ERROR_LOW_SLOT_CONFIDENCE
-                ),
-                message=(
-                    "Detected slot confidence is too low: "
-                    f"{confidence:.2f} < "
-                    f"{minimum_confidence:.2f}"
-                ),
-            )
-            return
-
-        if (
-            self._fsm.current_state
-            is not SystemState.DETECT_TARGET_SLOT
-        ):
-            self._fail_perception(
-                error_code=self.ERROR_PERCEPTION_RESULT,
-                message=(
-                    "Perception result received in "
-                    f"state '{self._fsm.current_state.name}'."
-                ),
-            )
-            return
-
-        self._perception_goal_handle = None
-        self._detected_target_slot = (
-            result.target_slot
-        )
-
-        target_slot = self._detected_target_slot
-
-        self.get_logger().info(
-            "Empty slot detected: "
-            f"frame_id={target_slot.header.frame_id}, "
-            f"x={target_slot.pose.position.x:.3f}, "
-            f"y={target_slot.pose.position.y:.3f}, "
-            f"z={target_slot.pose.position.z:.3f}, "
-            f"confidence={target_slot.confidence:.2f}, "
-            f"candidate_count={result.candidate_count}"
-        )
-
-        self._fsm.transition(
-            SystemState.PLACE_BOOK
-        )
-        self._status_message = (
-            "Empty slot detected. "
-            "Waiting to start book placement."
-        )
-        self._publish_status()
-
-        self.get_logger().info(
-            "FSM transition completed: "
-            "DETECT_TARGET_SLOT -> PLACE_BOOK"
-        )
         self._send_place_book_goal()
 
     def _send_place_book_goal(self) -> None:
@@ -1037,13 +768,6 @@ class TaskManagerNode(Node):
             self._fail_manipulation(
                 error_code=self.ERROR_MANIPULATION_RESULT,
                 message="No current book task is available.",
-            )
-            return
-
-        if self._detected_target_slot is None:
-            self._fail_manipulation(
-                error_code=self.ERROR_MANIPULATION_RESULT,
-                message="Detected target slot does not exist.",
             )
             return
 
@@ -1070,33 +794,13 @@ class TaskManagerNode(Node):
         task = self._current_plan.tasks[
             self._current_task_index
         ]
-        profile = task.book_profile
 
         goal = PlaceBook.Goal()
-        goal.job_id = task.job_id
-        goal.book_id = task.book_id
-        goal.target_slot = self._detected_target_slot
-        goal.book_width = float(profile["width"])
-        goal.book_height = float(profile["height"])
-        goal.book_thickness = float(
-            profile["thickness"]
-        )
-        goal.insertion_speed = float(
-            self.get_parameter(
-                "insertion_speed"
-            ).value
-        )
 
         self.get_logger().info(
-            "Sending book-placement goal: "
-            f"job_id={goal.job_id}, "
-            f"book_id={goal.book_id}, "
-            f"target_frame="
-            f"{goal.target_slot.header.frame_id}, "
-            f"insertion_depth="
-            f"{goal.target_slot.insertion_depth:.3f}, "
-            f"insertion_speed="
-            f"{goal.insertion_speed:.3f}"
+            "Sending book-placement command: "
+            f"book_id={task.book_id}, "
+            f"task_index={self._current_task_index}"
         )
 
         send_goal_future = (
@@ -1155,20 +859,18 @@ class TaskManagerNode(Node):
         self,
         feedback_message,
     ) -> None:
-        """Handle book-placement progress feedback."""
+        """Handle book-placement phase feedback."""
         feedback = feedback_message.feedback
 
         self._status_message = (
             "Placing book: "
-            f"phase={feedback.phase}, "
-            f"progress={feedback.progress:.2f}"
+            f"phase={feedback.phase}"
         )
         self._publish_status()
 
         self.get_logger().info(
             "Manipulation feedback: "
-            f"phase={feedback.phase}, "
-            f"progress={feedback.progress:.2f}"
+            f"phase={feedback.phase}"
         )
 
     def _handle_manipulation_result(
@@ -1189,10 +891,7 @@ class TaskManagerNode(Node):
             )
             return
 
-        if not (
-            result.success
-            and result.placement_verified
-        ):
+        if not result.success:
             error_code = int(result.error_code)
 
             if error_code == 0:
@@ -1202,12 +901,6 @@ class TaskManagerNode(Node):
                 result.message
                 or "Book placement failed."
             )
-
-            if result.failed_phase:
-                failure_description = (
-                    f"{failure_description} "
-                    f"failed_phase={result.failed_phase}"
-                )
 
             self._fail_manipulation(
                 error_code=error_code,
@@ -1296,8 +989,6 @@ class TaskManagerNode(Node):
             f"{len(self._current_plan.tasks)}"
         )
 
-        self._detected_target_slot = None
-
         self._fsm.transition(
             SystemState.NEXT_BOOK
         )
@@ -1347,21 +1038,6 @@ class TaskManagerNode(Node):
         message: str,
     ) -> None:
         """Move the FSM to FAILED after manipulation failure."""
-        self._fsm.fail(
-            error_code=error_code,
-            message=message,
-        )
-        self._status_message = message
-        self._publish_status()
-
-        self.get_logger().error(message)
-
-    def _fail_perception(
-        self,
-        error_code: int,
-        message: str,
-    ) -> None:
-        """Move the FSM to FAILED after perception failure."""
         self._fsm.fail(
             error_code=error_code,
             message=message,
@@ -1431,7 +1107,6 @@ class TaskManagerNode(Node):
             SystemState.RECEIVE_TRAY: 0.20,
             SystemState.SELECT_BOOK: 0.25,
             SystemState.NAV_TO_SHELF: 0.35,
-            SystemState.DETECT_TARGET_SLOT: 0.45,
             SystemState.PLACE_BOOK: 0.60,
             SystemState.UPDATE_DATA: 0.75,
             SystemState.NEXT_BOOK: 0.80,
@@ -1448,7 +1123,6 @@ class TaskManagerNode(Node):
     def destroy_node(self) -> None:
         """Destroy the action client and node."""
         self._navigation_client.destroy()
-        self._perception_client.destroy()
         self._manipulation_client.destroy()
         super().destroy_node()
 
