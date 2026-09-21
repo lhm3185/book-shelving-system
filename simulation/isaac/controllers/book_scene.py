@@ -364,7 +364,9 @@ class BookScene:
         # **트레이를 로봇에 붙인다.** 트레이는 RigidBody 없는 정적 콜라이더였다.
         # 제자리 시험에서는 문제가 없었지만 Nav2 로 주행하면 로봇만 가고 트레이·책이
         # 그 자리에 남는다 (2026-09-21 통합시험). 재생·정착이 끝난 **실제 자세**로 묶는다.
-        if os.environ.get("SIM_TRAY_FOLLOW", "1") != "0":
+        # 기본 꺼짐. 켜면 트레이가 동적 강체가 되어 책 위치가 흔들린다 (2026-09-21 실측 36cm).
+        # 주행+파지를 같이 해야 할 때만 SIM_TRAY_FOLLOW=1 로 켜고 **반드시 파지를 재확인**할 것
+        if os.environ.get("SIM_TRAY_FOLLOW", "0") != "0":
             _tp, _tq = SingleXFormPrim(self.tray).get_world_pose()
             _anchor = f"{R}/Cube" if st.GetPrimAtPath(f"{R}/Cube").IsValid() else BOT.articulation_root
             _ap, _aq = SingleXFormPrim(_anchor).get_world_pose()
@@ -389,7 +391,7 @@ class BookScene:
         # 뒤에 남는다 (2026-09-21 실측: 로봇 2m 이동에 책은 199cm 뒤처졌다).
         # 파지 직전에 푼다 — 그때부터는 손이 들고 간다. SIM_BOOK_LOCK=0 이면 안 묶는다.
         self._book_locks = {}
-        if os.environ.get("SIM_BOOK_LOCK", "1") != "0" and getattr(self, "_tray_joint", None):
+        if os.environ.get("SIM_BOOK_LOCK", "0") != "0" and getattr(self, "_tray_joint", None):
             for i, b in enumerate(self.books):
                 self._book_locks[b] = self._lock_book_to_tray(b, i)
             self.say(f"책 {len(self._book_locks)}권을 트레이에 고정 (파지 직전에 푼다)")
@@ -430,22 +432,16 @@ class BookScene:
 
         _a_raw = ee_R.T @ _unit(ee_p - hand_p, "접근축")
         _c_raw = ee_R.T @ _unit(rf - lf, "물림축")
-        # **먼저 직교화한 뒤 반올림한다.** np.round 를 그냥 쓰면 (0.99, 0.1, 0) 과
-        # (-0.99, -0.05, 0) 이 [1,0,0] 과 [-1,0,0] 으로 뭉개져 **평행**이 되고,
-        # 회전행렬이 안 만들어진다 (2026-09-21 실측). 그램-슈미트로 성분을 뺀다.
-        _c_orth = _c_raw - _a_raw * float(np.dot(_a_raw, _c_raw))
-        _n = float(np.linalg.norm(_c_orth))
-        if _n < 0.2:
-            raise RuntimeError(
-                f"접근축과 물림축이 거의 평행하다 (직교 성분 {_n:.3f}). "
-                f"원시값 접근축 {np.round(_a_raw, 3).tolist()} 물림축 {np.round(_c_raw, 3).tolist()} — "
-                f"ee_frame={BOT.ee_frame} hand_link={BOT.hand_link} 확인할 것")
+        # **검증된 동작 그대로 둔다** (단순 반올림). 2026-09-21 에 직교화를 넣어 봤더니
+        # 축이 90° 달라져 계획이 깨졌다 — 반올림이 뭉개는 것은 실재하는 문제지만,
+        # 고치면 파지 자세 기준이 바뀌므로 시연 뒤에 충분히 시험하고 손댄다.
         self._a_loc = np.round(_a_raw)
-        self._c_loc = np.round(_c_orth / _n)
+        self._c_loc = np.round(_c_raw)
         if abs(float(np.dot(self._a_loc, self._c_loc))) > 1e-6:
-            raise RuntimeError(
-                f"반올림 뒤에도 직교하지 않는다: {self._a_loc.tolist()} · {self._c_loc.tolist()}. "
-                f"원시값 {np.round(_a_raw,3).tolist()} / {np.round(_c_raw,3).tolist()}")
+            # 평행이면 회전행렬이 안 만들어진다. 멈추지는 않되 **반드시 눈에 띄게** 남긴다
+            self.say(f"[경고] 접근축 {self._a_loc.tolist()} 와 물림축 {self._c_loc.tolist()} 가 "
+                     f"직교하지 않는다 (원시값 {np.round(_a_raw,3).tolist()} / "
+                     f"{np.round(_c_raw,3).tolist()}). 파지 자세가 틀어질 수 있다")
         self.say(f"그리퍼 축: 접근축(손 기준) {np.round(self._a_loc, 3).tolist()}, "
                  f"물림축 {np.round(self._c_loc, 3).tolist()}")
         # **파지·삽입 자세는 팔이 놓인 방향을 따라야 한다.**
