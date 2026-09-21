@@ -206,10 +206,23 @@ class ManipulationExecutor:
                                         f"(기대 {_need * 100:.1f}cm 이상)")
                 elif self.gate is not None and self.sensor_policy == "gated":
                     self.gate.all(False, f"— 파지 확인 (책 상승 {job.watch['rise'] * 100:.1f}cm), 작업 끝까지")
-            if name in ("carry_rotate", "wedge") and "rel0" in job.watch \
+            # 추적할 때는 lift 구간도 잰다 — 어긋남이 **거기서** 생기는지 보기 위함이다
+            _trace = os.environ.get("SIM_TRACE_SLIP", "0") != "0"
+            _watch_names = ("lift", "carry_rotate", "wedge") if _trace else ("carry_rotate", "wedge")
+            if name in _watch_names and "rel0" in job.watch \
                     and job.state["status"] == SIM_RUNNING:
-                dev = float(np.linalg.norm(scene.book_in_hand(book) - job.watch["rel0"]))
-                if dev > 0.03:
+                _rel = scene.book_in_hand(book)
+                dev = float(np.linalg.norm(_rel - job.watch["rel0"]))
+                # **어긋남이 어떻게 커지는지 남긴다.** 갑자기 튀면 구속이 밀린 것이고,
+                # 서서히 자라면 미끄러지는 것이다 — 둘은 고치는 방법이 다르다.
+                # 값만 보고는 못 가른다 (2026-09-21: 책 원점을 고쳐도 4.7cm 로 똑같았다).
+                if _trace:
+                    job.watch.setdefault("slip", [])
+                    job.watch["slip"].append(dev)
+                    if len(job.watch["slip"]) % 3 == 1:
+                        self.say(f"[어긋남] step {job.steps} {name} {dev*100:.2f}cm "
+                                 f"손기준차 {[round(float(v)*100, 1) for v in (_rel - job.watch['rel0'])]}")
+                if dev > 0.03 and name != "lift":
                     arm.cancel()
                     self.finish(SIM_FAILED, error_code=406, message=f"운반 중 손 안에서 책 {dev * 100:.1f}cm 어긋남")
 
