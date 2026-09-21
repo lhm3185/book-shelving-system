@@ -428,12 +428,24 @@ class BookScene:
                     f"finger_links={BOT.finger_links} 를 확인할 것")
             return v / n
 
-        self._a_loc = np.round(ee_R.T @ _unit(ee_p - hand_p, "접근축"))
-        self._c_loc = np.round(ee_R.T @ _unit(rf - lf, "물림축"))
+        _a_raw = ee_R.T @ _unit(ee_p - hand_p, "접근축")
+        _c_raw = ee_R.T @ _unit(rf - lf, "물림축")
+        # **먼저 직교화한 뒤 반올림한다.** np.round 를 그냥 쓰면 (0.99, 0.1, 0) 과
+        # (-0.99, -0.05, 0) 이 [1,0,0] 과 [-1,0,0] 으로 뭉개져 **평행**이 되고,
+        # 회전행렬이 안 만들어진다 (2026-09-21 실측). 그램-슈미트로 성분을 뺀다.
+        _c_orth = _c_raw - _a_raw * float(np.dot(_a_raw, _c_raw))
+        _n = float(np.linalg.norm(_c_orth))
+        if _n < 0.2:
+            raise RuntimeError(
+                f"접근축과 물림축이 거의 평행하다 (직교 성분 {_n:.3f}). "
+                f"원시값 접근축 {np.round(_a_raw, 3).tolist()} 물림축 {np.round(_c_raw, 3).tolist()} — "
+                f"ee_frame={BOT.ee_frame} hand_link={BOT.hand_link} 확인할 것")
+        self._a_loc = np.round(_a_raw)
+        self._c_loc = np.round(_c_orth / _n)
         if abs(float(np.dot(self._a_loc, self._c_loc))) > 1e-6:
             raise RuntimeError(
-                f"접근축 {self._a_loc.tolist()} 와 물림축 {self._c_loc.tolist()} 가 직교하지 않는다. "
-                "np.round 가 축을 뭉갰거나 그리퍼가 비스듬히 달려 있다 — 회전행렬이 안 만들어진다")
+                f"반올림 뒤에도 직교하지 않는다: {self._a_loc.tolist()} · {self._c_loc.tolist()}. "
+                f"원시값 {np.round(_a_raw,3).tolist()} / {np.round(_c_raw,3).tolist()}")
         self.say(f"그리퍼 축: 접근축(손 기준) {np.round(self._a_loc, 3).tolist()}, "
                  f"물림축 {np.round(self._c_loc, 3).tolist()}")
         # **파지·삽입 자세는 팔이 놓인 방향을 따라야 한다.**
