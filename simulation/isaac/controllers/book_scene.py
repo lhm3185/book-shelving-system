@@ -45,6 +45,7 @@ SHELF_ROW_Z = float(os.environ.get("SIM_SHELF_ROW_Z", 0.355 * 1.4))
 BOOK_SRC = "/World/books/book_encyclopedia_set_01_2k__book_encyclopedia_set_01_book15"
 ARM_JOINTS = BOT.arm_joints
 FINGERS = BOT.grip_joints
+TRAY_FOLLOW_MIN_M = float(os.environ.get("SIM_TRAY_FOLLOW_MIN", "0.002"))
 DECK_Z = BOT.deck_z          # 트레이가 놓이는 면의 월드 높이 (로봇별)
 TIP_DOWN = 0.035            # 책등 윗면에서 손끝이 내려가 잡는 깊이
 GRIP_CLEAR = 0.005
@@ -215,9 +216,18 @@ class BookScene:
         self.tray_yaw = float(_yaw0)      # 파지·삽입 자세의 기준 방향
         say(f"트레이 배치: 팔 기준 {np.round(_tray_rel[:2], 4).tolist()} "
             f"→ 월드 {np.round(_tray_w[:2], 3).tolist()}, 면 z {DECK_Z:.3f}")
-        # 트레이를 로봇에 붙이는 일은 **world.reset() 뒤**에 한다 (아래 참조).
-        # 여기서 만들면 재생 전 자세로 기준이 잡혀 트레이가 4.5cm 내려앉았다 (2026-09-21 실측).
+        # **트레이를 키네마틱 강체로** 만든다. 동적 강체 + 고정 조인트로 묶어 봤더니
+        # 트레이가 흔들려 책이 칸에서 36cm 벗어났다 (2026-09-21 실측).
+        # 키네마틱은 물리가 밀지 못하고 우리가 매 스텝 자세를 준다 — 북엔드와 같은 방식이다.
+        # 기준 상대 자세는 재생·정착이 끝난 뒤에 잡는다 (아래).
         self._tray_joint = None
+        self._tray_anchor = None
+        self._tray_follow = os.environ.get("SIM_TRAY_FOLLOW", "1") != "0"
+        # **강체를 붙이지 않는다.** 키네마틱 강체로 만들어 봤더니 그리퍼 축 계산이
+        # `접근축 를 못 구한다 (길이 5.07e-07)` 로 죽었다 — ee_frame 과 hand_link 가
+        # 같은 자리로 나온다 (2026-09-21 실측, SIM_TRAY_FOLLOW=0 이면 정상).
+        # 트레이는 정적 콜라이더 그대로 두고 자세만 매 스텝 옮긴다. 그 위의 책은
+        # 마찰에 기대지 않고 follow_tray() 가 같은 변위로 직접 옮긴다.
 
         pitch = nslots = floor_top = None
         # **진단용 스위치.** SIM_TRAY_COLLIDER=0 이면 트레이 콜라이더를 안 붙인다.
@@ -361,32 +371,6 @@ class BookScene:
         for _ in range(120):
             self.world.step(render=False)
 
-        # **트레이를 로봇에 붙인다.** 트레이는 RigidBody 없는 정적 콜라이더였다.
-        # 제자리 시험에서는 문제가 없었지만 Nav2 로 주행하면 로봇만 가고 트레이·책이
-        # 그 자리에 남는다 (2026-09-21 통합시험). 재생·정착이 끝난 **실제 자세**로 묶는다.
-        # 기본 꺼짐. 켜면 트레이가 동적 강체가 되어 책 위치가 흔들린다 (2026-09-21 실측 36cm).
-        # 주행+파지를 같이 해야 할 때만 SIM_TRAY_FOLLOW=1 로 켜고 **반드시 파지를 재확인**할 것
-        if os.environ.get("SIM_TRAY_FOLLOW", "0") != "0":
-            _tp, _tq = SingleXFormPrim(self.tray).get_world_pose()
-            _anchor = f"{R}/Cube" if st.GetPrimAtPath(f"{R}/Cube").IsValid() else BOT.articulation_root
-            _ap, _aq = SingleXFormPrim(_anchor).get_world_pose()
-            _Ra = R_from_quat(np.asarray(_aq, float))
-            _rel_p = _Ra.T @ (np.asarray(_tp, float) - np.asarray(_ap, float))
-            _rel_q = quat_from_R(_Ra.T @ R_from_quat(np.asarray(_tq, float)))
-            _tprim = st.GetPrimAtPath(self.tray)
-            UsdPhysics.RigidBodyAPI.Apply(_tprim)
-            UsdPhysics.MassAPI.Apply(_tprim).CreateMassAttr().Set(2.0)
-            _j = UsdPhysics.FixedJoint.Define(st, "/World/bs_tray_joint")
-            _j.CreateBody0Rel().SetTargets([_anchor])
-            _j.CreateBody1Rel().SetTargets([self.tray])
-            _j.CreateLocalPos0Attr().Set(Gf.Vec3f(*[float(v) for v in _rel_p]))
-            _j.CreateLocalRot0Attr().Set(Gf.Quatf(float(_rel_q[0]), Gf.Vec3f(*[float(v) for v in _rel_q[1:]])))
-            _j.CreateLocalPos1Attr().Set(Gf.Vec3f(0, 0, 0))
-            _j.CreateLocalRot1Attr().Set(Gf.Quatf(1, Gf.Vec3f(0, 0, 0)))
-            _j.CreateExcludeFromArticulationAttr().Set(True)
-            self._tray_joint = "/World/bs_tray_joint"
-            self.say(f"트레이를 로봇에 고정: {os.path.basename(_anchor)} ↔ bs_tray (주행해도 따라온다)")
-
         # **책도 트레이에 묶는다.** 트레이만 로봇에 붙이면 주행할 때 책은 얹혀만 있어서
         # 뒤에 남는다 (2026-09-21 실측: 로봇 2m 이동에 책은 199cm 뒤처졌다).
         # 파지 직전에 푼다 — 그때부터는 손이 들고 간다. SIM_BOOK_LOCK=0 이면 안 묶는다.
@@ -470,6 +454,38 @@ class BookScene:
         seed[0] = math.atan2(self.tray_center_w[1] - l0p[1], self.tray_center_w[0] - l0p[0])
         self.q_home, ok = self.ik_joints(self.home_tip, self.DOWN, seed)
         self.open_tray = self.T_max / 2 + GRIP_CLEAR
+        # 트레이 추종은 **__init__ 맨 마지막**에 설정한다. 그리퍼 축 계산보다 앞에 두었더니
+        # ee_frame 과 hand_link 가 같은 자리로 나와 '접근축 를 못 구한다' 로 죽었다 (2026-09-21 실측).
+        # 재생·정착이 끝난 **실제 자세**로 로봇↔트레이 상대 변환을 잡는다.
+        # 이후 매 스텝 follow_tray() 가 이 관계를 유지한다 → 주행해도 트레이가 따라온다.
+        if self._tray_follow:
+            _anchor = f"{R}/Cube" if st.GetPrimAtPath(f"{R}/Cube").IsValid() else BOT.articulation_root
+            _ap, _aq = SingleXFormPrim(_anchor).get_world_pose()
+            _tp, _tq = SingleXFormPrim(self.tray).get_world_pose()
+            _Ra = R_from_quat(np.asarray(_aq, float))
+            self._tray_anchor = _anchor
+            self._tray_rel_p = _Ra.T @ (np.asarray(_tp, float) - np.asarray(_ap, float))
+            self._tray_rel_R = _Ra.T @ R_from_quat(np.asarray(_tq, float))
+            # **트레이 위 책은 self.books 전부다** — 이 장면이 트레이 칸에 직접 놓은 것들이다.
+            # 기하로 판정해 봤더니 6권 중 1권만 걸렸다 (2026-09-21 실측). 판정할 것이 아니라
+            # 아는 것이다. 서가에 꽂힌 책은 애초에 self.books 가 아니고,
+            # 파지한 책은 attach() 에서 빠진다.
+            _Rt = R_from_quat(np.asarray(_tq, float))
+            self._tray_books = {}
+            for _bk in self.books:
+                _bp, _bq = SingleXFormPrim(_bk).get_world_pose()
+                self._tray_books[_bk] = (
+                    _Rt.T @ (np.asarray(_bp, float) - np.asarray(_tp, float)),
+                    _Rt.T @ R_from_quat(np.asarray(_bq, float)))
+            self.say(f"트레이 위 책 {len(self._tray_books)}/{len(self.books)}권을 같이 옮긴다")
+            self.say(f"트레이가 로봇을 따라간다: {os.path.basename(_anchor)} ↔ bs_tray (키네마틱)")
+            # world.step() 을 부르는 곳이 셋이다 (run_simulation, manipulation_executor 2군데).
+            # 물리 콜백에 물리면 어디서 돌리든 한 번씩만 불린다.
+            try:
+                self.world.add_physics_callback("bs_tray_follow", lambda _dt: self.follow_tray())
+            except Exception as exc:     # noqa: BLE001
+                self.say(f"[경고] 트레이 추종 콜백 등록 실패 — 주행하면 트레이가 뒤에 남는다: {exc}")
+
         say(f"장면 준비: 트레이 칸 {nslots}개, 책 {len(self.books)}권, 원본 {len(sources)}종, 홈 IK {ok}")
         for b in self.books:
             t, ln, w = self.dims[b]
@@ -565,6 +581,23 @@ class BookScene:
                 hits.append(f"link_{i} 반경18cm: " + ", ".join(x[:46] for x in out[:4]))
         return ("[진단] 팔 주변 물체 — " + " | ".join(hits)) if hits else "[진단] 팔 주변에 바깥 물체 없음"
 
+    def refresh_base(self):
+        """팔 베이스의 **지금** 월드 자세를 다시 읽어 IK·좌표 계약에 반영한다.
+
+        왜 필요한가: 시작할 때 한 번 읽은 값을 그대로 쓰면, AMR 이 주행한 만큼
+        **IK 목표도 계약 변환도 통째로 어긋난다** (2026-09-21 확인). 주행과 파지를
+        같이 하려면 작업을 계획하기 전에 매번 다시 읽어야 한다.
+
+        돌려주는 값: 지난번 기준점에서 팔 베이스가 움직인 거리 (m).
+        """
+        l0p, l0q = SingleXFormPrim(BASE_LINK).get_world_pose()
+        l0p = np.asarray(l0p, float)
+        moved = float(np.linalg.norm(l0p - self.l0p))
+        self.l0p = l0p
+        self.Rl0 = R_from_quat(np.asarray(l0q, float))
+        self.lula.set_robot_base_pose(l0p, np.asarray(l0q, float))
+        return moved
+
     def to_world(self, p_arm):
         return self.l0p + self.Rl0 @ np.asarray(p_arm, float)
 
@@ -634,6 +667,9 @@ class BookScene:
     # ---------------------------------------------------------------- 계획
     def plan_job(self, book, place_center_world):
         """책 하나를 집어, 꽂힌 뒤 AABB 중심이 place_center_world 가 되도록 꽂는 경로. 홈 → 홈"""
+        moved = self.refresh_base()
+        if moved > 0.01:
+            self.say(f"팔 베이스가 {moved*100:.1f}cm 움직였다 — IK 기준을 다시 잡았다")
         bb = self.aabb(book); bc = (bb[:3] + bb[3:]) / 2
         T, Lb, W = self.dims.get(book, (self.T, self.L, self.W))
         DOWN, HORIZ = self.DOWN, self.HORIZ
@@ -777,6 +813,43 @@ class BookScene:
         self.say(f"  [{tag}] {book.rsplit('/', 1)[1]} 중심 {np.round(c, 3).tolist()} "
                  f"크기 {np.round([b[3] - b[0], b[4] - b[1], b[5] - b[2]], 3).tolist()}")
 
+    def follow_tray(self):
+        """트레이(와 트레이 위 책)를 로봇에 붙어 있게 유지한다. 매 스텝 부른다.
+
+        왜 이렇게 하나: 트레이는 로봇의 **형제 prim** 이라 로봇이 주행해도 따라오지 않는다.
+        고정 조인트로 묶으면 트레이가 흔들려 책이 칸에서 벗어났다 — 키네마틱으로 직접 옮긴다.
+        책은 손에 들려 있지 않은 것만 **트레이와 같은 변위**로 옮긴다 (미끄러짐 방지).
+        """
+        if not getattr(self, "_tray_anchor", None):
+            return
+        # **작업 중에는 아무것도 옮기지 않는다.** 팔이 움직이면 그 반작용으로 베이스가
+        # 흔들리는데, 그때마다 트레이를 순간이동시키면 그 위의 책이 밀려 파지가 깨진다
+        # (실측: 책만 얼렸을 때 상승 3.2~4.1cm, 기준 5.0cm 미달).
+        # 작업 중에는 AMR 이 서 있으므로 따라갈 것도 없다.
+        if getattr(self, "job_active", False):
+            return
+        ap, aq = SingleXFormPrim(self._tray_anchor).get_world_pose()
+        Ra = R_from_quat(np.asarray(aq, float))
+        want_p = np.asarray(ap, float) + Ra @ self._tray_rel_p
+        want_R = Ra @ self._tray_rel_R
+        cur_p, _ = SingleXFormPrim(self.tray).get_world_pose()
+        # **서 있을 때는 손대지 않는다.** 베이스는 가만히 있어도 미세하게 떨리는데,
+        # 그 떨림마다 책을 순간이동시키면 파지를 방해한다 — 들어 올려도 책이 안 따라오고
+        # `405 책 상승 -2.1cm` 로 죽었다 (2026-09-21 A/B 실측, 추종 OFF 는 406 까지 갔다).
+        # 주행은 0.3 m/s 기준 한 스텝에 5 mm 라 이 문턱을 넉넉히 넘는다.
+        if float(np.linalg.norm(want_p - np.asarray(cur_p, float))) < TRAY_FOLLOW_MIN_M:
+            return
+        want_q = quat_from_R(want_R)
+        SingleXFormPrim(self.tray).set_world_pose(want_p, want_q)
+        # 기록해 둔 책을 트레이와 **같은 강체처럼** 옮긴다 (마찰에 기대지 않는다).
+        # 잡고 있는 책은 손이 들고 가므로 건드리지 않는다.
+        held = getattr(self, "_held_book", None)
+        for b, (rel_p, rel_R) in self._tray_books.items():
+            if b == held:
+                continue
+            SingleXFormPrim(b).set_world_pose(want_p + want_R @ rel_p,
+                                              quat_from_R(want_R @ rel_R))
+
     def _lock_book_to_tray(self, book, i):
         """주행 중에 책이 트레이 위에서 미끄러지지 않게 고정 조인트로 묶는다"""
         tp, tq = SingleXFormPrim(self.tray).get_world_pose()
@@ -807,6 +880,8 @@ class BookScene:
         # 고정 조인트로 붙이기 직전에 세운 자세로 맞춘다 (자세만, 위치는 그대로).
         # 트레이 고정을 **먼저 푼다.** 안 풀면 트레이 조인트와 손 조인트가 서로 당긴다
         self.unlock_book(book)
+        self._held_book = book      # follow_tray() 가 이 책은 안 건드린다
+        getattr(self, "_tray_books", {}).pop(book, None)   # 놓은 뒤에는 서가에 있어야 한다
         if book in self.upright_q:
             p_now = SingleXFormPrim(book).get_world_pose()[0]
             SingleXFormPrim(book).set_world_pose(np.asarray(p_now, float), self.upright_q[book])
@@ -820,6 +895,7 @@ class BookScene:
         j.CreateExcludeFromArticulationAttr().Set(True)
 
     def detach(self):
+        self._held_book = None
         if self.stage.GetPrimAtPath(GRASP_JOINT).IsValid():
             self.stage.RemovePrim(GRASP_JOINT)
 
