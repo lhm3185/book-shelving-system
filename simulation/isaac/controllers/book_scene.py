@@ -1274,6 +1274,17 @@ class BookScene:
         self.say(f"  [{tag}] {book.rsplit('/', 1)[1]} 중심 {np.round(c, 3).tolist()} "
                  f"크기 {np.round([b[3] - b[0], b[4] - b[1], b[5] - b[2]], 3).tolist()}")
 
+    def rebase_tray_to(self, world_p, world_q):
+        """다음 스텝에 **트레이를 이 월드 자세에 그대로 두고**, 앵커와의 관계만 다시 잡는다.
+
+        주행 복귀 보정이 부르는 것이다. 보정은 루트를 옮겨 팔 베이스를 출발 자리에 맞추는데,
+        트레이 앵커(차체)도 함께 끌려간다. 그러면 추종이 트레이를 따라 옮겨 **칸 중심에
+        정확히 있던 책이 밀린다** (2026-09-21 실측: 트레이 월드 6.1 cm, 책 팔기준 5.4 cm
+        → 운반 중 406). 보정 전 트레이는 이미 출발 팔 기준 칸 중심에 있으므로,
+        **트레이는 두고 관계만 갱신**하면 보정 뒤에도 칸 중심이 유지된다.
+        """
+        self._rebase_tray_to = (np.asarray(world_p, float), np.asarray(world_q, float))
+
     def follow_tray(self):
         """트레이(와 트레이 위 책)를 로봇에 붙어 있게 유지한다. 매 스텝 부른다.
 
@@ -1291,6 +1302,16 @@ class BookScene:
             return
         ap, aq = SingleXFormPrim(self._tray_anchor).get_world_pose()
         Ra = R_from_quat(np.asarray(aq, float))
+        # 복귀 보정이 요청했으면 **트레이는 두고 관계만 다시 잡는다** (rebase_tray_to 참조)
+        rebase = getattr(self, "_rebase_tray_to", None)
+        if rebase is not None:
+            self._rebase_tray_to = None
+            tp, tq = rebase
+            self._tray_rel_p = Ra.T @ (tp - np.asarray(ap, float))
+            self._tray_rel_R = Ra.T @ R_from_quat(tq)
+            self.say(f"[추종] 복귀 보정 뒤 트레이를 보정 전 자리에 고정: "
+                     f"{np.round(tp, 4).tolist()}")
+            return
         want_p = np.asarray(ap, float) + Ra @ self._tray_rel_p
         want_R = Ra @ self._tray_rel_R
         cur_p, _ = SingleXFormPrim(self.tray).get_world_pose()

@@ -215,6 +215,14 @@ class NavigationExecutor:
         # 팔 기준 y 는 0.0916→0.1030 으로 벌어졌다 = 팔 베이스가 4.3° 돌아감).
         # 루트를 dyaw 만큼 돌린 뒤, 돌아간 상태에서 남는 위치 차이를 다시 메운다.
         self._snapshot("보정전")
+        # **보정 전 트레이 자세를 붙잡아 둔다.** 보정은 루트를 옮기므로 트레이 앵커(차체)가
+        # 함께 끌려가고, 추종이 트레이를 따라 옮겨 칸 중심에 있던 책이 밀린다.
+        # 보정 전 트레이는 이미 출발 팔 기준 칸 중심에 있으니 그 자리에 두게 한다
+        try:
+            _tp, _tq = SingleXFormPrim(self.scene.tray).get_world_pose()
+            self.scene.rebase_tray_to(_tp, _tq)
+        except Exception as exc:      # noqa: BLE001 - 보정이 이것 때문에 멈추면 안 된다
+            self.say(f"[주행] 트레이 자세를 못 붙잡았다: {type(exc).__name__}: {exc}")
         root_p, root_q = self.root.get_world_pose()
         root_p = np.asarray(root_p, float)
         root_q = np.asarray(root_q, float)
