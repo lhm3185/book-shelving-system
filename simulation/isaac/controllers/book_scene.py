@@ -386,6 +386,15 @@ class BookScene:
         for _ in range(120):
             self.world.step(render=False)
 
+        # **책도 트레이에 묶는다.** 트레이만 로봇에 붙이면 주행할 때 책은 얹혀만 있어서
+        # 뒤에 남는다 (2026-09-21 실측: 로봇 2m 이동에 책은 199cm 뒤처졌다).
+        # 파지 직전에 푼다 — 그때부터는 손이 들고 간다. SIM_BOOK_LOCK=0 이면 안 묶는다.
+        self._book_locks = {}
+        if os.environ.get("SIM_BOOK_LOCK", "1") != "0" and getattr(self, "_tray_joint", None):
+            for i, b in enumerate(self.books):
+                self._book_locks[b] = self._lock_book_to_tray(b, i)
+            self.say(f"책 {len(self._book_locks)}권을 트레이에 고정 (파지 직전에 푼다)")
+
         l0p, l0q = SingleXFormPrim(BASE_LINK).get_world_pose()
         self.l0p = np.asarray(l0p, float); self.Rl0 = R_from_quat(np.asarray(l0q, float))
         if BOT.lula[0] == "supported":
@@ -761,10 +770,36 @@ class BookScene:
         self.say(f"  [{tag}] {book.rsplit('/', 1)[1]} 중심 {np.round(c, 3).tolist()} "
                  f"크기 {np.round([b[3] - b[0], b[4] - b[1], b[5] - b[2]], 3).tolist()}")
 
+    def _lock_book_to_tray(self, book, i):
+        """주행 중에 책이 트레이 위에서 미끄러지지 않게 고정 조인트로 묶는다"""
+        tp, tq = SingleXFormPrim(self.tray).get_world_pose()
+        bp, bq = SingleXFormPrim(book).get_world_pose()
+        Rt = R_from_quat(np.asarray(tq, float))
+        rel_p = Rt.T @ (np.asarray(bp, float) - np.asarray(tp, float))
+        rel_q = quat_from_R(Rt.T @ R_from_quat(np.asarray(bq, float)))
+        path = f"/World/bs_book_locks/lock_{i}"
+        j = UsdPhysics.FixedJoint.Define(self.stage, path)
+        j.CreateBody0Rel().SetTargets([self.tray])
+        j.CreateBody1Rel().SetTargets([book])
+        j.CreateLocalPos0Attr().Set(Gf.Vec3f(*[float(v) for v in rel_p]))
+        j.CreateLocalRot0Attr().Set(Gf.Quatf(float(rel_q[0]), Gf.Vec3f(*[float(v) for v in rel_q[1:]])))
+        j.CreateLocalPos1Attr().Set(Gf.Vec3f(0, 0, 0))
+        j.CreateLocalRot1Attr().Set(Gf.Quatf(1, Gf.Vec3f(0, 0, 0)))
+        j.CreateExcludeFromArticulationAttr().Set(True)
+        return path
+
+    def unlock_book(self, book):
+        """그 책의 트레이 고정을 푼다. 손이 들기 직전에 부른다"""
+        path = self._book_locks.pop(book, None) if hasattr(self, "_book_locks") else None
+        if path and self.stage.GetPrimAtPath(path).IsValid():
+            self.stage.RemovePrim(path)
+
     def attach(self, book):
         """파지 순간 손과 책을 고정 조인트로 붙인다 (지침 허용 방식, 마찰 파지는 손목 회전에서 실패 확인)"""
         # 트레이에서 몇 도 기운 채로 잡으면 그 기울기가 그대로 서가까지 간다 (꽂힘 판정 실패).
         # 고정 조인트로 붙이기 직전에 세운 자세로 맞춘다 (자세만, 위치는 그대로).
+        # 트레이 고정을 **먼저 푼다.** 안 풀면 트레이 조인트와 손 조인트가 서로 당긴다
+        self.unlock_book(book)
         if book in self.upright_q:
             p_now = SingleXFormPrim(book).get_world_pose()[0]
             SingleXFormPrim(book).set_world_pose(np.asarray(p_now, float), self.upright_q[book])
