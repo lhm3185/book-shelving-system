@@ -213,18 +213,37 @@ def test_snap_pulls_vision_x_onto_slot_centre():
     assert '19.9 mm' in note
 
 
-def test_snap_leaves_y_and_z_alone():
-    """**y 는 건드리지 않는다.** 설정의 칸 y 는 실제 책 위치와 1.3~2.4 cm 어긋나 있었다.
-
-    거기로 당겼더니 "그 자리에 책이 없다"(411) 로 거절당했다 (2026-09-21 GPU PC).
-    이 축은 비전 관측이 실제에 더 가깝다.
-    """
+def test_snap_leaves_y_alone_by_default():
+    """기본값에서는 y 를 건드리지 않는다 — 아직 검증 전인 보정이다."""
     from shelving_manipulation.grasp_planner import snap_grasp_to_slot
     g, slots = _obs_goal(-0.3424)
     off = replace(g, grasp=replace(g.grasp, top_center=(
         -0.3424, 0.0788 + 0.044, g.grasp.top_center[2])))
     fixed, _ = snap_grasp_to_slot(off, slots)
     assert fixed.grasp.top_center[1:] == off.grasp.top_center[1:]
+
+
+def test_snap_y_when_switch_on():
+    """`snap_grasp_y` 를 켜면 y 도 칸 중심으로 맞춘다."""
+    from shelving_manipulation.grasp_planner import snap_grasp_to_slot
+    g, slots = _obs_goal(-0.3424)
+    off = replace(g, grasp=replace(g.grasp, top_center=(
+        -0.3424, 0.0788 + 0.044, g.grasp.top_center[2])))
+    fixed, note = snap_grasp_to_slot(off, slots, {'snap_grasp_y': True})
+    assert fixed.grasp.top_center[1] == pytest.approx(0.0788, abs=1e-9)
+    assert '+44.0 mm' in note
+
+
+def test_snap_y_keeps_z_and_respects_half_book():
+    """켜져 있어도 z 는 그대로고, 책 길이 절반을 넘는 y 는 손대지 않는다."""
+    from shelving_manipulation.grasp_planner import snap_grasp_to_slot
+    g, slots = _obs_goal(-0.3623)
+    far = replace(g, grasp=replace(g.grasp, top_center=(
+        -0.3623, 0.0788 + 0.13, g.grasp.top_center[2])))
+    fixed, note = snap_grasp_to_slot(far, slots, {'snap_grasp_y': True})
+    assert fixed.grasp.top_center[1] == pytest.approx(0.0788 + 0.13, abs=1e-9)
+    assert fixed.grasp.top_center[2] == far.grasp.top_center[2]
+    assert note == ''
 
 
 def test_snap_does_not_move_beyond_half_pitch():

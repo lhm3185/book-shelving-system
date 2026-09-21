@@ -107,6 +107,11 @@ DEFAULT_LIMITS = {
     # 0.45 → 0.55: M0609 는 팔 베이스가 높아 꽂는 단이 팔 기준 0.5097 이다 (manipulation.yaml 과 같이 유지).
     # 이 값이 계약 좌표를 담는지는 test/test_contract_coords.py 가 지킨다
     'place_region_max': [-0.22, 0.65, 0.55],
+    # 파지 y 를 칸 중심에 맞출 것인가. **기본 꺼짐 — 아직 검증 전이다.**
+    # 근거: 9/21 에 '설정 칸 y 가 실제와 어긋난다' 며 껐는데, 그 측정이 좌표계가
+    # 4.36° 돌아간 상태에서 읽은 값이었다. 기울기를 걷어내면 칸별 퍼짐이 0 이다.
+    # 복귀 보정이 들어간 지금 다시 재 봐야 한다 (A/B 용 스위치).
+    'snap_grasp_y': False,
 }
 
 
@@ -220,7 +225,7 @@ def validate_grasp(goal: PlaceGoal, tray_slots, limits: Optional[dict] = None) -
     return Check(OK, '')
 
 
-def snap_grasp_to_slot(goal: PlaceGoal, tray_slots):
+def snap_grasp_to_slot(goal: PlaceGoal, tray_slots, limits: Optional[dict] = None):
     """
     비전이 준 x 를 가장 가까운 트레이 칸 중심에 맞춘다 → (새 goal, 알린 글 또는 '').
 
@@ -231,8 +236,10 @@ def snap_grasp_to_slot(goal: PlaceGoal, tray_slots):
 
     **칸 간격의 절반을 넘게 벗어나면 손대지 않는다.** 그때는 어느 칸인지 알 수 없고,
     엉뚱한 칸으로 당겨 붙이면 옆 책을 집으러 간다 — validate_grasp 가 거절하게 둔다.
-    y·z 는 건드리지 않는다 — 칸을 가르는 축은 x 뿐이고, 설정의 칸 y 는 실제와 어긋난다.
+    z 는 건드리지 않는다 (높이는 책 규격에서 나오고 validate_grasp 가 따로 검사한다).
+    y 는 `snap_grasp_y` 가 켜졌을 때만 맞춘다.
     """
+    lim = _merged(limits)
     g = goal.grasp
     if g is None or not tray_slots or len(tray_slots) < 2:
         return goal, ''
@@ -243,15 +250,26 @@ def snap_grasp_to_slot(goal: PlaceGoal, tray_slots):
     if abs(dx) >= pitch / 2.0:
         return goal, ''
 
-    # **y 는 건드리지 않는다.** 설정에 적힌 칸 중심 y 는 실제 책 위치와 1.3~2.4 cm
-    # 어긋나 있었고(2026-09-21 실측: 설정 0.0788, 실제 책 0.092~0.103), 거기로 당겼더니
-    # 그 자리에 책이 없다고 거절당했다(411). 이 축은 비전 쪽이 실제에 더 가깝다.
-    if abs(dx) < 1e-6:
+    # y 는 **스위치가 켜졌을 때만** 맞춘다 (`snap_grasp_y`). 9/21 에 한 번 껐는데,
+    # 끈 근거였던 측정이 좌표계가 4.36° 돌아간 상태에서 읽은 값이었다 —
+    # 기울기를 걷어내면 칸별 퍼짐이 0 이므로 '칸마다 어긋난다' 는 틀린 결론이었다.
+    # 복귀 보정이 들어간 지금 다시 재야 해서 A/B 스위치로 둔다.
+    dy = 0.0
+    new_y = g.top_center[1]
+    if lim['snap_grasp_y']:
+        dy = g.top_center[1] - slot.center[1]
+        # 책 길이의 절반을 넘게 벗어났으면 그 책을 보고 있는 것이 아니다 — 손대지 않는다
+        y_limit = goal.book_height / 2.0 if goal.book_height > 0 else 0.10
+        if abs(dy) < y_limit:
+            new_y = slot.center[1]
+
+    if abs(dx) < 1e-6 and new_y == g.top_center[1]:
         return goal, ''
-    snapped = replace(g, top_center=(slot.center[0], g.top_center[1], g.top_center[2]))
+    snapped = replace(g, top_center=(slot.center[0], new_y, g.top_center[2]))
+    moved_y = '' if new_y == g.top_center[1] else f', y {dy * 1000:+.1f} mm'
     return (replace(goal, grasp=snapped),
-            f'파지 x 를 칸 중심에 맞췄다: {g.top_center[0]:+.4f} → {slot.center[0]:+.4f} '
-            f'({dx * 1000:+.1f} mm, 칸 간격 {pitch * 1000:.0f} mm)')
+            f'파지 좌표를 칸 중심에 맞췄다: x {g.top_center[0]:+.4f} → {slot.center[0]:+.4f} '
+            f'({dx * 1000:+.1f} mm{moved_y}, 칸 간격 {pitch * 1000:.0f} mm)')
 
 
 def grasp_pick_center(goal: PlaceGoal):

@@ -229,7 +229,7 @@ class ManipulationNode(Node):
         if check.ok:
             # **검사 전에** 비전 x 를 칸 중심에 맞춘다 — 트레이는 좌표를 아는 고정 지그다.
             # 비전이 정하는 것은 몇 번 칸인가이고, 그 칸의 x 는 지그가 이미 안다
-            goal, note = snap_grasp_to_slot(goal, self.tray_slots)
+            goal, note = snap_grasp_to_slot(goal, self.tray_slots, self.limits)
             if note:
                 self.get_logger().info(note)
             # 계약 §5 — 틀린 점을 경계에서 잡는다. 특히 "윗면 높이가 책 규격과 맞는가"
