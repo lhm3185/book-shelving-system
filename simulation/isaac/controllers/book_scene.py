@@ -788,7 +788,13 @@ class BookScene:
         """
         if not BRANCH_GUARD:
             return True
-        if self.elbow_branch(q) != "up":
+        br = self.elbow_branch(q)
+        if br is None:
+            # **판정할 수 없으면 통과시킨다.** Franka 는 link_2/3/5 라는 프레임이 없어서
+            # 늘 None 이 나온다 — 여기서 False 를 주면 **모든 IK 해가 거절되어 Franka 가
+            # 통째로 멈춘다.** 가지 문제는 6축(해가 8개뿐)에만 있는 것이다.
+            return True
+        if br != "up":
             return False
         d = float(q[0]) - float(self.q_home[0])
         d = (d + math.pi) % (2 * math.pi) - math.pi          # −π~π 로 감싼다
