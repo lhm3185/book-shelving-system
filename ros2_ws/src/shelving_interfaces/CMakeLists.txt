@@ -12,9 +12,11 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/TrayJob.msg"
   "msg/RobotStatus.msg"
   "msg/TargetSlot.msg"
+  "msg/GraspObservation.msg"
   "action/NavigateToTarget.action"
   "action/DetectTargetSlot.action"
   "action/PlaceBook.action"
+  "action/LookAt.action"
   DEPENDENCIES builtin_interfaces geometry_msgs std_msgs action_msgs
 )
 
