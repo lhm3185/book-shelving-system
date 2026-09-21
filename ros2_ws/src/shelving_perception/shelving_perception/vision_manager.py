@@ -197,6 +197,24 @@ class VisionManager(Node):
         # YOLO 검출 결과를 책으로 인정할 최소 confidence입니다.
         self.confidence_threshold = float(self.declare_parameter(
             'confidence_threshold', 0.75).value)
+        # 신뢰도 1등 한 권만 발행·표시할지. false 면 검출된 전부 (디버그용)
+        self.publish_best_only = bool(self.declare_parameter(
+            'publish_best_only', True).value)
+        # **책 검출 ROI — 트레이 영역만 본다.** 팔 기준(arm_base_link) 3D 상자다.
+        # 픽셀 ROI 가 아니라 3D 로 두는 이유: 카메라가 움직여도 같은 영역을 가리킨다.
+        # **책장 빈 공간 경로에는 적용하지 않는다** (거기는 ROI 가 있으면 안 된다).
+        # **가로(x)는 트레이에 딱 맞춘다.** 넓게 두면 로봇팔 받침대나 바닥이
+        # 책으로 잡히는 일이 있다 (2026-09-21 현장 관찰).
+        #   칸 중심   -0.6623 ~ -0.2873   (6칸, 간격 0.075)
+        #   책 바깥면 -0.6800 ~ -0.2697   (두께 0.0353 의 절반을 더함)
+        #   여유 10mm -0.690  ~ -0.260    ← 이것을 쓴다
+        # y·z 는 깊이·높이라 여유를 둔다 (책 윗면 z ~0.1935).
+        self.book_roi_enabled = bool(self.declare_parameter(
+            'book_roi_enabled', True).value)
+        self.book_roi_min = [float(v) for v in self.declare_parameter(
+            'book_roi_min', [-0.69, -0.02, 0.00]).value]
+        self.book_roi_max = [float(v) for v in self.declare_parameter(
+            'book_roi_max', [-0.26, 0.18, 0.32]).value]
 
         # self.target_topic = self.declare_parameter(
         #     'target_topic', '/perception/empty_shelf_position').value
@@ -470,6 +488,11 @@ class VisionManager(Node):
                 cy,
                 depth_scale,
             )
+            # **트레이 ROI 밖의 책은 버립니다.** 서가에 꽂힌 책·배경이 섞이면
+            # 1등 선택이 엉뚱한 책을 고릅니다. 책 경로에만 적용합니다 —
+            # 책장 빈 공간 판정에는 ROI 를 걸지 않습니다.
+            detected_targets, roi_dropped = self._filter_book_roi(
+                detected_targets, rgb_msg.header.frame_id, rgb_msg.header.stamp)
             # 책장 전체의 bbox와 클래스를 책장 YOLO 모델로 검출합니다.
             shelf_detection = self._detect_shelf(rgb_image)
             # 로봇 기준의 삽입 후보들을 현재 카메라 기준 좌표로 변환합니다.
@@ -494,6 +517,11 @@ class VisionManager(Node):
                 detections,
                 shelf_detection,
                 empty_slots,
+                roi_px=self._book_roi_pixels(
+                    rgb_msg.header.frame_id, rgb_msg.header.stamp,
+                    fx, fy, cx, cy, rgb_image.shape),
+                keep_boxes=[t['box'] for t in detected_targets],
+                dropped=roi_dropped,
             )
         except (IndexError, ValueError) as error:
             # 모델 출력 또는 깊이 계산 오류를 action 실패 결과로 전달합니다.
@@ -517,8 +545,16 @@ class VisionManager(Node):
                 ),
             )
 
-        # 검출된 모든 책을 하나씩 로봇 좌표로 변환하고 발행합니다.
-        for target in detected_targets:
+        # **신뢰도가 가장 높은 책 한 권만** 로봇팔에 보냅니다.
+        # 토픽은 한 프레임에 여러 점을 따로 쏘면 받는 쪽이 "어느 것이 1등인지",
+        # "어디까지가 같은 프레임인지"를 알 수 없습니다. 그래서 하나만 냅니다.
+        # 전부 보고 싶을 때는 publish_best_only:=false (디버그용).
+        if detected_targets and self.publish_best_only:
+            best = max(detected_targets, key=lambda t: t['confidence'])
+            publish_targets = [best]
+        else:
+            publish_targets = detected_targets
+        for target in publish_targets:
             # 책의 카메라 좌표를 target_frame 기준 점으로 변환합니다.
             book_point = self._transform_xyz(
                 target['xyz'], rgb_msg.header.frame_id, rgb_msg.header.stamp)
@@ -545,10 +581,12 @@ class VisionManager(Node):
                 self.book_pose_pub.publish(book_pose)
             # 사람이 확인할 수 있도록 검출 위치와 각도를 로그로 출력합니다.
             self.get_logger().info(
-                f"Book detected: xyz=({book_point.point.x:.3f}, "
+                f"Book picked(best): xyz=({book_point.point.x:.3f}, "
                 f"{book_point.point.y:.3f}, {book_point.point.z:.3f}), "
-                f"center={target['center']}, "
-                f"yaw={target['image_angle']:.3f} rad")
+                f"center={target['center']}, conf={target['confidence']:.2f}, "
+                f"depth={target.get('depth_source', '?')}, "
+                f"yaw={target['image_angle']:.3f} rad "
+                f"(후보 {len(detected_targets)}권)")
 
         # 찾은 빈 단들을 하나씩 target_frame으로 변환하고 토픽으로 발행합니다.
         transformed_empty_slots = []
@@ -615,6 +653,77 @@ class VisionManager(Node):
             return None
         # 가장 신뢰도가 높은 책장 하나를 선택합니다.
         return max(candidates, key=lambda candidate: candidate['confidence'])
+
+    def _arm_to_camera_tf(self, camera_frame, stamp):
+        """팔 기준 → 카메라 기준 TF. 못 구하면 None."""
+        try:
+            return self.tf_buffer.lookup_transform(
+                camera_frame,
+                self.slot_position_frame,
+                rclpy.time.Time.from_msg(stamp),
+                timeout=rclpy.duration.Duration(seconds=0.2),
+            )
+        except TransformException:
+            return None
+
+    def _filter_book_roi(self, targets, camera_frame, stamp):
+        """**트레이 ROI 안의 책만** 남깁니다. (남은 것, 버린 수) 를 돌려줍니다.
+
+        왜 3D 인가: 픽셀 상자로 자르면 카메라가 조금만 움직여도 엉뚱한 영역을 가립니다.
+        팔 기준 상자는 카메라가 어디서 보든 **같은 실제 공간**을 가리킵니다.
+
+        **책장 빈 공간 판정에는 쓰지 않습니다.** 거기는 ROI 가 있으면 안 됩니다 —
+        서가 어디든 빈 칸이 생길 수 있기 때문입니다.
+        """
+        if not self.book_roi_enabled or not targets:
+            return targets, 0
+        kept, dropped = [], 0
+        for target in targets:
+            point = self._transform_xyz(target['xyz'], camera_frame, stamp)
+            if point is None:
+                # 변환 실패는 **버리지 않습니다** — ROI 판정을 못 한 것이지
+                # 밖에 있다고 밝혀진 것이 아닙니다
+                kept.append(target)
+                continue
+            p = point.point
+            lo, hi = self.book_roi_min, self.book_roi_max
+            if (lo[0] <= p.x <= hi[0] and lo[1] <= p.y <= hi[1]
+                    and lo[2] <= p.z <= hi[2]):
+                kept.append(target)
+            else:
+                dropped += 1
+        if dropped:
+            self.get_logger().info(
+                f'ROI 밖 책 {dropped}권 제외 (남은 {len(kept)}권). '
+                f'ROI {self.book_roi_min} ~ {self.book_roi_max} @'
+                f'{self.slot_position_frame}')
+        return kept, dropped
+
+    def _book_roi_pixels(self, camera_frame, stamp, fx, fy, cx, cy, shape):
+        """ROI 3D 상자를 화면 사각형으로 투영합니다. 못 구하면 None."""
+        if not self.book_roi_enabled:
+            return None
+        transform = self._arm_to_camera_tf(camera_frame, stamp)
+        if transform is None:
+            return None
+        lo, hi = self.book_roi_min, self.book_roi_max
+        us, vs = [], []
+        for x in (lo[0], hi[0]):
+            for y in (lo[1], hi[1]):
+                for z in (lo[2], hi[2]):
+                    pt = PointStamped()
+                    pt.header.frame_id = self.slot_position_frame
+                    pt.point.x, pt.point.y, pt.point.z = x, y, z
+                    c = do_transform_point(pt, transform).point
+                    if c.z <= 1e-6:          # 카메라 뒤쪽은 투영할 수 없다
+                        continue
+                    us.append(c.x * fx / c.z + cx)
+                    vs.append(c.y * fy / c.z + cy)
+        if len(us) < 2:
+            return None
+        h, w = shape[:2]
+        return (max(0, int(min(us))), max(0, int(min(vs))),
+                min(w - 1, int(max(us))), min(h - 1, int(max(vs))))
 
     def _candidate_slots_in_camera(self, camera_frame, stamp):
         """로봇 기준 삽입 후보 좌표를 현재 카메라 기준으로 변환합니다."""
@@ -701,12 +810,41 @@ class VisionManager(Node):
         detections,
         shelf_detection=None,
         empty_slots=None,
+        roi_px=None,
+        keep_boxes=None,
+        dropped=0,
     ):
         """책장·책·빈 단 표시를 그린 영상을 ROS Image로 발행합니다."""
         # 원본 영상을 복사해 디버그 표시가 원본 데이터에 영향을 주지 않게 합니다.
         debug_image = rgb_image.copy()
-        # 검출된 모든 상자에 대해 시각화 정보를 그립니다.
-        for detection in detections:
+        # **트레이 ROI** 를 노란 상자로 그립니다 (팔 기준 3D 상자를 화면에 투영한 것).
+        if roi_px is not None:
+            rx1, ry1, rx2, ry2 = roi_px
+            cv2.rectangle(debug_image, (rx1, ry1), (rx2, ry2), (0, 255, 255), 2)
+            cv2.putText(
+                debug_image,
+                f"tray ROI (dropped {dropped})",
+                (rx1 + 4, max(18, ry1 - 6)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+        # ROI 밖이라 버린 책은 **회색 얇은 상자**로 남깁니다 — 왜 안 골랐는지 보이게
+        if keep_boxes is not None:
+            kept = {tuple(b) for b in keep_boxes}
+            for det in detections:
+                if tuple(det['box']) not in kept:
+                    bx1, by1, bx2, by2 = det['box']
+                    cv2.rectangle(
+                        debug_image, (bx1, by1), (bx2, by2), (150, 150, 150), 1)
+            detections = [d for d in detections if tuple(d['box']) in kept]
+        # **신뢰도 1등 한 권만** 그립니다 (로봇팔에 보내는 그 한 권).
+        draw_list = detections
+        if detections and getattr(self, 'publish_best_only', True):
+            draw_list = [max(detections, key=lambda d: d['confidence'])]
+        for detection in draw_list:
             # 검출 상자의 픽셀 좌표를 읽습니다.
             x1, y1, x2, y2 = detection['box']
             # 책 상자를 초록색 사각형으로 표시합니다.
@@ -717,6 +855,9 @@ class VisionManager(Node):
                 (0, 255, 0),
                 2,
             )
+            # **로봇팔에 보내는 좌표가 바로 이 점**이다 — 눈으로 확인할 수 있게 찍는다
+            cu, cv_ = detection.get('center', ((x1 + x2) // 2, (y1 + y2) // 2))
+            cv2.circle(debug_image, (int(cu), int(cv_)), 5, (0, 0, 255), -1)
             # 화면에 표시할 confidence 문자열을 만듭니다.
             label = f"book {detection['confidence']:.2f}"
             # 상자 위쪽에 검출 class와 confidence를 표시합니다.

@@ -45,6 +45,24 @@ class SlotGoal:
 
 
 @dataclass(frozen=True)
+class GraspGoal:
+    """
+    비전이 본 파지 관측 (top_center 는 윗면 중심이며 AABB 중심이 아니다).
+
+    이름을 나눈 이유: 같은 필드 이름에 서로 다른 점을 넣어 8cm·0.67m 가 어긋난 적이 있다
+    (2026-09-17 사고 #3·#5). 계약: docs/doyoon-kim/manipulation/PICKPLACE_CONTRACT_V2.md 4절
+    """
+
+    frame_id: str
+    top_center: Tuple[float, float, float]
+    spine_yaw: float
+    thickness: float
+    width: float
+    confidence: float
+    age_s: Optional[float] = None
+
+
+@dataclass(frozen=True)
 class PlaceGoal:
     job_id: str
     book_id: str
@@ -53,6 +71,7 @@ class PlaceGoal:
     book_height: float
     book_thickness: float
     insertion_speed: float
+    grasp: Optional[GraspGoal] = None
 
 
 @dataclass
@@ -143,6 +162,76 @@ def resolve_book(goal: PlaceGoal, profile: BookDims,
     if any((not math.isfinite(d)) or d <= 0 or d > lim['max_book_dimension'] for d in dims):
         return None, Check(410, f'책 치수가 잘못됨 두께 {dims[0]} 높이 {dims[1]} 폭 {dims[2]}')
     return BookDims(*dims), Check(OK, '')
+
+
+def validate_grasp(goal: PlaceGoal, tray_slots, limits: Optional[dict] = None) -> Check:
+    """
+    비전이 준 파지 관측을 쓰기 전에 검사한다 (계약 5절).
+
+    핵심은 높이 검사다 — 트레이에 세운 책은 윗면이 칸 중심에서 **책 폭(W)의 절반**만큼
+    위에 있다. 비전이 윗면 대신 책등 중앙이나 AABB 중심을 보냈으면 **여기서 수 cm 가
+    어긋난다.** 계약 위반을 이름뿐 아니라 **물리량으로도** 잡는 것이다.
+    """
+    lim = _merged(limits)
+    g = goal.grasp
+    if g is None:
+        return Check(OK, '')
+    if g.frame_id != lim['frame_id']:
+        return Check(410, f"파지 관측 frame_id '{g.frame_id}' ≠ '{lim['frame_id']}'")
+    if not all(math.isfinite(v) for v in g.top_center):
+        return Check(410, '파지 관측 top_center 에 NaN/inf')
+    if lim['max_target_age_s'] > 0 and g.age_s is not None \
+            and g.age_s > lim['max_target_age_s']:
+        return Check(411, f'파지 관측이 오래됨 {g.age_s:.1f}s')
+    if tray_slots:
+        xs = [sl.center[0] for sl in tray_slots]
+        ys = [sl.center[1] for sl in tray_slots]
+        if not (min(xs) - 0.10 <= g.top_center[0] <= max(xs) + 0.10):
+            return Check(410, f'파지 관측 x {g.top_center[0]:+.3f} 가 트레이 범위 밖')
+        if not (min(ys) - 0.15 <= g.top_center[1] <= max(ys) + 0.15):
+            return Check(410, f'파지 관측 y {g.top_center[1]:+.3f} 가 트레이 범위 밖')
+        want_top = tray_slots[0].center[2] + goal.book_width / 2.0
+        if goal.book_width > 0 and abs(g.top_center[2] - want_top) > 0.01:
+            return Check(410,
+                         f'관측 높이가 책 규격과 다르다: top z {g.top_center[2]:.4f}, '
+                         f'기대 {want_top:.4f} (칸 중심 + 책 폭/2). '
+                         f'윗면 중심이 아닌 다른 점을 보냈을 수 있다')
+    if g.thickness > 0 and goal.book_thickness > 0 \
+            and abs(g.thickness - goal.book_thickness) > 0.005:
+        return Check(410, f'관측 두께 {g.thickness:.4f} ≠ 규격 {goal.book_thickness:.4f}')
+    # **옆 책에 손가락이 닿지 않는가.** 여기가 가장 좁다.
+    # 칸 간격 0.075, 책 두께 0.0353, 손가락 0.0264 → 여유는 8.3 mm 뿐이다.
+    # 비전 좌표가 그보다 더 어긋나면 집으러 가다 옆 책을 친다 (2026-09-21 실측:
+    # 바깥쪽 칸에서 오차가 14~16 mm 까지 나왔다).
+    if tray_slots and len(tray_slots) >= 2 and goal.book_thickness > 0:
+        centers = sorted(sl.center[0] for sl in tray_slots)
+        pitch = min(b - a for a, b in zip(centers, centers[1:]))
+        book = BookDims(goal.book_thickness, goal.book_height, goal.book_width)
+        finger_outer = grip_open_per_finger(book, lim) + lim['finger_thickness']
+        margin = (pitch - goal.book_thickness / 2) - finger_outer
+        nearest = min(centers, key=lambda c: abs(c - g.top_center[0]))
+        dx = abs(g.top_center[0] - nearest)
+        if margin > 0 and dx > margin:
+            return Check(410,
+                         f'파지 좌표가 칸 중심에서 {dx*1000:.1f} mm 어긋났다 — '
+                         f'여유 {margin*1000:.1f} mm 를 넘는다. 손가락이 옆 책에 닿는다 '
+                         f'(칸 간격 {pitch*1000:.0f} mm, 손가락 바깥면 '
+                         f'{finger_outer*1000:.1f} mm)')
+    return Check(OK, '')
+
+
+def grasp_pick_center(goal: PlaceGoal):
+    """
+    비전 윗면 중심을 로봇팔이 쓰는 AABB 중심으로 바꾼다 (관측이 없으면 None).
+
+    세운 책의 윗면은 AABB 중심에서 **책 폭(W)의 절반**만큼 위다 (좌표 계약 2번).
+    유도는 치수를 아는 쪽(로봇팔)이 한다 — 비전에게 가려진 면까지 추정하게 하지 않는다.
+    """
+    g = goal.grasp
+    if g is None or goal.book_width <= 0:
+        return None
+    x, y, z = g.top_center
+    return [float(x), float(y), float(z) - goal.book_width / 2.0]
 
 
 def validate_goal(goal: PlaceGoal, book: BookDims, limits: Optional[dict] = None) -> Check:
@@ -251,7 +340,10 @@ def build_place_command(token: str, goal: PlaceGoal, book: BookDims, tray_slot: 
         'book_id': goal.book_id,
         'frame_id': lim['frame_id'],
         'book': {'thickness': book.thickness, 'height': book.height, 'width': book.width},
-        'pick': {'tray_slot': tray_slot.index, 'center': list(tray_slot.center)},
+        # 비전 관측이 있으면 **그 좌표로 집는다**. 없으면 설정의 트레이 칸 (기존 동작)
+        'pick': {'tray_slot': tray_slot.index,
+                 'center': grasp_pick_center(goal) or list(tray_slot.center),
+                 'source': 'vision' if goal.grasp is not None else 'config'},
         'place': {
             'center': list(goal.slot.position),
             'yaw': yaw,

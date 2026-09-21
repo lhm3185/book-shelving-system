@@ -1,5 +1,6 @@
 """목표 검사·트레이 칸 선택·명령 생성 단위시험 (ROS 없이)."""
 
+from dataclasses import replace
 import math
 from pathlib import Path
 
@@ -119,11 +120,71 @@ def test_package_config_matches_contract():
     assert profile.thickness < profile.width < profile.height
 
 
+def test_vision_grasp_becomes_aabb_center():
+    """비전은 윗면 중심을 주고, 로봇팔이 책 폭의 절반을 빼 AABB 중심으로 바꾼다."""
+    from shelving_manipulation.grasp_planner import GraspGoal, grasp_pick_center
+    g = goal(book_width=BOOK.width, book_height=BOOK.height,
+             book_thickness=BOOK.thickness)
+    top_z = 0.1119 + g.book_width / 2          # 칸 중심 + 책 폭/2 = 윗면
+    with_grasp = replace(g, grasp=GraspGoal(
+        frame_id='arm_base_link', top_center=(-0.5123, 0.0788, top_z),
+        spine_yaw=0.0, thickness=g.book_thickness, width=g.book_width, confidence=0.9))
+    center = grasp_pick_center(with_grasp)
+    assert center == pytest.approx([-0.5123, 0.0788, 0.1119], abs=1e-6)
+    cmd = build_place_command('tok', with_grasp, BOOK, TraySlot(2, (-0.51, 0.08, 0.11)))
+    assert cmd['pick']['source'] == 'vision'
+    assert cmd['pick']['center'] == pytest.approx([-0.5123, 0.0788, 0.1119], abs=1e-6)
+
+
+def test_vision_grasp_wrong_point_is_rejected():
+    """윗면이 아닌 점(예: AABB 중심)을 보내면 높이 검사에서 걸린다 — 계약 위반을 물리량으로 잡는다."""
+    from shelving_manipulation.grasp_planner import GraspGoal, validate_grasp
+    g = goal(book_width=BOOK.width, book_height=BOOK.height,
+             book_thickness=BOOK.thickness)
+    slots = [TraySlot(0, (-0.6623, 0.0788, 0.1119)), TraySlot(1, (-0.5873, 0.0788, 0.1119))]
+    # 윗면 대신 AABB 중심을 보냈다 → 책 폭의 절반만큼 낮다
+    bad = replace(g, grasp=GraspGoal(
+        frame_id='arm_base_link', top_center=(-0.6623, 0.0788, 0.1119),
+        spine_yaw=0.0, thickness=g.book_thickness, width=g.book_width, confidence=0.9))
+    check = validate_grasp(bad, slots)
+    assert check.code == 410 and '높이' in check.message
+    # 프레임이 틀려도 거절한다
+    wrong_frame = replace(g, grasp=GraspGoal(
+        frame_id='base_link', top_center=(-0.6623, 0.0788, 0.1119 + g.book_width / 2),
+        spine_yaw=0.0, thickness=g.book_thickness, width=g.book_width, confidence=0.9))
+    assert validate_grasp(wrong_frame, slots).code == 410
+
+
+def test_vision_grasp_offset_would_hit_neighbour():
+    """칸 중심에서 너무 벗어난 파지 좌표는 거절한다 — 손가락이 옆 책에 닿는다."""
+    from shelving_manipulation.grasp_planner import GraspGoal, validate_grasp
+    g = goal(book_width=BOOK.width, book_height=BOOK.height,
+             book_thickness=BOOK.thickness)
+    slots = [TraySlot(i, (-0.6623 + 0.075 * i, 0.0788, 0.1119)) for i in range(6)]
+    top_z = 0.1119 + g.book_width / 2
+
+    def obs(x):
+        return replace(g, grasp=GraspGoal(
+            frame_id='arm_base_link', top_center=(x, 0.0788, top_z),
+            spine_yaw=0.0, thickness=g.book_thickness, width=g.book_width,
+            confidence=0.9))
+
+    # 칸 중심 그대로면 통과한다
+    assert validate_grasp(obs(-0.5123), slots).ok
+    # 4 mm 어긋남 — 여유(약 8 mm) 안이라 통과한다
+    assert validate_grasp(obs(-0.5163), slots).ok
+    # 16 mm 어긋남 — 2026-09-21 에 바깥쪽 칸에서 실제로 나온 오차. 거절해야 한다
+    check = validate_grasp(obs(-0.5283), slots)
+    assert check.code == 410 and '옆 책' in check.message
+
+
 def test_command_contains_contract_fields():
     cmd = build_place_command('tok', goal(), BOOK, TraySlot(2, (-0.51, 0.08, 0.11)))
     assert cmd['type'] == 'place_book' and cmd['token'] == 'tok'
     assert cmd['frame_id'] == 'arm_base_link'
-    assert cmd['pick'] == {'tray_slot': 2, 'center': [-0.51, 0.08, 0.11]}
+    # 비전 관측이 없으면 설정의 트레이 칸을 쓰고, source 로 그 사실을 남긴다
+    assert cmd['pick'] == {'tray_slot': 2, 'center': [-0.51, 0.08, 0.11],
+                           'source': 'config'}
     assert cmd['place']['center'] == list(VERIFIED)
     assert cmd['place']['yaw'] == pytest.approx(math.pi / 2)
     assert cmd['grip']['open_per_finger'] == pytest.approx(BOOK.thickness / 2 + 0.005)

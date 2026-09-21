@@ -31,8 +31,9 @@ import yaml
 
 from .book_placer import (cancel_command, decode, encode, error_name, MockSimExecutor, Outcome,
                           PlaceTracker)
-from .grasp_planner import (build_place_command, DEFAULT_LIMITS, parse_profile, parse_tray,
-                            PlaceGoal, resolve_book, select_tray_slot, SlotGoal, validate_goal)
+from .grasp_planner import (build_place_command, DEFAULT_LIMITS, GraspGoal, parse_profile,
+                            parse_tray, PlaceGoal, resolve_book, select_tray_slot, SlotGoal,
+                            validate_goal, validate_grasp)
 
 # 진행 중 이 단계 이후에 실패하면 책이 이미 트레이를 떠났다고 본다
 LEFT_TRAY_PHASES = ('MOVING_TO_PRE_INSERT', 'INSERTING', 'RELEASING', 'RETREATING', 'VERIFYING')
@@ -165,6 +166,31 @@ class ManipulationNode(Node):
             book_height=request.book_height,
             book_thickness=request.book_thickness,
             insertion_speed=request.insertion_speed,
+            grasp=self._to_grasp(request),
+        )
+
+    def _to_grasp(self, request):
+        """
+        비전이 준 파지 관측을 값으로 바꾼다 (has_grasp 이 false 면 None).
+
+        None 이면 기존처럼 **설정 파일의 트레이 칸**으로 집는다 — 비전이 늦어도
+        흐름이 멈추지 않는다 (계약 §4).
+        """
+        if not getattr(request, 'has_grasp', False):
+            return None
+        g = request.grasp
+        gstamp = Time.from_msg(g.header.stamp)
+        gage = None
+        if gstamp.nanoseconds > 0:
+            gage = (self.get_clock().now() - gstamp).nanoseconds / 1e9
+        return GraspGoal(
+            frame_id=g.header.frame_id,
+            top_center=(g.top_center.x, g.top_center.y, g.top_center.z),
+            spine_yaw=g.spine_yaw,
+            thickness=g.thickness,
+            width=g.width,
+            confidence=g.confidence,
+            age_s=gage,
         )
 
     def _finish(self, goal_handle, success, failed_phase, verified, code, message, canceled=False):
@@ -196,10 +222,15 @@ class ManipulationNode(Node):
         self._set_status('RUNNING', job_id, 0.0, 0, 'DETECTING_BOOK')
         self._feedback(goal_handle, 'DETECTING_BOOK', 0.0)
 
-        # 1차: 트레이 칸 좌표는 설정값 (비전은 그림자 모드)
+        # 트레이 칸 좌표는 설정값. 비전 관측(grasp)이 오면 **검사를 통과한 것만** 쓴다
         book, check = resolve_book(goal, self.profile, self.limits)
         if check.ok:
             check = validate_goal(goal, book, self.limits)
+        if check.ok:
+            # 계약 §5 — 틀린 점을 경계에서 잡는다. 특히 "윗면 높이가 책 규격과 맞는가"
+            check = validate_grasp(goal, self.tray_slots, self.limits)
+            if not check.ok:
+                self.get_logger().warning(f'파지 관측 거절: {check.message}')
         tray_slot = None
         if check.ok:
             tray_slot, check = select_tray_slot(
@@ -217,7 +248,9 @@ class ManipulationNode(Node):
         with self._lock:
             self._tracker = tracker
         self.get_logger().info(
-            f'작업 {job_id} book={goal.book_id} 트레이 칸 {tray_slot.index} → {goal.slot.position} '
+            f'작업 {job_id} book={goal.book_id} 트레이 칸 {tray_slot.index} '
+            f"파지 {command['pick']['center']} ({command['pick']['source']}) "
+            f'→ {goal.slot.position} '
             f"삽입 속도 {command['insertion_speed']:.3f} m/s")
         self._send(command)
 
