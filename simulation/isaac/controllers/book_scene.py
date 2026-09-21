@@ -48,7 +48,8 @@ FINGERS = BOT.grip_joints
 TRAY_FOLLOW_MIN_M = float(os.environ.get("SIM_TRAY_FOLLOW_MIN", "0.002"))
 DECK_Z = BOT.deck_z         # 트레이가 놓이는 면의 월드 높이 (로봇별)
 # 링크가 이보다 낮으면 받침판을 뚫는 것으로 본다 (팔 베이스가 판 위에 바로 붙어 있다)
-DECK_MIN_Z = DECK_Z - float(os.environ.get("SIM_DECK_MARGIN", "0.02"))
+# 팔이 받침판을 이만큼까지 파고드는 것은 눈감아 준다 (충돌 구가 근사값이라 여유가 필요하다)
+DECK_SINK_M = float(os.environ.get("SIM_DECK_SINK", "0.02"))
 TIP_DOWN = 0.035            # 책등 윗면에서 손끝이 내려가 잡는 깊이
 GRIP_CLEAR = 0.005
 SPINE_INSET = 0.02          # 계획상 최종 책등이 서가 앞면에서 들어가는 거리
@@ -59,14 +60,25 @@ VEL_LIMIT = np.array(BOT.vel_limit)             # URDF 실측 (로봇별, 프로
 # 빠른 구간을 막으려는 값이 아니다. 손목 특이점에서 0.124 rad(7°) 가 남는데
 # 32배까지 잘게 나눠도 줄지 않는다 — 진짜 작은 불연속이다 (2026-09-21 실측).
 MAX_STEP = float(os.environ.get("SIM_MAX_STEP", "0.12"))
+# 관절 경로 제한 시간. **안전장치이지 성능 목표가 아니다** — 팔이 명령 속도를
+# 그대로 따라가지 못하면 계산한 시간보다 오래 걸린다. 2.0/3.0 으로는 팔이
+# 경유점 24/36 까지 잘 가고 있는데도 404 로 잘렸다 (2026-09-21 실측).
+TIME_FACTOR = float(os.environ.get("SIM_TIME_FACTOR", "3.5"))
+TIME_PAD = float(os.environ.get("SIM_TIME_PAD", "5.0"))
 GRASP_JOINT = "/World/bs_grasp_joint"
-# 잡은 책을 키네마틱으로 들고 가 볼 수 있다. **기본은 꺼짐** — 켜 봤더니 더 나빠졌다:
-# 책 prim 아래에 이미 강체가 있는데 부모에 하나 더 붙는 꼴이라 물리가 서로 싸운다
+# 잡은 책을 키네마틱으로 들고 가 볼 수 있다. **기본은 꺼짐** — 켜 봤더니 더 나빠졌다
 # (2026-09-21 실측: 책이 뒤집혀 돌고 57.6cm 떨어졌다. 끄면 4.7cm 로 일정하다).
-# 고치려면 **강체가 실제로 붙어 있는 prim** 을 찾아 거기에 걸어야 한다.
+# **원인은 아직 모른다.** 한때 "책 prim 아래에 강체가 하나 더 있다"고 적었는데 **틀렸다** —
+# 에셋에는 물리 API 가 전혀 없고(usdc 토큰 확인), 강체는 우리가 book_i 에 하나만 붙인다.
+# 돌아가는 중인 동적 강체를 키네마틱으로 바꾸는 것 자체가 문제일 수 있다.
 GRASP_KINEMATIC = os.environ.get("SIM_GRASP_KINEMATIC", "0") != "0"
 # 그리퍼 접근축을 물림축과 직교화한다 (기본 꺼짐 — 파지 자세가 90° 바뀐다)
 GRIP_ORTHO = os.environ.get("SIM_GRIP_ORTHO", "0") != "0"
+# IK 결과가 **팔꿈치↑ 가지**인지 검사한다. 끄면 팔꿈치↓ 해가 조용히 섞인다
+BRANCH_GUARD = os.environ.get("SIM_BRANCH_GUARD", "1") != "0"
+# 홈을 어떻게 정하나. ik = 트레이 위 한 점으로 IK (옛 방식, 실행 검증됨)
+#                  joints = YAML 관절각 + FK (자기모순 없음, 실행은 아직 안 됨)
+
 
 
 def named(primitive, name):
@@ -81,7 +93,7 @@ class JointPath(Primitive):
     def __init__(self, name, qs, speed=0.35):
         length = sum(float(np.max(np.abs(b - a))) for a, b in zip(qs[:-1], qs[1:]))
         self._plan_len = length
-        super().__init__(max(4.0, length / speed * 2.0 + 3.0))
+        super().__init__(max(6.0, length / speed * TIME_FACTOR + TIME_PAD))
         self.name = name
         self.qs = [np.asarray(q, float) for q in qs]
         self.speed = speed
@@ -95,7 +107,7 @@ class JointPath(Primitive):
         # (2026-09-20 M0609: 경로 길이 0.7 rad 인데 첫 간격만 3.4 rad → 제한 시간 초과).
         # 실제 경로 길이로 다시 잡는다.
         real = sum(float(np.max(np.abs(b - a))) for a, b in zip(self._pts[:-1], self._pts[1:]))
-        need = max(4.0, real / self.speed * 2.0 + 3.0)
+        need = max(6.0, real / self.speed * TIME_FACTOR + TIME_PAD)
         self._limit = max(getattr(self, "_limit", 0), ctx.steps_for(need))
         if real > 1.5:
             ctx.backend.say(f"[진단] {self.name}: 실제 경로 {real:.2f} rad "
@@ -356,6 +368,7 @@ class BookScene:
         # 안 맞추면 재생 순간 팔이 85° 튀며 로봇이 흔들린다 (2026-09-18 실측).
         _stiff = float(os.environ.get("ARM_DRIVE_STIFFNESS", BOT.drive_stiffness))
         _damp = float(os.environ.get("ARM_DRIVE_DAMPING", BOT.drive_damping))
+        _maxf = float(os.environ.get("ARM_DRIVE_MAXFORCE", "0"))
         _tuned = []
         for _p in Usd.PrimRange(st.GetPrimAtPath(R)):
             if _p.GetName() not in set(ARM_JOINTS):
@@ -365,11 +378,16 @@ class BookScene:
                 _d.CreateTypeAttr().Set("force")
                 _d.CreateStiffnessAttr().Set(_stiff)
                 _d.CreateDampingAttr().Set(_damp)
+            if _maxf > 0:
+                # 구동력 상한. 지금까지 건드리지 않아 URDF effort(163 N·m)가 그대로 상한이었다.
+                # 팔을 멀리 뻗는 자세에서 팔꿈치(joint_3)가 목표보다 0.267 rad 처진 채
+                # 도달 판정을 못 받아 `404` 가 났다 (2026-09-21 실측, 주변에 닿는 물체는 없었다).
+                _d.CreateMaxForceAttr().Set(_maxf)
             _t = _d.GetTargetPositionAttr().Get()
             if _t not in (None, 0.0):
                 _d.CreateTargetPositionAttr().Set(0.0)
                 _tuned.append(f"{_p.GetName()} 목표 {_t}°→0°")
-        say(("팔 구동 게인 설정: 강성 %.0e 감쇠 %.0e" % (_stiff, _damp)) if _stiff > 0
+        say(("팔 구동 게인 설정: 강성 %.0e 감쇠 %.0e 힘상한 %s" % (_stiff, _damp, _maxf or "에셋값")) if _stiff > 0
             else "팔 구동 게인: **에셋 기본값 사용** (ARM_DRIVE_STIFFNESS=0)")
         if _tuned:
             say(f"  구동 목표 보정: {_tuned}")
@@ -408,18 +426,39 @@ class BookScene:
             for d in (0.3, -0.3, 0.8, -0.8):
                 v = np.zeros(BOT.dof); v[j] = d
                 self._ik_nudges.append(v)
+        # **반대편 가지도 후보에 넣는다.** 같은 손끝 자세에 팔을 통째로 돌린 해가 있는데,
+        # 작은 흔들기(±0.8)로는 거기까지 못 간다. 받침판에 막히지 않는 유일한 해가
+        # 그쪽일 수 있다 — 실제로 어제까지 파지가 되던 자세가 그 가지였다 (2026-09-21).
+        # 어느 쪽을 고를지는 **받침판 관통 검사(_above_deck)가 정한다.**
+        for j in (0, 3, 5):          # 어깨 회전(joint_1)과 손목(joint_4, joint_6)
+            if j < BOT.dof:
+                for d in (math.pi, -math.pi):
+                    v = np.zeros(BOT.dof); v[j] = d
+                    self._ik_nudges.append(v)
         self.lula.set_robot_base_pose(l0p, l0q)
         self.ik = ArticulationKinematicsSolver(r, self.lula, BOT.ee_frame)
-        # 받침판 뚫기 검사에 쓸 링크 프레임. Lula 가 아는 이름만 남긴다
-        self._deck_frames = []
-        for _i in range(2, BOT.dof + 1):
-            _f = f"link_{_i}"
-            try:
-                self.lula.compute_forward_kinematics(_f, np.zeros(BOT.dof))
-                self._deck_frames.append(_f)
-            except Exception:      # noqa: BLE001
-                pass
-        say(f"받침판 뚫기 검사 대상: {self._deck_frames or '없음'} (기준 z {DECK_MIN_Z:.3f})")
+        # **받침판 관통 검사에 쓸 충돌 구.** 기술서(descriptor)에 링크별로 들어 있다.
+        # 링크 원점 높이만 보면 부족하다 — 원점은 판 위인데 팔 몸통이 닿는 경우를 놓친다
+        # (2026-09-21: link_3 원점은 판 위인데 joint_2 가 -1.43 에서 물리적으로 멈췄다).
+        # base_link·link_1 은 **받침판에 붙어 있는 것이 정상**이라 검사에서 뺀다.
+        self._deck_spheres = []
+        try:
+            _desc = yaml.safe_load(open(BOT.lula[1]))
+            for _entry in (_desc.get("collision_spheres") or []):
+                for _lname, _sph in _entry.items():
+                    if _lname in ("base_link", "link_1"):
+                        continue
+                    try:
+                        self.lula.compute_forward_kinematics(_lname, np.zeros(BOT.dof))
+                    except Exception:      # noqa: BLE001 — Lula 가 모르는 프레임은 건너뛴다
+                        continue
+                    for _s in _sph:
+                        self._deck_spheres.append(
+                            (_lname, np.asarray(_s["center"], float), float(_s["radius"])))
+        except Exception as exc:      # noqa: BLE001
+            say(f"[주의] 충돌 구를 못 읽었다 — 받침판 관통 검사를 하지 않는다: {exc}")
+        say(f"받침판 관통 검사: 구 {len(self._deck_spheres)}개 "
+            f"(판 z {DECK_Z:.3f}, 허용 관통 {DECK_SINK_M*100:.0f}cm)")
 
         ee_p, ee_R = self.ik.compute_end_effector_pose()
         hand_p = np.array(SingleXFormPrim(HAND_LINK).get_world_pose()[0])
@@ -492,30 +531,25 @@ class BookScene:
 
         tray_top = DECK_Z + floor_top + self.W_max
         self._home_tip_z = tray_top + 0.30      # 받침판 기준 높이 — 주행해도 안 변한다
-        self.home_tip = np.array([self.tray_center_w[0], self.tray_center_w[1], self._home_tip_z])
-        # **홈과 트레이 중앙을 팔 기준으로 굳혀 둔다.** 주행 뒤에는 이 값으로 월드를 다시 만든다.
-        # 트레이의 실측 자세로 다시 잡았더니 팔 기준으로 1.9cm 옮겨졌고, q_home 은 원래 자리로
-        # 풀린 값이라 IK 가 가지를 갈아타 `402 approach 2.9 rad` 가 났다 (2026-09-21 실측).
-        # 홈은 트레이가 어디에 앉았느냐가 아니라 **팔에서 본 자리**로 정의되어야 한다.
-        self._home_tip_arm = self.to_arm(self.home_tip)
-        self._tray_center_arm = self.to_arm(self.tray_center_w)
-        # **씨앗은 검증된 홈 자세다.** 예전에는 `atan2(월드 방위각)` 을 joint_1 에 넣었는데,
-        # 그것은 관절각이 아니라 월드 각도라 **뒤집힌 가지**(joint_1 ≈ +3.26 rad = 187°)로
-        # 풀렸다. 그 해는 가지 경계 바로 위라 베이스가 1~2mm 만 흔들려도 갈아타고,
-        # 그때마다 `402 approach 2.9 rad` 가 났다 (2026-09-21 무작위 배치 시험에서 5/5 실패).
-        # measure_poses.py 로 실측·검증한 자세를 씨앗으로 주면 검증된 가지로 풀린다.
-        # **홈은 IK 로 풀지 않는다. 검증된 관절각을 그대로 쓰고 손끝 자리는 FK 로 얻는다.**
-        # 예전에는 `home_tip`(트레이 위 한 점) + `DOWN` 자세로 IK 를 풀어 q_home 을 만들었다.
-        # 그런데 그 둘과 검증된 홈 자세는 **서로 모순**이라, 검증된 자세를 씨앗으로 줘도
-        # 2.705 rad 떨어진 해가 나왔다 (2026-09-21 무작위 배치 시험). 모순을 없앤다 —
-        # 홈은 관절각으로 정의되고, 손끝 위치·자세는 거기서 따라 나온다.
+        # **홈은 IK 로 풀지 않는다.** 검증된 관절각을 그대로 쓰고 손끝 자리는 FK 로 얻는다.
+        # 예전에는 트레이 위 한 점 + DOWN 자세로 IK 를 풀었는데, 씨앗의 joint_1 에
+        # **월드 방위각**을 넣고 있어 뒤집힌 가지(joint_1 ≈ +3.26 rad)로 풀렸다.
+        # 그 해는 가지 경계 위라 베이스가 1~2mm 흔들릴 때마다 갈아탔다 (402, 2.9 rad).
         self.q_home = np.asarray(conf["poses"]["home"], float)
         _hp, _hR = self.lula.compute_forward_kinematics(BOT.ee_frame, self.q_home)
         self.home_tip = np.asarray(_hp, float)
         self.HOME_ORI = quat_from_R(np.asarray(_hR, float))
+        # **홈과 트레이 중앙을 팔 기준으로 굳혀 둔다.** 주행 뒤에는 이 값으로 월드를 다시 만든다.
+        # 홈은 트레이가 어디에 앉았느냐가 아니라 **팔에서 본 자리**로 정의되어야 한다.
         self._home_tip_arm = self.to_arm(self.home_tip)
+        self._tray_center_arm = self.to_arm(self.tray_center_w)
+        _br = self.elbow_branch(self.q_home)
         self.say(f"홈: 관절각 {np.round(self.q_home, 4).tolist()} → "
-                 f"손끝(팔기준) {np.round(self._home_tip_arm, 4).tolist()}")
+                 f"손끝(팔기준) {np.round(self._home_tip_arm, 4).tolist()}  "
+                 f"가지 **팔꿈치{'↑' if _br == 'up' else '↓' if _br == 'down' else '?'}**")
+        if BRANCH_GUARD and _br != "up":
+            self.say("[경고] 홈이 팔꿈치↑ 가 아니다 — 가지 가드가 모든 IK 를 거절할 수 있다. "
+                     "arm_<로봇>.yaml 의 poses.home 을 확인할 것")
         self.open_tray = self.T_max / 2 + GRIP_CLEAR
         # 트레이 추종은 **__init__ 맨 마지막**에 설정한다. 그리퍼 축 계산보다 앞에 두었더니
         # ee_frame 과 hand_link 가 같은 자리로 나와 '접근축 를 못 구한다' 로 죽었다 (2026-09-21 실측).
@@ -725,31 +759,71 @@ class BookScene:
         Lm = np.stack([self._a_loc, self._c_loc, b_l], axis=1); Wm = np.stack([a_w, c_w, np.cross(a_w, c_w)], axis=1)
         return quat_from_R(Wm @ Lm.T)
 
-    def _above_deck(self, q):
-        """이 관절각에서 **모든 링크가 받침판 위**에 있는가.
+    def elbow_branch(self, q):
+        """팔꿈치가 어깨–손목 선보다 **위**인가. 관절 원점만 보므로 충돌 구 정확도와 무관.
 
-        왜 필요한가: Lula 는 기구학만 본다. 어깨를 받침판 속으로 밀어 넣는 해도
-        멀쩡히 돌려준다. 그 해로 경로를 짜면 팔이 물리적으로 못 가고
-        `404 제한 시간 초과` 가 난다 — 경유점은 다 보냈는데 joint_2 만 0.42 rad 남는다
-        (2026-09-21 실측: link_1·link_2 가 Nova_Carter_ROS/Cube 와 겹쳐 있었다).
-
-        FK 로 각 링크 원점 높이를 보고 받침판보다 낮으면 버린다. 겹침검사(PhysX)보다
-        훨씬 싸고, **막히는 경우의 대부분인 '아래로 파고드는 해'** 를 잡는다.
+        6축은 같은 손 자세에 해가 **정확히 8개**뿐이다 (7축 Franka 처럼 연속으로 비켜설 수
+        없다). 그 8개는 팔꿈치↓ 4개와 팔꿈치↑ 4개로 갈리고, **팔꿈치↓ 는 윗팔이 수평 아래
+        15.9° 로 내려가 받침판에 닿는다.** 그래서 가지를 고르는 것이 전부다.
+        (근거: 웹 클로드 v21 회신 §1, 도구 simulation/isaac/tools/branch/m0609_kin.py)
         """
-        if not getattr(self, "_deck_frames", None):
+        try:
+            sh = np.asarray(self.lula.compute_forward_kinematics("link_2", q)[0], float)
+            el = np.asarray(self.lula.compute_forward_kinematics("link_3", q)[0], float)
+            wr = np.asarray(self.lula.compute_forward_kinematics("link_5", q)[0], float)
+        except Exception:      # noqa: BLE001 — 프레임을 모르면 판정하지 않는다
+            return None
+        line = wr - sh
+        den = float(np.dot(line, line))
+        if den < 1e-12:
+            return None
+        t = float(np.dot(el - sh, line)) / den
+        return "up" if float((el - (sh + t * line))[2]) > 0 else "down"
+
+    def _branch_ok(self, q):
+        """팔꿈치↑ 이고, 어깨가 홈과 같은 쪽을 보는가.
+
+        두 번째 조건은 어깨가 반대로 도는 팔꿈치↑ 해(j1 ≈ +2.87)를 막는다 —
+        가지는 맞아도 팔 전체가 뒤로 돈다.
+        """
+        if not BRANCH_GUARD:
             return True
-        for f in self._deck_frames:
-            try:
-                p, _ = self.lula.compute_forward_kinematics(f, np.asarray(q, float))
-            except Exception:      # noqa: BLE001 — 프레임 이름이 없으면 검사하지 않는다
+        if self.elbow_branch(q) != "up":
+            return False
+        d = float(q[0]) - float(self.q_home[0])
+        d = (d + math.pi) % (2 * math.pi) - math.pi          # −π~π 로 감싼다
+        return abs(d) < math.pi / 2
+
+    def _above_deck(self, q):
+        """이 관절각에서 **팔이 받침판을 뚫지 않는가** (기술서 충돌 구로 검사).
+
+        Lula 는 기구학만 본다. 어깨를 받침판 속으로 밀어 넣는 해도 멀쩡히 돌려준다.
+        그 해로 경로를 짜면 팔이 물리적으로 못 가고 `404 제한 시간 초과` 가 난다 —
+        경유점을 절반쯤 보낸 채 joint_2 가 -1.43 에서 멈춘다 (2026-09-21 실측).
+
+        링크 원점 높이만 보면 부족했다 (원점은 판 위인데 몸통이 닿는다). 기술서의
+        링크별 충돌 구를 FK 로 월드에 놓고, **구의 아랫점이 판보다 아래면** 버린다.
+        """
+        if not getattr(self, "_deck_spheres", None):
+            return True
+        fk = {}
+        for name, c, r in self._deck_spheres:
+            if name not in fk:
+                try:
+                    fk[name] = self.lula.compute_forward_kinematics(name, np.asarray(q, float))
+                except Exception:      # noqa: BLE001
+                    fk[name] = None
+            if fk[name] is None:
                 continue
-            if float(p[2]) < DECK_MIN_Z:
+            p, R = fk[name]
+            z = float((np.asarray(p, float) + np.asarray(R, float) @ c)[2]) - r
+            if z < DECK_Z - DECK_SINK_M:
                 if os.environ.get("SIM_TRACE_IK", "0") != "0":
                     self._deck_rej = getattr(self, "_deck_rej", {})
-                    key = f"{f} z={float(p[2]):.3f}"
+                    key = f"{name} 바닥 z={z:.3f}"
                     self._deck_rej[key] = self._deck_rej.get(key, 0) + 1
-                    if self._deck_rej[key] in (1, 50, 500):
-                        self.say(f"[받침판] {f} z {float(p[2]):.3f} < {DECK_MIN_Z:.3f} "
+                    if self._deck_rej[key] in (1, 100):
+                        self.say(f"[받침판] {name} 구 바닥 {z:.3f} < {DECK_Z - DECK_SINK_M:.3f} "
                                  f"— 해를 버린다 ({self._deck_rej[key]}번째)")
                 return False
         return True
@@ -859,7 +933,9 @@ class BookScene:
         seed = np.asarray(seed, float)
         lim = BOT.ik_seed_limit
         best = None
-        for k, s0 in enumerate([seed] + [seed + d for d in self._ik_nudges]):
+        # 홈을 마지막 씨앗으로 둔다 — 흔들기로 못 찾으면 팔꿈치↑ 홈에서 다시 푼다
+        _seeds = [seed] + [seed + d for d in self._ik_nudges] + [np.asarray(self.q_home, float)]
+        for k, s0 in enumerate(_seeds):
             q, ok = self.lula.compute_inverse_kinematics(
                 BOT.ee_frame, np.asarray(target, float), np.asarray(ori, float),
                 np.asarray(s0, float), 0.004, 0.05)
@@ -867,8 +943,16 @@ class BookScene:
                 continue
             q = np.asarray(q, float)
             q = self._unwrap_to(q, seed)
+            if not self._branch_ok(q):
+                continue          # 팔꿈치↓ 해는 받침판에 닿는다 — 조용히 쓰지 않는다
+            # 받침판 검사는 **가드로만** 남긴다. 해를 버리면 IK 가 다른 가지로 튀고,
+            # 그게 `down` 1.96 rad 점프의 정체였다 (웹 클로드 v21 회신 §Q2).
+            # 팔꿈치↑ 에서는 발동하지 않아야 정상이다 — 발동하면 그 자체가 신호다.
             if not self._above_deck(q):
-                continue          # 어깨·팔꿈치가 받침판을 뚫는 해는 쓸 수 없다
+                self._deck_warn = getattr(self, "_deck_warn", 0) + 1
+                if self._deck_warn in (1, 20, 200):
+                    self.say(f"[받침판 경고] 팔꿈치↑ 인데 받침판에 닿는 해가 나왔다 "
+                             f"({self._deck_warn}번째) q={np.round(q, 3).tolist()}")
             d = float(np.max(np.abs(q[:len(seed)] - seed)))
             if lim <= 0 or d <= lim:
                 return q, True
@@ -1032,7 +1116,8 @@ class BookScene:
         # 꽂아 넣는 동작은 책이 칸 벽을 따라 들어가야 하므로 직선이어야 한다.
         # approach 는 직교 보간이 검증돼 있다. 관절 공간으로 바꿨더니 팔이 넓게 휘둘러
         # 실행에서 `404 제한 시간 초과` 가 났다 (2026-09-21 실측). 문제였던 구간만 바꾼다.
-        JOINT_SEGS = {"carry_rotate", "return"}
+        JOINT_SEGS = set(os.environ.get(
+            "SIM_JOINT_SEGS", "carry_rotate,return").replace(" ", "").split(","))
         segs = {}; q = self.q_home
         for name, wps in order:
             if name in JOINT_SEGS:
@@ -1054,6 +1139,25 @@ class BookScene:
             if w > MAX_STEP:
                 return None, 402, f"{name}: 인접점 관절변화 {w:.3f} rad"
             worst_all = max(worst_all, w)
+        # **계획 전체를 파일로 덤프한다** (SIM_PLAN_DUMP). Isaac 없이 도는 가지 감사
+        # 도구(m0609_plan_audit.py)에 그대로 넣기 위한 것이다.
+        if os.environ.get("SIM_PLAN_DUMP"):
+            import json
+            _lin = {"down", "lift", "wedge", "back", "touch", "push", "retreat"}
+            _wp, _lab, _isl = [], [], []
+            for _n in ("approach", "down", "lift", "carry_rotate", "wedge",
+                       "back", "touch", "push", "retreat", "return"):
+                for _q in segs.get(_n, []):
+                    _wp.append([float(v) for v in _q])
+                    _lab.append(_n)
+                    _isl.append(_n in _lin and _n not in JOINT_SEGS)
+            try:
+                with open(os.environ["SIM_PLAN_DUMP"], "w") as _f:
+                    json.dump({"home": [float(v) for v in self.q_home],
+                               "waypoints": _wp, "labels": _lab, "linear": _isl}, _f)
+                self.say(f"계획 덤프: {len(_wp)}점 → {os.environ['SIM_PLAN_DUMP']}")
+            except Exception as _exc:      # noqa: BLE001
+                self.say(f"[경고] 계획 덤프 실패: {_exc}")
         if shifted:
             # 같은 자세를 다른 값으로 표현한 것뿐이라 홈도 같이 맞춘다 (물리적으로 동일하다)
             self.q_home = np.asarray(segs["approach"][0], float).copy()

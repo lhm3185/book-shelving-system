@@ -46,6 +46,8 @@ ap.add_argument("--trials", type=int, default=6)
 ap.add_argument("--span", type=float, default=1.0, help="위치를 흔드는 폭 (m, ±)")
 ap.add_argument("--yaw-span", type=float, default=0.0, help="방향을 흔드는 폭 (도, ±)")
 ap.add_argument("--seed", type=int, default=7)
+ap.add_argument("--settle", type=float, nargs="+", default=[1.5],
+                help="로봇을 옮긴 뒤 refresh_base 까지 기다릴 시간(초). 여러 개면 비교한다")
 ap.add_argument("--tol-rad", type=float, default=0.01,
                 help="관절각이 이만큼까지 같으면 같은 경로로 본다 (0.01 rad ≈ 0.57°)")
 ap.add_argument("--books", type=int, default=6)
@@ -97,8 +99,12 @@ q0 = np.asarray(q0, float)
 rng = np.random.default_rng(a.seed)
 
 
-def set_pose(dx, dy, dyaw_deg):
-    """로봇 루트를 원래 자리에서 (dx, dy) 옮기고 dyaw 만큼 돌린다"""
+def set_pose(dx, dy, dyaw_deg, settle_s=1.5):
+    """로봇 루트를 원래 자리에서 (dx, dy) 옮기고 dyaw 만큼 돌린 뒤 **정착시킨다**.
+
+    왜 기다리나: Nav2 가 멈춘 직후에는 베이스가 아직 흔들린다. 그 순간 `refresh_base()` 를
+    읽으면 **흔들린 자세가 기준**이 된다 — "상태를 언제 읽느냐" 계열의 함정이다.
+    """
     h = math.radians(dyaw_deg) / 2.0
     dq = np.array([math.cos(h), 0.0, 0.0, math.sin(h)])
     w0, x0, y0, z0 = q0
@@ -108,7 +114,7 @@ def set_pose(dx, dy, dyaw_deg):
                   w1 * y0 - x1 * z0 + y1 * w0 + z1 * x0,
                   w1 * z0 + x1 * y0 - y1 * x0 + z1 * w0])
     root.set_world_pose(p0 + np.array([dx, dy, 0.0]), q)
-    for _ in range(90):                     # 옮긴 뒤 가라앉힌다 (책이 튀면 파지 판정이 흔들린다)
+    for _ in range(max(1, int(settle_s * 60))):
         world.step(render=False)
 
 
@@ -125,8 +131,14 @@ def arm_frame_path(plan):
     return out
 
 
-def trial(dx, dy, dyaw):
-    set_pose(dx, dy, dyaw)
+def branch_of(q):
+    """팔꿈치 가지. 6축은 해가 8개뿐이고 **가지가 전부를 정한다** (웹 클로드 v21 회신 §1)"""
+    fn = getattr(scene, "elbow_branch", None)
+    return fn(np.asarray(q, float)) if fn else None
+
+
+def trial(dx, dy, dyaw, settle_s=1.5):
+    set_pose(dx, dy, dyaw, settle_s)
     moved = scene.refresh_base()
     pick_w = scene.to_world(PICK_ARM)
     place_w = scene.to_world(PLACE_ARM)
@@ -141,6 +153,15 @@ def trial(dx, dy, dyaw):
     plan, code, err = scene.plan_job(book, place_w)
     if plan is None:
         return None, f"계획 실패 M{code} {err}"
+    # **가지 불변 단언** — 모든 경유점이 팔꿈치↑ 여야 한다. 하나라도 ↓ 면 받침판에 닿는다
+    bad_br = []
+    for _n, _qs in plan["segs"].items():
+        for _i, _q in enumerate(_qs):
+            if branch_of(_q) == "down":
+                bad_br.append(f"{_n}[{_i}]")
+                break
+    if bad_br:
+        return None, f"팔꿈치↓ 가 섞였다: {', '.join(bad_br[:4])}"
     return (arm_frame_path(plan), book, dist, moved), None
 
 
@@ -158,7 +179,7 @@ for i in range(a.trials):
         dx = float(rng.uniform(-a.span, a.span))
         dy = float(rng.uniform(-a.span, a.span))
         dyaw = float(rng.uniform(-a.yaw_span, a.yaw_span))
-    res, err = trial(dx, dy, dyaw)
+    res, err = trial(dx, dy, dyaw, a.settle[0])
     tag = f"{i:2d}  dx{dx:+.2f} dy{dy:+.2f} yaw{dyaw:+6.1f}°"
     if err:
         rows.append((tag, None, err))
@@ -188,6 +209,25 @@ else:
     say(f"**{len(bad)}/{a.trials} 회가 다르다** — 월드 가정이 남아 있다")
     for tag, w, note in bad:
         say(f"    {tag}  {note}")
+if len(a.settle) > 1 and base is not None:
+    say("")
+    say("=" * 78)
+    say("정착 시간별 비교 — **언제부터 같아지는가**가 필요한 대기 시간이다")
+    say("=" * 78)
+    ref = None
+    for t in a.settle:
+        r2, e2 = trial(0.0, 0.0, 0.0, t)
+        if e2:
+            say(f"  {t:4.1f}초  **{e2}**")
+            continue
+        path2 = r2[0]
+        if ref is None:
+            ref = path2
+            say(f"  {t:4.1f}초  기준")
+            continue
+        w = max(float(np.max(np.abs(b - c))) for (_, b), (_, c) in zip(ref, path2))
+        say(f"  {t:4.1f}초  관절각 최대차 {w:.5f} rad")
+
 say("주의: 이 시험은 **계획**만 본다. 실제로 꽂히는지는 따로 봐야 한다")
 app.close()
 sys.exit(1 if bad else 0)
