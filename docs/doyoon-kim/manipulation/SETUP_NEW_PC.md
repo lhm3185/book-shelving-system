@@ -169,11 +169,23 @@ grep address ~/.ros/fastdds_whitelist.xml
 주소가 목록에 없으면 둘 중 하나:
 
 ```bash
-# (A) 한 PC 안에서만 쓸 때 — 화이트리스트를 쓰지 않는다
-unset FASTRTPS_DEFAULT_PROFILES_FILE
+# (A) 한 PC 안에서만 쓸 때 — 저장소의 빈 프로파일을 가리킨다
+export FASTRTPS_DEFAULT_PROFILES_FILE=<저장소>/config/fastdds_local.xml
 
 # (B) 여러 PC 를 쓸 때 — 이 PC 주소를 <interfaceWhiteList> 에 추가
 ```
+
+**`unset` 으로는 안 된다.** 스크립트들이 `${FASTRTPS_DEFAULT_PROFILES_FILE:-~/.ros/fastdds_whitelist.xml}`
+로 기본값을 주기 때문에, 지워 두면 도로 켜진다. 빈 문자열도 안 된다 — FastDDS 가
+`realpath failed` 를 뱉고 `:-` 가 또 기본값으로 바꾼다. 그래서 **있지만 아무 것도 안 하는**
+파일(`config/fastdds_local.xml`)을 가리킨다. 스크립트에서 기본값을 줄 때는 `:-` 가 아니라 `-` 를 쓴다.
+
+### 화이트리스트는 **같은 PC 안**도 막는다
+
+`useBuiltinTransports=false` 로 공유메모리·로컬호스트 전송이 꺼지기 때문이다.
+2026-09-21 GPU PC 에서 Isaac 은 멀쩡히 돌고 **다른 PC 에서는 토픽이 보이는데**
+정작 그 PC 안에서 `ros2 topic list` 하면 `/parameter_events`, `/rosout` 뿐이었다.
+한 PC 에서 다 돌리는 시연은 반드시 (A) 로 할 것.
 
 `./scripts/setup_check.sh` 가 이것도 같이 본다.
 
@@ -196,7 +208,9 @@ ARM_ROBOT=m0609 ISAAC_ENTRY=simulation/isaac/tools/check_reach.py \
 
 `트레이 6/6   서가 4/4` 가 나오면 환경이 제대로 선 것이다.
 
-그다음은 `DEMO_20260921.md` 의 터미널 순서를 따른다.
+그다음은 `DEMO_PATROL_PICK.md` (순회+파지 한 명령) 또는 `DEMO_20260921.md` 의 터미널 순서를 따른다.
+**순회·파지 시연은 클론만 하면 돈다** — 레벨은 `~/Desktop` 에 없으면 저장소 사본으로 떨어지고,
+YOLO 모델도 저장소에 들어 있다.
 Isaac 을 이 PC 에서 직접 돌린다면 `SIM_HOST=local ./scripts/demo/sim_up.sh`.
 
 ---

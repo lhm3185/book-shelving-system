@@ -13,7 +13,17 @@
 set -u
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-LEVEL="${SIM_LEVEL:-$HOME/Desktop/assets/level/ing_library_env_v4.usd}"
+# 레벨을 찾는 순서. **저장소 안 사본으로 떨어진다** — 클론만 한 PC 에서도 돌아야 한다
+# (연구실 PC 는 ~/Desktop 에 두고 쓰지만, 집 PC 에는 그 폴더가 없다)
+LEVEL_CANDIDATES=(
+    "${SIM_LEVEL:-}"
+    "$HOME/Desktop/assets/level/ing_library_env_v4.usd"
+    "$REPO/simulation/assets/level/ing_library_env_v4.usd"
+)
+LEVEL=""
+for cand in "${LEVEL_CANDIDATES[@]}"; do
+    [ -n "$cand" ] && [ -f "$cand" ] && { LEVEL="$cand"; break; }
+done
 CAM=/World/ridgeback_franka/panda_hand/rsd455/RSD455/Camera_OmniVision_OV9782_Color
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-129}"
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
@@ -52,7 +62,14 @@ set +u; source /opt/ros/jazzy/setup.bash; source "$REPO/ros2_ws/install/setup.ba
 
 # ------------------------------------------------------------------ 1. Isaac
 if [ "$KEEP_SIM" -eq 0 ]; then
-    [ -f "$LEVEL" ] || { echo "**레벨이 없다: $LEVEL**"; exit 1; }
+    [ -n "$LEVEL" ] || {
+        # **찾아본 곳을 전부 보여준다** — "없다" 만으로는 어디에 둬야 할지 알 수 없다
+        echo "**레벨을 못 찾았다.** 찾아본 곳:"
+        for cand in "${LEVEL_CANDIDATES[@]}"; do
+            [ -n "$cand" ] && echo "    $cand"
+        done
+        echo "  SIM_LEVEL=<경로> 로 직접 지정할 수 있다"
+        exit 1; }
     OLD=$(pgrep -f 'isaac/run_simulation' || true)
     [ -n "$OLD" ] && { echo "남은 Isaac 종료: $OLD"; kill $OLD; sleep 5; }
     echo "[1/4] Isaac 시작 (약 4분) — 레벨 $(basename "$LEVEL")"
