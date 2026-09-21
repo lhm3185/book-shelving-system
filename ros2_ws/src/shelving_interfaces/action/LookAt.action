@@ -1,8 +1,12 @@
-# 로봇팔을 **관측 자세**로 보낸다. FSM 은 "무엇을 볼지"만 말하고,
-# 자세 값은 로봇팔 설정(arm.yaml 의 poses.view_*)에 둔다 —
-# FSM 이 관절각을 들고 다니면 좌표 계약이 하나 더 생긴다.
+# 로봇팔을 **관측 자세**로 보낸다.
 #
-# 계약: docs/doyoon-kim/manipulation/PICKPLACE_CONTRACT_V2.md §2
+# **정상 흐름에는 쓰이지 않는다.** 로봇팔이 비전의 클라이언트라, 관측 자세 이동은
+# 작업 안에서 알아서 한다 (AskVision 프리미티브). 이것은 **시험·디버그용**이다:
+#   · 비전 팀이 로봇팔 동작 없이 "책장을 보는 화면"만 띄우고 인식을 시험할 때
+#   · 관측 자세를 실측·조정할 때
+#
+# 자세 값은 한 곳에만 둔다 — arm.yaml 의 poses.view_shelf / poses.view_tray.
+# 계약: docs/doyoon-kim/manipulation/PICKPLACE_CONTRACT_V2.md §7
 
 string job_id
 string view                 # "shelf" | "tray"
