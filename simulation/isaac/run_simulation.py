@@ -148,6 +148,40 @@ if args.camera or args.camera_prim or args.amr_test_overrides:
         gate.set_camera_hz(args.camera_hz)
     say(f"센서 정책 {args.sensor_policy}: 카메라 노드 {len(gate.camera_nodes)}, 라이다 노드 {len(gate.lidar_nodes)}")
 
+# --- 트레이 오차 측정: 장면만 세우고 표를 찍은 뒤 끝낸다
+if args.probe_tray:
+    import json as _json
+    for _ in range(int(os.environ.get("SIM_PROBE_SETTLE_STEPS", "120"))):
+        world.step(render=False)
+    # **로봇이 실제로 쓰는 설정값**과 비교한다 (시뮬이 아는 값이 아니라).
+    # 이 파일이 파지 목표의 출처다 — 여기가 틀리면 파지가 틀린다
+    _cfg = None
+    try:
+        import yaml as _yaml
+        _pf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
+                           "ros2_ws/src/shelving_manipulation/config/book_profiles.yaml")
+        with open(os.path.abspath(_pf), encoding="utf-8") as _fh:
+            _slots = ((_yaml.safe_load(_fh) or {}).get("tray") or {}).get("slots") or []
+        _cfg = [sl["center"] for sl in sorted(_slots, key=lambda x: x.get("index", 0))]
+        say(f"[PROBE] 설정 칸 {len(_cfg)}개 ({os.path.basename(_pf)})")
+    except Exception as _exc:      # noqa: BLE001
+        say(f"[PROBE] 설정 칸을 못 읽었다: {type(_exc).__name__}: {_exc}")
+    _rows = []
+    for _i, _b in enumerate(scene.books):
+        _c = scene.center(_b)
+        _arm = scene.to_arm(_c)
+        _row = {"slot": _i, "book": _b.rsplit("/", 1)[-1],
+                "world": [round(float(v), 5) for v in _c],
+                "arm": [round(float(v), 5) for v in _arm]}
+        if _cfg is not None and _i < len(_cfg):
+            _row["cfg"] = [round(float(v), 5) for v in _cfg[_i]]
+            _row["err_mm"] = [round(float((_arm[_k] - _cfg[_i][_k]) * 1000), 2) for _k in (0, 1, 2)]
+        _rows.append(_row)
+        say(f"[PROBE] {_json.dumps(_row, ensure_ascii=False)}")
+    say(f"[PROBE] done books={len(_rows)}")
+    app.close()
+    raise SystemExit(0)
+
 # 실행기 등록 — 로봇팔과 주행. 둘 다 같은 노드를 쓰고 자기 토픽만 만든다
 node = ros_bridge.make_node("isaac_place_book_executor")
 executor = None

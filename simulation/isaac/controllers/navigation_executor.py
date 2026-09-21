@@ -200,6 +200,22 @@ class NavigationExecutor:
         except Exception as exc:      # noqa: BLE001 - 진단이 주행을 막으면 안 된다
             self.say(f"[추적:{tag}] 못 찍었다: {type(exc).__name__}: {exc}")
 
+    def _log_residual(self, when):
+        """**팔 베이스**의 출발 대비 잔차를 적는다 (루트가 아니다).
+
+        두 번 찍는다: 보정 직후와 정착 뒤. 보정 직후 값은 물리가 따라오기 전의
+        USD 값일 수 있어 0 에 가깝게 나와도 믿기 어렵다. 파지가 실제로 보는 것은
+        **정착 뒤** 값이다.
+        """
+        if not DIAG:
+            return
+        p, q = self.arm_base.get_world_pose()
+        res = self.home_arm[:2] - np.asarray(p, float)[:2]
+        ryaw = _yaw(self.home_arm_q) - _yaw(np.asarray(q, float))
+        ryaw = math.atan2(math.sin(ryaw), math.cos(ryaw))
+        self.say(f"[DIAG] return_residual({when})=[{float(np.hypot(*res)):.5f}, "
+                 f"{math.degrees(ryaw):+.3f}]")
+
     # ---------------------------------------------------------------- 복귀 보정
     def _realign_arm_base(self):
         """제자리로 돌아왔으면 **팔 베이스**를 출발 자리에 정확히 맞춘다.
@@ -258,14 +274,7 @@ class NavigationExecutor:
         self._write_root(root_p, np.asarray(root_q, float), "복귀 보정(위치)")
         self.say(f"[주행] 팔 베이스 복귀 보정: 위치 {drift*100:.1f}cm, "
                  f"자세 {math.degrees(dyaw):+.2f}° — 파지 기준을 출발 때와 같게 맞췄다")
-        if DIAG:
-            # **보정 뒤 실제로 얼마가 남았는지.** 보정량이 아니라 잔차를 적는다 —
-            # 팔 베이스(panda_link0) 기준이며 루트가 아니다
-            _p, _q = self.arm_base.get_world_pose()
-            _res = self.home_arm[:2] - np.asarray(_p, float)[:2]
-            _ryaw = _yaw(self.home_arm_q) - _yaw(np.asarray(_q, float))
-            self.say(f"[DIAG] return_residual=[{float(np.hypot(*_res)):.5f}, "
-                     f"{math.degrees(math.atan2(math.sin(_ryaw), math.cos(_ryaw))):+.3f}]")
+        self._log_residual("보정직후")
         self._snapshot("보정직후")
 
     # ---------------------------------------------------------------- 매 스텝
@@ -291,6 +300,10 @@ class NavigationExecutor:
             if self.settle <= 0:
                 # 보정 뒤 남은 스텝 동안 follow_tray 가 따라왔는지 — '보정직후' 와 비교한다
                 self._snapshot("도착시")
+                # **정착 뒤 잔차를 다시 잰다.** 보정 직후에 읽은 값은 물리가 따라오기 전
+                # USD 값일 수 있다 (같은 이유로 '보정직후' 스냅샷이 '보정전' 과 같았다).
+                # 파지가 실제로 보는 것은 이 값이다
+                self._log_residual("정착후")
                 self.status = "succeeded"
                 p, _ = self.root.get_world_pose()
                 self.say(f"[주행] 도착 ({float(p[0]):+.3f}, {float(p[1]):+.3f})")

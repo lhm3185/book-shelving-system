@@ -394,6 +394,25 @@ class BookScene:
 
         if before_reset is not None:
             before_reset(st)      # ROS 그래프 설정 보완 등 — 재생(초기화) 전에 해야 반영된다
+
+        # **출발 위치를 옮기는 시험용 스위치** — `SIM_ROBOT_OFFSET="dx,dy"` (m, 월드).
+        # 트레이 앵커·책 배치·`home_arm` 은 **모두 이 뒤에** 잡히므로, 옮긴 자리가
+        # 그대로 새 출발점이 된다. 즉 '출발점 오차' 가 아니라 **'출발점 변화'** 를 재는 것이다.
+        # reset 전에 옮겨야 그 자세가 기본 상태로 저장된다.
+        _off = os.environ.get("SIM_ROBOT_OFFSET", "").strip()
+        if _off:
+            try:
+                _dx, _dy = (float(v) for v in _off.replace(" ", "").split(","))
+                _rp, _rq = SingleXFormPrim(R).get_world_pose()
+                _rp = np.asarray(_rp, float).copy()
+                _rp[0] += _dx
+                _rp[1] += _dy
+                SingleXFormPrim(R).set_world_pose(_rp, _rq)
+                say(f"출발 위치 이동: ({_dx:+.3f}, {_dy:+.3f}) m → "
+                    f"({_rp[0]:+.4f}, {_rp[1]:+.4f}) [SIM_ROBOT_OFFSET]")
+            except (TypeError, ValueError) as _exc:
+                say(f"SIM_ROBOT_OFFSET 형식 오류 '{_off}' ({_exc}) — 옮기지 않는다")
+
         self.world.reset(); self.robot.initialize()
         r = self.robot
         self.idx_arm = [r.get_dof_index(j) for j in ARM_JOINTS]
