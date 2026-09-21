@@ -215,6 +215,35 @@ class BookScene:
         self.tray_yaw = float(_yaw0)      # 파지·삽입 자세의 기준 방향
         say(f"트레이 배치: 팔 기준 {np.round(_tray_rel[:2], 4).tolist()} "
             f"→ 월드 {np.round(_tray_w[:2], 3).tolist()}, 면 z {DECK_Z:.3f}")
+        # **트레이를 로봇에 붙인다.** 지금까지 트레이는 RigidBody 없이 월드에 고정된
+        # 정적 콜라이더였다. 로봇이 제자리에 서 있는 시험에서는 문제가 없었지만,
+        # **Nav2 로 주행하면 로봇만 가고 트레이·책은 그 자리에 남는다.**
+        # 그러면 서가 앞에 도착해도 팔 옆에 책이 없다 (2026-09-21 통합시험에서 드러남).
+        # 로봇 몸체와 고정 조인트로 묶어 같이 움직이게 한다. SIM_TRAY_FOLLOW=0 이면 옛 동작.
+        self._tray_joint = None
+        if os.environ.get("SIM_TRAY_FOLLOW", "1") != "0":
+            _tray_prim = st.GetPrimAtPath(self.tray)
+            UsdPhysics.RigidBodyAPI.Apply(_tray_prim)
+            UsdPhysics.MassAPI.Apply(_tray_prim).CreateMassAttr().Set(2.0)
+            # 붙일 상대: 받침판(Cube) 이 있으면 그것, 없으면 아티큘레이션 루트
+            _anchor = f"{R}/Cube" if st.GetPrimAtPath(f"{R}/Cube").IsValid() else BOT.articulation_root
+            _ap, _aq = SingleXFormPrim(_anchor).get_world_pose()
+            _Ra = R_from_quat(np.asarray(_aq, float))
+            _rel_p = _Ra.T @ (np.array([_tray_w[0], _tray_w[1], DECK_Z]) - np.asarray(_ap, float))
+            _rel_q = quat_from_R(_Ra.T @ R_from_quat(_tray_q))
+            _j = UsdPhysics.FixedJoint.Define(st, "/World/bs_tray_joint")
+            _j.CreateBody0Rel().SetTargets([_anchor])
+            _j.CreateBody1Rel().SetTargets([self.tray])
+            _j.CreateLocalPos0Attr().Set(Gf.Vec3f(*[float(v) for v in _rel_p]))
+            _j.CreateLocalRot0Attr().Set(Gf.Quatf(float(_rel_q[0]), Gf.Vec3f(*[float(v) for v in _rel_q[1:]])))
+            _j.CreateLocalPos1Attr().Set(Gf.Vec3f(0, 0, 0))
+            _j.CreateLocalRot1Attr().Set(Gf.Quatf(1, Gf.Vec3f(0, 0, 0)))
+            _j.CreateExcludeFromArticulationAttr().Set(True)
+            self._tray_joint = "/World/bs_tray_joint"
+            say(f"트레이를 로봇에 고정: {_anchor} ↔ bs_tray (주행해도 따라온다)")
+        else:
+            say("트레이 고정 안 함 (SIM_TRAY_FOLLOW=0) — 주행하면 트레이가 제자리에 남는다")
+
         pitch = nslots = floor_top = None
         # **진단용 스위치.** SIM_TRAY_COLLIDER=0 이면 트레이 콜라이더를 안 붙인다.
         # "팔이 트레이에 막히는가" 를 5분 만에 가르기 위한 것 — 책은 트레이를 통과해
