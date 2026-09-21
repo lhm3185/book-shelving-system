@@ -83,6 +83,11 @@ class ManipulationExecutor:
     def finish(self, status, **extra):
         if self.gate is not None and self.sensor_policy == "gated":
             self.gate.all(True, "— 작업 끝, 관측 대기")
+        if "grip_w0" in getattr(self.job, "watch", {}):
+            _w0 = self.job.watch["grip_w0"]
+            _wm = self.job.watch.get("grip_w_min", _w0)
+            self.say(f"[JUDGE] width_hold={'ok' if _w0 - _wm <= 0.002 else 'ng'} "
+                     f"({_w0*1000:.1f} → 최소 {_wm*1000:.1f} mm)")
         if os.environ.get("SIM_DIAG_M406") == "1":
             # **작업 중에 루트를 몇 번 옮겼나** (가설 H-a). 0 이 아니면 손 안의 책이
             # 밀릴 수 있다 — 주행 실행기의 _write_root 가 센다
@@ -212,6 +217,20 @@ class ManipulationExecutor:
                                         f"(기대 {_need * 100:.1f}cm 이상)")
                 elif self.gate is not None and self.sensor_policy == "gated":
                     self.gate.all(False, f"— 파지 확인 (책 상승 {job.watch['rise'] * 100:.1f}cm), 작업 끝까지")
+                # **판정을 바꾸지 않는다.** 실물에서도 읽을 수 있는 신호(그리퍼 폭)를
+                # 나란히 적어 두고, 두 판정이 몇 판에서 일치하는지 나중에 센다.
+                # 책의 월드 자세는 실물에서 못 읽으므로 지금 기준은 시뮬 전용이다
+                try:
+                    _w = scene.grip_width()
+                    _t = float(job.book_thickness) if getattr(job, "book_thickness", 0) else \
+                        float(scene.dims.get(book, (0, 0, 0))[0])
+                    _ok = "ok" if _t > 0 and abs(_w - _t) <= 0.003 else "ng"
+                    job.watch["grip_w0"] = _w
+                    job.watch["grip_w_min"] = _w
+                    self.say(f"[JUDGE] rise={job.watch['rise']*100:.1f}cm(ok) "
+                             f"width={_w*1000:.1f}mm (book {_t*1000:.1f}±3 → {_ok})")
+                except Exception as _exc:      # noqa: BLE001 - 기록이 작업을 막으면 안 된다
+                    self.say(f"[JUDGE] 폭을 못 읽었다: {type(_exc).__name__}: {_exc}")
             # 추적할 때는 lift 구간도 잰다 — 어긋남이 **거기서** 생기는지 보기 위함이다
             _trace = os.environ.get("SIM_TRACE_SLIP", "0") != "0"
             _watch_names = ("lift", "carry_rotate", "wedge") if _trace else ("carry_rotate", "wedge")
@@ -219,6 +238,9 @@ class ManipulationExecutor:
                     and job.state["status"] == SIM_RUNNING:
                 _rel = scene.book_in_hand(book)
                 dev = float(np.linalg.norm(_rel - job.watch["rel0"]))
+                if "grip_w_min" in job.watch:
+                    # 폭이 줄면 책이 빠지는 중이다 — 실물에서 알아챌 수 있는 유일한 신호
+                    job.watch["grip_w_min"] = min(job.watch["grip_w_min"], scene.grip_width())
                 # **어긋남이 어떻게 커지는지 남긴다.** 갑자기 튀면 구속이 밀린 것이고,
                 # 서서히 자라면 미끄러지는 것이다 — 둘은 고치는 방법이 다르다.
                 # 값만 보고는 못 가른다 (2026-09-21: 책 원점을 고쳐도 4.7cm 로 똑같았다).

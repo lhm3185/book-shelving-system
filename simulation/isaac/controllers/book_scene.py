@@ -1462,6 +1462,15 @@ class BookScene:
     def book_origin(self, b):
         return np.asarray(SingleXFormPrim(b).get_world_pose()[0], float)
 
+    def grip_width(self):
+        """지금 그리퍼 폭(m). **실물에서도 읽을 수 있는 신호**라 파지 판정 후보다.
+
+        지금 파지 판정은 "책이 얼마나 올라왔나" 인데, 책의 월드 자세는 실물에서 못 읽는다.
+        폭은 관절값이라 실물에도 있다. 쥐었으면 책 두께 ±3 mm, 헛쥐었으면 ~0,
+        못 닫았으면 열린 폭 그대로다.
+        """
+        return float(BOT.grip_width(self.robot.get_joint_positions()[self.idx_fing]))
+
     def book_in_hand(self, b):
         hp, hq = SingleXFormPrim(HAND_LINK).get_world_pose()
         return R_from_quat(hq).T @ (self.book_origin(b) - np.asarray(hp, float))
