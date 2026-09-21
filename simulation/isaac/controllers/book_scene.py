@@ -556,7 +556,21 @@ class BookScene:
         # 재생·정착이 끝난 **실제 자세**로 로봇↔트레이 상대 변환을 잡는다.
         # 이후 매 스텝 follow_tray() 가 이 관계를 유지한다 → 주행해도 트레이가 따라온다.
         if self._tray_follow:
-            _anchor = f"{R}/Cube" if st.GetPrimAtPath(f"{R}/Cube").IsValid() else BOT.articulation_root
+            # **팔 베이스 링크에 붙인다.** 트레이가 어디에 있어야 하는지는 "팔 기준" 으로
+            # 정해져 있다 (칸 좌표가 전부 팔 기준이다). 차체(Cube/articulation_root)에
+            # 붙이면 차체와 팔 베이스가 **서로 다른 몸체**라 주행 뒤 둘이 어긋나고,
+            # 한쪽을 맞추면 다른 쪽이 틀어진다 — 2026-09-21 실측: 주행 복귀 보정으로
+            # 팔 베이스를 제자리에 놓자 트레이가 월드에서 6.1 cm 끌려가 책이 칸 중심에서
+            # 5.4 cm 밀렸다 (보정 **전에는** 칸 중심에 정확히 있었다).
+            # **기본은 차체(Cube/articulation_root)** — 지금까지의 동작이다.
+            # SIM_TRAY_ANCHOR=arm 으로 바꾸면 **팔 베이스 링크**에 붙는다.
+            _body = f"{R}/Cube" if st.GetPrimAtPath(f"{R}/Cube").IsValid() else BOT.articulation_root
+            _arm_base = f"{R}/{BOT.base_link}"
+            if os.environ.get("SIM_TRAY_ANCHOR", "body") == "arm" \
+                    and st.GetPrimAtPath(_arm_base).IsValid():
+                _anchor = _arm_base
+            else:
+                _anchor = _body
             _ap, _aq = SingleXFormPrim(_anchor).get_world_pose()
             _tp, _tq = SingleXFormPrim(self.tray).get_world_pose()
             _Ra = R_from_quat(np.asarray(_aq, float))
@@ -575,6 +589,8 @@ class BookScene:
                     _Rt.T @ (np.asarray(_bp, float) - np.asarray(_tp, float)),
                     _Rt.T @ R_from_quat(np.asarray(_bq, float)))
             self.say(f"트레이 위 책 {len(self._tray_books)}/{len(self.books)}권을 같이 옮긴다")
+            self.say(f"트레이 기준 링크: {_anchor.rsplit(chr(47), 1)[-1]} "
+                     f"(SIM_TRAY_ANCHOR={os.environ.get(chr(83)+chr(73)+chr(77)+chr(95)+'TRAY_ANCHOR', 'body')})")
             self.say(f"트레이가 로봇을 따라간다: {os.path.basename(_anchor)} ↔ bs_tray (키네마틱)")
             # world.step() 을 부르는 곳이 셋이다 (run_simulation, manipulation_executor 2군데).
             # 물리 콜백에 물리면 어디서 돌리든 한 번씩만 불린다.

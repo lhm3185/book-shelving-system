@@ -48,12 +48,24 @@ while [ $# -gt 0 ]; do
 done
 
 pids=()
+# 띄울 때 **새 프로세스 그룹**으로 만든다 (setsid). 그래야 자식까지 한 번에 내릴 수 있다 —
+# Isaac 은 python.sh 가 kit python 을 또 띄우므로, 부모만 죽이면 자식이 고아로 남는다
+# (2026-09-21 실측: Ctrl+C 뒤 run_simulation·manipulation_node·TF·rqt 가 systemd 밑에 남아
+#  다음 실행과 토픽이 충돌했다)
+spawn() { setsid "$@" & pids+=($!); }
+
 cleanup() {
     echo; echo "정리 중..."
-    # **우리가 띄운 PID 만** 죽인다. pkill 패턴은 자기 명령줄까지 잡아 셸을 죽인 적이 있다
-    for p in "${pids[@]:-}"; do [ -n "$p" ] && kill "$p" 2>/dev/null; done
-    sleep 2
-    for p in "${pids[@]:-}"; do [ -n "$p" ] && kill -9 "$p" 2>/dev/null; done
+    # **우리가 띄운 것만** 내린다. pkill 패턴은 자기 명령줄까지 잡아 셸을 죽인 적이 있다.
+    # 프로세스 **그룹**(-PID)으로 보내 자식까지 함께 내린다
+    for p in "${pids[@]:-}"; do [ -n "$p" ] && kill -TERM -"$p" 2>/dev/null; done
+    sleep 3
+    # rqt_image_view 는 TERM 을 무시한다 — KILL 이 필요하다
+    for p in "${pids[@]:-}"; do [ -n "$p" ] && kill -KILL -"$p" 2>/dev/null; done
+    sleep 1
+    local left=0
+    for p in "${pids[@]:-}"; do [ -n "$p" ] && kill -0 "$p" 2>/dev/null && left=$((left + 1)); done
+    [ "$left" -gt 0 ] && echo "**$left 개가 안 내려갔다** — ps 로 확인할 것"
     echo "정리 끝"
 }
 trap cleanup INT TERM EXIT
@@ -73,10 +85,9 @@ if [ "$KEEP_SIM" -eq 0 ]; then
     OLD=$(pgrep -f 'isaac/run_simulation' || true)
     [ -n "$OLD" ] && { echo "남은 Isaac 종료: $OLD"; kill $OLD; sleep 5; }
     echo "[1/4] Isaac 시작 (약 4분) — 레벨 $(basename "$LEVEL")"
-    ( cd "$REPO" && SIM_USD="$LEVEL" ./scripts/run_isaac_sim.sh --gui \
+    spawn env SIM_USD="$LEVEL" "$REPO/scripts/run_isaac_sim.sh" --gui \
         --camera-prim "$CAM" --amr-test-overrides --drive-speed "$SPEED" \
-        > "$LOG/isaac.log" 2>&1 ) &
-    pids+=($!)
+        > "$LOG/isaac.log" 2>&1
 else
     echo "[1/4] 떠 있는 Isaac 을 그대로 쓴다"
 fi
@@ -108,29 +119,29 @@ ARM_BASE=$(ARM_ROBOT=franka python3 -c \
      from robot_profiles import profile; print(profile().base_link.split('/')[-1])")
 [ -n "$ARM_BASE" ] || { echo "팔 기준 프레임을 못 구했다"; exit 1; }
 echo "      팔 기준 프레임: $ARM_BASE → arm_base_link"
-ros2 run tf2_ros static_transform_publisher --frame-id "$ARM_BASE" --child-frame-id arm_base_link \
-    --ros-args -p use_sim_time:=true > "$LOG/tf_arm.log" 2>&1 & pids+=($!)
-ros2 run tf2_ros static_transform_publisher --frame-id Camera_OmniVision_OV9782_Color \
-    --child-frame-id sim_camera --ros-args -p use_sim_time:=true > "$LOG/tf_cam.log" 2>&1 & pids+=($!)
+spawn ros2 run tf2_ros static_transform_publisher --frame-id "$ARM_BASE" \
+    --child-frame-id arm_base_link --ros-args -p use_sim_time:=true > "$LOG/tf_arm.log" 2>&1
+spawn ros2 run tf2_ros static_transform_publisher --frame-id Camera_OmniVision_OV9782_Color \
+    --child-frame-id sim_camera --ros-args -p use_sim_time:=true > "$LOG/tf_cam.log" 2>&1
 
 RES="$REPO/ros2_ws/install/shelving_perception/share/shelving_perception/resource"
-ros2 run shelving_perception vision_manager --ros-args \
+spawn ros2 run shelving_perception vision_manager --ros-args \
     --params-file "$REPO/ros2_ws/src/shelving_perception/config/perception.yaml" \
     -p model_path:="${MODEL_PATH:-$RES/book_tray_best.pt}" \
     -p shelf_model_path:="${SHELF_MODEL:-$RES/best.pt}" \
     -p confidence_threshold:="${VISION_CONF:-0.75}" \
-    > "$LOG/vision.log" 2>&1 & pids+=($!)
-ros2 run shelving_manipulation manipulation_node --ros-args \
+    > "$LOG/vision.log" 2>&1
+spawn ros2 run shelving_manipulation manipulation_node --ros-args \
     --params-file "$REPO/ros2_ws/src/shelving_manipulation/config/manipulation.yaml" -p executor:=sim \
-    > "$LOG/manipulation.log" 2>&1 & pids+=($!)
+    > "$LOG/manipulation.log" 2>&1
 sleep 8
 
 # 검출 요청을 계속 보낸다 — 비전은 요청이 있을 때만 검출한다
-ros2 topic pub -r 1 /perception/detect_request std_msgs/Bool "{data: true}" \
-    > "$LOG/trigger.log" 2>&1 & pids+=($!)
+spawn ros2 topic pub -r 1 /perception/detect_request std_msgs/Bool "{data: true}" \
+    > "$LOG/trigger.log" 2>&1
 # 검출 화면 (실패해도 시연은 계속한다)
-ros2 run rqt_image_view rqt_image_view /perception/debug_image \
-    > "$LOG/rqt.log" 2>&1 & pids+=($!)
+spawn ros2 run rqt_image_view rqt_image_view /perception/debug_image \
+    > "$LOG/rqt.log" 2>&1
 echo "      비전 창: /perception/debug_image (노란 ROI · 초록 상자 · 빨간 점)"
 sleep 5
 

@@ -92,7 +92,15 @@ DEFAULT_LIMITS = {
     'finger_thickness': 0.0264,        # Franka Hand 손가락 하나 벌림축 두께 (Isaac 5.1.0 실측)
     'side_clearance': 0.005,           # 칸 옆 책과 한쪽 여유
     'height_clearance': 0.02,          # 책 위 여유
-    'grip_clearance': 0.005,           # 파지 전 벌림 여유 (한쪽)
+    # 파지 전 벌림 여유 (한쪽). **이 값이 곧 '손가락 ↔ 집을 책' 안쪽 여유다** —
+    # 손가락 안쪽면이 책 반두께 + 이 값에 놓이므로 책 두께가 상쇄된다.
+    # **기본값은 0.005 그대로 둔다** (기준선을 깨지 않기 위해).
+    # 지금은 안쪽 5.0 / 바깥 8.3 mm 로 치우쳐 있다. 양쪽을 같게 하려면 0.00665 →
+    # 양쪽 6.65 mm. 전환은 사람이 정한다 (2026-09-22 야간 보고서 참조).
+    'grip_clearance': 0.005,
+    # 좁은 쪽(안쪽)까지 보고 거절할 것인가. **기본 꺼짐** — 켜면 검사가 3.3 mm 엄해져
+    # 기준선 성공률이 달라진다. 켜는 판단은 야간 측정(블록 2-3) 뒤에.
+    'guard_inner_clearance': False,
     'insertion_yaw': math.pi / 2,      # 1차 서가 삽입 방향 (arm_base_link +Y)
     'yaw_tolerance': 0.10,             # rad
     'tilt_tolerance': 0.10,            # rad, 삽입 방향의 기울기
@@ -204,24 +212,36 @@ def validate_grasp(goal: PlaceGoal, tray_slots, limits: Optional[dict] = None) -
     if g.thickness > 0 and goal.book_thickness > 0 \
             and abs(g.thickness - goal.book_thickness) > 0.005:
         return Check(410, f'관측 두께 {g.thickness:.4f} ≠ 규격 {goal.book_thickness:.4f}')
-    # **옆 책에 손가락이 닿지 않는가.** 여기가 가장 좁다.
-    # 칸 간격 0.075, 책 두께 0.0353, 손가락 0.0264 → 여유는 8.3 mm 뿐이다.
-    # 비전 좌표가 그보다 더 어긋나면 집으러 가다 옆 책을 친다 (2026-09-21 실측:
-    # 바깥쪽 칸에서 오차가 14~16 mm 까지 나왔다).
+    # **손가락이 무언가에 닿지 않는가.** 여기가 가장 좁다.
+    # 손이 x 로 어긋나면 **양쪽이 동시에** 줄어든다 — 한쪽 손가락은 옆 책으로,
+    # 반대쪽 손가락은 집을 책으로 간다. 그래서 **둘 중 좁은 쪽**이 허용치다.
+    #
+    #   안쪽 여유 = 손가락 안쪽면 − 책 반두께 = grip_clearance 그 자체 (책 두께가 상쇄된다)
+    #   바깥 여유 = (칸 간격 − 책 반두께) − 손가락 바깥면
+    #
+    # 2026-09-21 까지 **바깥쪽만 보고 있었다** (8.3 mm). 실제로 먼저 닿는 것은
+    # 안쪽(5.0 mm)이라 검사가 3.3 mm 만큼 느슨했다.
     if tray_slots and len(tray_slots) >= 2 and goal.book_thickness > 0:
         centers = sorted(sl.center[0] for sl in tray_slots)
         pitch = min(b - a for a, b in zip(centers, centers[1:]))
         book = BookDims(goal.book_thickness, goal.book_height, goal.book_width)
-        finger_outer = grip_open_per_finger(book, lim) + lim['finger_thickness']
-        margin = (pitch - goal.book_thickness / 2) - finger_outer
+        finger_inner = grip_open_per_finger(book, lim)
+        finger_outer = finger_inner + lim['finger_thickness']
+        inner_gap = finger_inner - goal.book_thickness / 2
+        outer_gap = (pitch - goal.book_thickness / 2) - finger_outer
+        # 기본은 바깥쪽만 본다 (지금까지의 동작). `guard_inner_clearance` 를 켜면
+        # 좁은 쪽까지 본다 — 손이 어긋나면 양쪽이 동시에 줄기 때문에 그쪽이 옳지만,
+        # 검사가 엄해져 기준선이 달라지므로 전환은 측정 뒤에 사람이 정한다
+        margin = min(inner_gap, outer_gap) if lim['guard_inner_clearance'] else outer_gap
+        side = '집을 책' if margin == inner_gap else '옆 책'
         nearest = min(centers, key=lambda c: abs(c - g.top_center[0]))
         dx = abs(g.top_center[0] - nearest)
         if margin > 0 and dx > margin:
             return Check(410,
                          f'파지 좌표가 칸 중심에서 {dx*1000:.1f} mm 어긋났다 — '
-                         f'여유 {margin*1000:.1f} mm 를 넘는다. 손가락이 옆 책에 닿는다 '
-                         f'(칸 간격 {pitch*1000:.0f} mm, 손가락 바깥면 '
-                         f'{finger_outer*1000:.1f} mm)')
+                         f'여유 {margin*1000:.1f} mm 를 넘는다. 손가락이 {side} 에 닿는다 '
+                         f'(안쪽 {inner_gap*1000:.1f} / 바깥 {outer_gap*1000:.1f} mm, '
+                         f'칸 간격 {pitch*1000:.0f} mm)')
     return Check(OK, '')
 
 

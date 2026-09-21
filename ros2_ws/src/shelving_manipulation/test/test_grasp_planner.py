@@ -187,6 +187,7 @@ def test_command_contains_contract_fields():
                            'source': 'config'}
     assert cmd['place']['center'] == list(VERIFIED)
     assert cmd['place']['yaw'] == pytest.approx(math.pi / 2)
+    # 벌림 = 책 반두께 + grip_clearance. 이 여유가 곧 '손가락 ↔ 집을 책' 안쪽 간격이다
     assert cmd['grip']['open_per_finger'] == pytest.approx(BOOK.thickness / 2 + 0.005)
 
 
@@ -265,3 +266,48 @@ def test_snap_is_noop_without_observation():
     slots = [TraySlot(i, (-0.6623 + 0.075 * i, 0.0788, 0.1119)) for i in range(6)]
     assert snap_grasp_to_slot(g, slots) == (g, '')
     assert snap_grasp_to_slot(g, []) == (g, '')
+
+
+def test_clearance_guard_uses_the_narrower_side():
+    """**안쪽(손가락↔집을 책)과 바깥쪽(손가락↔옆 책) 중 좁은 쪽**이 허용치다.
+
+    손이 x 로 어긋나면 양쪽이 동시에 줄어든다. 2026-09-21 까지 바깥쪽만 보고 있어
+    검사가 느슨했다 (안쪽 5.0 mm 인데 바깥 8.3 mm 로 판정).
+    """
+    from shelving_manipulation.grasp_planner import (DEFAULT_LIMITS, GraspGoal,
+                                                     grip_open_per_finger, validate_grasp)
+    g = goal(book_width=BOOK.width, book_height=BOOK.height, book_thickness=BOOK.thickness)
+    slots = [TraySlot(i, (-0.6623 + 0.075 * i, 0.0788, 0.1119)) for i in range(6)]
+    top_z = 0.1119 + g.book_width / 2
+
+    inner = grip_open_per_finger(BOOK, DEFAULT_LIMITS) - BOOK.thickness / 2
+    outer = (0.075 - BOOK.thickness / 2) - (grip_open_per_finger(BOOK, DEFAULT_LIMITS)
+                                            + DEFAULT_LIMITS['finger_thickness'])
+    narrow = min(inner, outer)
+
+    def obs(x):
+        return replace(g, grasp=GraspGoal(
+            frame_id='arm_base_link', top_center=(x, 0.0788, top_z),
+            spine_yaw=0.0, thickness=g.book_thickness, width=g.book_width, confidence=0.9))
+
+    lim = dict(DEFAULT_LIMITS, guard_inner_clearance=True)
+    # 켜면 좁은 쪽이 허용치다 — 넓은 쪽 값으로 판정하면 안 된다
+    assert validate_grasp(obs(-0.5123 + narrow * 0.9), slots, lim).ok
+    assert not validate_grasp(obs(-0.5123 + narrow * 1.1), slots, lim).ok
+    # **기본은 꺼져 있다** — 기준선을 깨지 않기 위해 지금까지의 동작(바깥쪽만)을 유지한다
+    assert validate_grasp(obs(-0.5123 + narrow * 1.1), slots).ok
+
+
+def test_clearances_are_currently_lopsided():
+    """지금은 안쪽·바깥쪽 여유가 치우쳐 있다 — 균형값(0.00665)으로 바꾸는 판단은 사람이 한다.
+
+    이 시험은 "치우쳐 있음"을 **기록**한다. 균형을 맞추면 이 시험이 깨지는데,
+    그때가 바로 사람이 전환을 결정한 시점이어야 한다.
+    """
+    from shelving_manipulation.grasp_planner import DEFAULT_LIMITS, grip_open_per_finger
+    inner = grip_open_per_finger(BOOK, DEFAULT_LIMITS) - BOOK.thickness / 2
+    outer = (0.075 - BOOK.thickness / 2) - (grip_open_per_finger(BOOK, DEFAULT_LIMITS)
+                                            + DEFAULT_LIMITS['finger_thickness'])
+    assert inner == pytest.approx(0.005, abs=1e-6), '안쪽 여유 = grip_clearance 그 자체'
+    assert outer == pytest.approx(0.0083, abs=1e-4)
+    assert min(inner, outer) == inner, '좁은 쪽은 안쪽이다 — 허용치는 이 값이어야 한다'
