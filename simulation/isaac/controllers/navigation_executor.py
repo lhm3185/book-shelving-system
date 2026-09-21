@@ -25,6 +25,7 @@ Ridgeback 은 전방향(홀로노믹)이라 몸통을 돌리지 않고 옆으로
 
 import json
 import math
+import os
 import time
 
 import numpy as np
@@ -39,7 +40,9 @@ BOT = profile()
 ARRIVE_TOL_M = 0.05          # 이 안에 들면 그 점은 도착으로 본다
 DEFAULT_SPEED = 0.4          # m/s. Nav2 기본 속도대
 RETURN_SNAP_M = 0.30         # 이 안쪽이면 '제자리로 돌아온 것' 으로 보고 팔 베이스를 맞춘다
-SETTLE_STEPS = 60            # 도착 뒤 기다리는 스텝 수 (앞 절반은 물리 안정, 뒤 절반은 트레이 추종)
+SETTLE_STEPS = 60            # 도착 뒤 기다리는 스텝 수 (그 사이에 여러 번 나눠 맞춘다)
+REALIGN_EVERY = 12           # 이 스텝마다 남은 차이를 다시 잰다 → 60/12 = 5회
+REALIGN_DONE_M = 0.001       # 이 안쪽이면 맞은 것으로 본다
 
 
 def _yaw(q):
@@ -86,6 +89,7 @@ class NavigationExecutor:
         self.steps = 0
         self.limit = 0
         self.settle = 0
+        self.debug = os.environ.get("SIM_NAV_DEBUG", "1") != "0"
         self._last_report = 0.0
 
         # **팔 베이스의 출발 자리를 기억해 둔다.** 파지·삽입 좌표는 모두 팔 기준이라,
@@ -153,6 +157,33 @@ class NavigationExecutor:
                  f"속도 {self.speed} m/s (제한 {self.limit} 스텝)")
         self.publish(message="시작", total_m=round(total, 3))
 
+    # ---------------------------------------------------------------- 진단
+    def _snapshot(self, tag):
+        """트레이와 책이 팔 기준 어디에 있는지 찍는다 (복귀 보정 추적용).
+
+        왜: 보정으로 팔 베이스는 출발 자리로 돌아가는데, 그 뒤에도 책이 기준보다
+        2.9 cm 남아 운반 중 M406 이 났다. 트레이 추종(follow_tray)이 보정을
+        따라오는지 보려면 **보정 앞뒤로 같은 값을 찍어 비교**해야 한다.
+        SIM_NAV_DEBUG=0 으로 끌 수 있다.
+        """
+        if not self.debug:
+            return
+        scene = self.scene
+        try:
+            tray_w = np.asarray(SingleXFormPrim(scene.tray).get_world_pose()[0], float)
+            line = f"[추적:{tag}] 트레이 월드 {np.round(tray_w, 4).tolist()}"
+            if hasattr(scene, "to_arm"):
+                line += f" 팔기준 {np.round(scene.to_arm(tray_w), 4).tolist()}"
+            self.say(line)
+            for book in list(getattr(scene, "books", []))[:3]:
+                c = scene.center(book)
+                arm = scene.to_arm(c) if hasattr(scene, "to_arm") else None
+                self.say(f"[추적:{tag}]   {book.rsplit('/', 1)[-1]} 월드 "
+                         f"{np.round(c, 4).tolist()}"
+                         + (f" 팔기준 {np.round(arm, 4).tolist()}" if arm is not None else ""))
+        except Exception as exc:      # noqa: BLE001 - 진단이 주행을 막으면 안 된다
+            self.say(f"[추적:{tag}] 못 찍었다: {type(exc).__name__}: {exc}")
+
     # ---------------------------------------------------------------- 복귀 보정
     def _realign_arm_base(self):
         """제자리로 돌아왔으면 **팔 베이스**를 출발 자리에 정확히 맞춘다.
@@ -172,7 +203,7 @@ class NavigationExecutor:
         drift = float(np.hypot(off[0], off[1]))
         dyaw = _yaw(self.home_arm_q) - _yaw(np.asarray(cur_q, float))
         dyaw = math.atan2(math.sin(dyaw), math.cos(dyaw))
-        if drift < 1e-3 and abs(dyaw) < 1e-4:
+        if drift < REALIGN_DONE_M and abs(dyaw) < 1e-4:
             return
         if drift > RETURN_SNAP_M:
             self.say(f"[주행] 팔 베이스가 출발 자리에서 {drift*100:.1f}cm 떨어져 있다 "
@@ -183,6 +214,7 @@ class NavigationExecutor:
         # 칸마다 다른 만큼 어긋난다 (2026-09-21 실측: 책들은 월드에서 y 가 모두 같은데
         # 팔 기준 y 는 0.0916→0.1030 으로 벌어졌다 = 팔 베이스가 4.3° 돌아감).
         # 루트를 dyaw 만큼 돌린 뒤, 돌아간 상태에서 남는 위치 차이를 다시 메운다.
+        self._snapshot("보정전")
         root_p, root_q = self.root.get_world_pose()
         root_p = np.asarray(root_p, float)
         root_q = np.asarray(root_q, float)
@@ -202,6 +234,7 @@ class NavigationExecutor:
         self.root.set_world_pose(root_p, np.asarray(root_q, float))
         self.say(f"[주행] 팔 베이스 복귀 보정: 위치 {drift*100:.1f}cm, "
                  f"자세 {math.degrees(dyaw):+.2f}° — 파지 기준을 출발 때와 같게 맞췄다")
+        self._snapshot("보정직후")
 
     # ---------------------------------------------------------------- 매 스텝
     def spin(self):
@@ -217,9 +250,15 @@ class NavigationExecutor:
             # follow_tray 가 매 스텝 따라 붙이는데, 보정하자마자 '도착' 을 알리면
             # 파지가 시작되며 job_active 로 추종이 멈춰, 트레이가 밀린 채 굳는다
             # (2026-09-21 실측: 책이 기준보다 2.9 cm 남아 운반 중 3.1 cm 미끄러짐).
-            if self.settle == SETTLE_STEPS // 2:
+            # **여러 번 나눠 맞춘다.** 트레이는 물리 링크(Cube/articulation_root)에 붙어 있고
+            # 우리가 옮기는 것은 루트 XForm 이다. 둘은 강체가 아니라서 한 번에 계산한 보정이
+            # 그대로 들어맞지 않는다. 매번 실제 팔 베이스를 다시 읽어 남은 차이만 줄이면
+            # 몇 번 만에 수렴한다 (한 번만 맞췄을 때 2.9 cm 가 남았다).
+            if self.settle > 0 and self.settle % REALIGN_EVERY == 0:
                 self._realign_arm_base()
             if self.settle <= 0:
+                # 보정 뒤 남은 스텝 동안 follow_tray 가 따라왔는지 — '보정직후' 와 비교한다
+                self._snapshot("도착시")
                 self.status = "succeeded"
                 p, _ = self.root.get_world_pose()
                 self.say(f"[주행] 도착 ({float(p[0]):+.3f}, {float(p[1]):+.3f})")
