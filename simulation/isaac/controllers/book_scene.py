@@ -1524,6 +1524,8 @@ class BookScene:
             return None, 0.0, f"스윙 c(reach): {err}"
         qs.extend(part[1:])
         n_c = len(part) - 1
+        q_b_end = np.asarray(q_sw, float).copy()
+        q_c_path = [np.asarray(v, float).copy() for v in part]      # q_sw … q_transfer
         # d. reorient — transfer → pre_ins (손 자세 → HORIZ). 직교가 안 되면 관절공간
         how = "직교"
         wps_d = [(np.asarray(transfer, float), O_sw), (np.asarray(pre_ins, float), HORIZ)]
@@ -1535,7 +1537,9 @@ class BookScene:
             how = f"관절공간(직교 실패: {err})"
             self.say(f"[스윙] d(reorient) 직교 실패 → 관절공간으로 — {err}")
         qs.extend(part[1:])
-        self._swing = {"dphi": dphi, "p_sw": p_sw, "O_sw": O_sw, "p_clear": p_clear}
+        self._swing = {"dphi": dphi, "p_sw": p_sw, "O_sw": O_sw, "p_clear": p_clear,
+                       "q_b_start": np.asarray(qs[n_a], float).copy(), "q_b_end": q_b_end,
+                       "q_c_path": q_c_path}
         arr = np.asarray(qs, float)
         worst = float(np.max(np.abs(np.diff(arr, axis=0)))) if len(arr) > 1 else 0.0
         self.say(f"[스윙] carry_rotate: a clear {clear_h:.3f} m ({n_a}점) · b j1 Δφ "
@@ -1557,6 +1561,23 @@ class BookScene:
             sw = {"dphi": dphi, "p_sw": np.asarray(_p, float),
                   "O_sw": quat_from_R(np.asarray(_R, float))}
         dphi, p_sw, O_sw = sw["dphi"], sw["p_sw"], sw["O_sw"]
+        if "q_c_path" in sw and os.environ.get("SIM_SWING_MIRROR", "1") != "0":
+            # 운반 때 지나간 관절값을 그대로 거슬러 간다. 역 d 를 IK 로 다시 풀면 다른 가지로
+            # 떨어져 q1 이 +0.93 rad 어긋나고 역 swing 이 j1 한계를 넘었다 (v08, 2026-09-23 00:4x)
+            q_tr = sw["q_c_path"][-1]
+            qs = [np.asarray(q_retreat, float).copy()]
+            qs.extend(self._joint_interp(qs[-1], q_tr))          # 역 d (관절, retreat → transfer)
+            d_d = float(np.max(np.abs(q_tr - qs[0])))
+            qs.extend([q.copy() for q in reversed(sw["q_c_path"][:-1])])   # 역 c (운반 c 그대로)
+            qs.extend(self._joint_interp(qs[-1], sw["q_b_start"]))         # 역 b (j1 만)
+            d_home = np.abs(np.asarray(self.q_home, float) - sw["q_b_start"])
+            qs.extend(self._joint_interp(sw["q_b_start"], self.q_home))
+            arr = np.asarray(qs, float)
+            worst = float(np.max(np.abs(np.diff(arr, axis=0)))) if len(arr) > 1 else 0.0
+            self.say(f"[스윙] return(거울): 역 d 관절 Δ최대 {d_d:.3f} rad · 역 c {len(sw['q_c_path']) - 1}점 · "
+                     f"역 b j1 {math.degrees(-dphi):+.1f}° · 홈까지 관절 Δ 최대 {float(d_home.max()):.3f} rad "
+                     f"(관절 {int(np.argmax(d_home)) + 1}) · 최대걸음 {worst:.3f} rad")
+            return qs, worst, ""
         qs = [np.asarray(q_retreat, float).copy()]
         # 역 d — retreat(HORIZ) → transfer(스윙 손 자세)
         how = "직교"
