@@ -990,6 +990,13 @@ class BookScene:
         self.l0p = l0p
         self.Rl0 = R_from_quat(l0q)
         self.lula.set_robot_base_pose(l0p, l0q)
+        if os.environ.get("SIM_TRACE_BASE", "0") != "0" and getattr(self, "robot", None) is not None:
+            # 비결정성 출처 (NIGHTLY F-6): 입력(비전)이 같아도 판마다 베이스·시작 관절이 다른지
+            try:
+                self.say(f"[refresh_base] 팔베이스 {np.round(l0p, 4).tolist()} q {np.round(l0q, 5).tolist()} "
+                         f"시작관절 {np.round(np.asarray(self.robot.get_joint_positions()[self.idx_arm], float), 4).tolist()}")
+            except Exception as _exc:      # noqa: BLE001 - 기록이 작업을 막으면 안 된다
+                self.say(f"[refresh_base] 기록 실패: {type(_exc).__name__}: {_exc}")
 
         # 방향은 yaw 만 쓴다. 베이스에 섞인 기울기를 손 자세에 넣으면 책이 기운다
         yaw = math.atan2(float(self.Rl0[1, 0]), float(self.Rl0[0, 0]))

@@ -287,6 +287,11 @@ class ManipulationExecutor:
             name = arm.phase.split(":")[-1]
             if name != "idle":
                 job.state["phase"] = name
+            # 구간이 바뀔 때 한 줄 (SIM_TRACE_PHASE=1, NIGHTLY 0-1i). 녹화 프레임 ≈ step / record_every
+            # (녹화 루프가 executor.spin 한 번에 한 번 센다) — '어느 구간이 솟는가'를 프레임으로 짚기 위함
+            if os.environ.get("SIM_TRACE_PHASE", "0") != "0" and job.watch.get("last_phase") != name:
+                job.watch["last_phase"] = name
+                self.say(f"[단계] {name} 시작 step={self.step} 작업step={job.steps}")
             job.peak = max(job.peak, float(ratio.max()))
             job.spikes += int(ratio.max() > 0.8)
             # **403 이 어느 구간에서 났는지 남긴다** (SIM_TRACE_SPIKE=1, 판정은 안 바꾼다).
