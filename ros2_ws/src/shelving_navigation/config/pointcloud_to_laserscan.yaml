@@ -14,8 +14,9 @@ pointcloud_to_laserscan:
     angle_increment: 0.00872665
     scan_time: 0.10
 
-    # /scan is for SLAM. Close-range safety will use /lidar/points_raw in the
-    # Nav2 local voxel layer. 1.05 m removes the observed Ridgeback/arm return.
+    # /scan is for localization. Close-range safety uses the clock-corrected
+    # /lidar/points_nav cloud in the Nav2 local voxel layer.
+    # 1.05 m removes the observed Ridgeback/arm return.
     range_min: 1.05
     range_max: 30.0
     use_inf: true

@@ -48,6 +48,7 @@ def generate_launch_description():
     waypoints_file = LaunchConfiguration("waypoints_file")
     use_sim_time = LaunchConfiguration("use_sim_time")
     start_rviz = LaunchConfiguration("start_rviz")
+    pointcloud_source_topic = LaunchConfiguration("pointcloud_source_topic")
     pointcloud_topic = LaunchConfiguration("pointcloud_topic")
     scan_topic = LaunchConfiguration("scan_topic")
 
@@ -89,14 +90,31 @@ def generate_launch_description():
             description="Start RViz.",
         ),
         DeclareLaunchArgument(
-            "pointcloud_topic",
+            "pointcloud_source_topic",
             default_value="/lidar/points_raw",
-            description="Ridgeback LiDAR PointCloud2 topic.",
+            description="Raw Ridgeback LiDAR PointCloud2 topic from Isaac.",
+        ),
+        DeclareLaunchArgument(
+            "pointcloud_topic",
+            default_value="/lidar/points_nav",
+            description="Clock-corrected LiDAR PointCloud2 topic for Nav2.",
         ),
         DeclareLaunchArgument(
             "scan_topic",
             default_value="/scan",
             description="Generated LaserScan topic.",
+        ),
+
+        Node(
+            package="shelving_navigation",
+            executable="pointcloud_timestamp_relay",
+            name="pointcloud_timestamp_relay",
+            output="screen",
+            parameters=[{
+                "input_topic": pointcloud_source_topic,
+                "output_topic": pointcloud_topic,
+                "use_sim_time": use_sim_time,
+            }],
         ),
 
         Node(

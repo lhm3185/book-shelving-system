@@ -48,6 +48,10 @@ setup(
             (
                 'navigation_node = shelving_navigation.navigation_node:main'
             ),
+            (
+                'pointcloud_timestamp_relay = '
+                'shelving_navigation.pointcloud_timestamp_relay:main'
+            ),
         ],
     },
 )

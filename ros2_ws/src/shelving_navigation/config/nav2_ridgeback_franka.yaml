@@ -28,6 +28,13 @@ amcl:
     robot_model_type: nav2_amcl::DifferentialMotionModel
     save_pose_rate: 0.5
     sigma_hit: 0.2
+    set_initial_pose: true
+    always_reset_initial_pose: false
+    initial_pose:
+      x: 2.03174
+      y: -5.64259
+      z: 0.0
+      yaw: 1.5707963267948966
     tf_broadcast: true
     transform_tolerance: 1.0
     update_min_a: 0.2
@@ -73,8 +80,8 @@ controller_server:
     use_realtime_priority: false
     progress_checker:
       plugin: nav2_controller::SimpleProgressChecker
-      required_movement_radius: 0.5
-      movement_time_allowance: 10.0
+      required_movement_radius: 0.15
+      movement_time_allowance: 30.0
     general_goal_checker:
       stateful: true
       plugin: nav2_controller::SimpleGoalChecker
@@ -201,7 +208,7 @@ local_costmap:
         mark_threshold: 0
         observation_sources: lidar_points
         lidar_points:
-          topic: /lidar/points_raw
+          topic: /lidar/points_nav
           data_type: PointCloud2
           clearing: true
           marking: true

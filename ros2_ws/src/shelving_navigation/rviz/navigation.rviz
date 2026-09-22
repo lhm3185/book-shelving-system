@@ -60,7 +60,7 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /robot_description
-      Enabled: true
+      Enabled: false
       Links:
         All Links Enabled: true
         Expand Joint Details: false
@@ -73,13 +73,13 @@ Visualization Manager:
       Name: RobotModel
       TF Prefix: ""
       Update Interval: 0
-      Value: true
+      Value: false
       Visual Enabled: true
     - Class: rviz_default_plugins/TF
       Enabled: true
       Frame Timeout: 15
       Frames:
-        All Enabled: false
+        All Enabled: true
         back_fisheye_camera:
           Value: true
         back_fisheye_camera_optical:
@@ -339,7 +339,7 @@ Visualization Manager:
         Value: /mobile_base/sensors/bumper_pointcloud
       Use Fixed Frame: true
       Use rainbow: true
-      Value: true
+      Value: false
     - Alpha: 1
       Class: rviz_default_plugins/Map
       Color Scheme: map
@@ -708,8 +708,8 @@ Visualization Manager:
         Durability Policy: Volatile
         Filter size: 10
         History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /front_3d_lidar/lidar_points
+        Reliability Policy: Best Effort
+        Value: /lidar/points_nav
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
