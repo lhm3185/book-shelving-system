@@ -74,4 +74,4 @@ if [ "$GUI" = "1" ] && [ -z "${DISPLAY:-}" ]; then
 fi
 
 cd "$ISAAC_SIM_PATH"
-exec ./python.sh "$REPO_ROOT/isaac_sim/isaac/run_simulation.py" "${ARGS[@]}"
+exec ./python.sh "$REPO_ROOT/isaac_sim/run_simulation.py" "${ARGS[@]}"
