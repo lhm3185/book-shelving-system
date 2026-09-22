@@ -271,7 +271,9 @@ class BookScene:
         # 없어서, 켰다고 믿고 엉뚱한 곳을 판 적이 있다 (2026-09-22).
         say(f"스위치: 레벨트레이={USE_LEVEL_TRAY} 이송={TRAY_DELIVERY} 추종={TRAY_CARRY} "
             f"손대지않음={HANDS_OFF} 키네마틱파지={GRASP_KINEMATIC} 그리퍼90도={GRIP_ROT90} "
-            f"차체고정={FIX_BASE} 관절구간={os.environ.get('SIM_JOINT_SEGS', '(기본)')}")
+            f"차체고정={FIX_BASE} 관절구간={os.environ.get('SIM_JOINT_SEGS', '(기본)')} "
+            f"운반={os.environ.get('SIM_CARRY_MODE', 'joint')} 복귀={os.environ.get('SIM_RETURN_MODE', 'joint')} "
+            f"경로검사={os.environ.get('SIM_PATH_AUDIT', '0')}")
         _resolve_kiosk_tray(st, say)
         self._cache = create_bbox_cache()
 
@@ -631,6 +633,21 @@ class BookScene:
             except (TypeError, ValueError) as _exc:
                 say(f"SIM_ROBOT_OFFSET 형식 오류 '{_off}' ({_exc}) — 옮기지 않는다")
 
+        # **부유 베이스의 뿌리 링크(`<루트>/world`)를 루트 XForm 에 맞춘다** — `SIM_ALIGN_WORLD_LINK=1`.
+        # 이 레벨(데스크탑 사본)은 뿌리 링크가 루트와 따로 놀아 (4.763, -3.469, yaw −15°) 에 있고
+        # 루트는 (4.986, -5.607, yaw +90°) 다 (2026-09-22 야간 실측, 스텝 60 부터 끝까지 그대로).
+        # 물리는 뿌리 링크 기준으로 풀리므로 팔 베이스가 2 m 떨어진 곳에 서고, IK 는 전부 401 이다.
+        _alw = os.environ.get("SIM_ALIGN_WORLD_LINK", "0") != "0"
+        if _alw and self.stage.GetPrimAtPath(R + "/world").IsValid():
+            _rp, _rq = SingleXFormPrim(R).get_world_pose()
+            _wl = SingleXFormPrim(R + "/world")
+            _wp0, _wq0 = _wl.get_world_pose()
+            _wl.set_local_pose(np.zeros(3), np.array([1.0, 0.0, 0.0, 0.0]))
+            _wp1, _wq1 = _wl.get_world_pose()
+            say(f"[뿌리링크] {R}/world {np.round(np.asarray(_wp0, float), 3).tolist()} q "
+                f"{np.round(np.asarray(_wq0, float), 3).tolist()} → {np.round(np.asarray(_wp1, float), 3).tolist()} q "
+                f"{np.round(np.asarray(_wq1, float), 3).tolist()} (루트 {np.round(np.asarray(_rp, float), 3).tolist()}) "
+                f"[SIM_ALIGN_WORLD_LINK]")
         self.world.reset(); self.robot.initialize()
         r = self.robot
         self.idx_arm = [r.get_dof_index(j) for j in ARM_JOINTS]
@@ -1450,6 +1467,182 @@ class BookScene:
                 best, dist = b, d
         return best, dist
 
+    # ---------------------------------------------------------------- 스윙 운반 (SIM_CARRY_MODE=swing)
+    # carry_rotate 를 관절공간 한 호로 잇으면 양 끝 자세가 멀어 손끝이 1 m 넘게 솟았다
+    # (2026-09-22 저녁 영상). 구간을 "관절 1개 순수 회전" 과 "직교 직선" 으로 나눠
+    # 손끝 궤적을 예측할 수 있게 한다: lift → (a) 수직 clear → (b) j1 만 스윙 →
+    # (c) 직교 reach → (d) 짧은 reorient. 기본 꺼짐 — 켜지 않으면 계획이 한 점도 안 바뀐다.
+    # **2026-09-22 야간: 권한 문제로 시뮬에서 한 번도 돌려 보지 못했다.** 아침에 시험할 것.
+    def _joint_interp(self, q0, q1):
+        """관절공간 직선 (q0 제외, q1 포함). 한 걸음은 plan_joint_path 와 같은 MAX_STEP×0.7"""
+        q0 = np.asarray(q0, float); q1 = np.asarray(q1, float)
+        n = max(1, int(math.ceil(float(np.max(np.abs(q1 - q0))) / (MAX_STEP * 0.7))))
+        return [q0 + (q1 - q0) * (i / n) for i in range(1, n + 1)]
+
+    def _swing_angle(self, p_from_w, p_to_w, q1_now):
+        """j1 만 돌려 p_from 의 방위각을 p_to 의 방위각으로 맞추는 Δφ (rad).
+
+        방위각은 팔 베이스(link0 원점, j1 축이 지나는 곳) 기준이다. 짧은 쪽을 먼저,
+        한계(실제 한계 − 0.05 rad)에 걸리면 반대쪽을 본다. 둘 다 안 되면 (None, 이유).
+        """
+        a = self.yaw_to_arm(p_from_w); b = self.yaw_to_arm(p_to_w)
+        d = math.atan2(float(b[1]), float(b[0])) - math.atan2(float(a[1]), float(a[0]))
+        d = (d + math.pi) % (2 * math.pi) - math.pi
+        cands = [d] if abs(d) < 1e-9 else [d, d - math.copysign(2 * math.pi, d)]
+        lo, hi = self._arm_limits()
+        for c in cands:
+            if lo is None or (lo[0] + 0.05 <= q1_now + c <= hi[0] - 0.05):
+                return c, ""
+        return None, (f"j1 한계: q1={q1_now:+.3f} Δφ 후보 {[round(c, 3) for c in cands]} "
+                      f"한계 {lo[0]:+.3f}~{hi[0]:+.3f}")
+
+    def _plan_swing_carry(self, lift, transfer, pre_ins, DOWN, HORIZ, q_lift):
+        """carry_rotate 를 네 조각으로 (NIGHTLY_PLAN 2-3). 돌려주는 값은 plan_path 와 같은 꼴."""
+        q_lift = np.asarray(q_lift, float)
+        qs = [q_lift.copy()]
+        # a. clear — 수직으로만 올린다 (SIM_SWING_CLEAR_M, 기본 0 = lift 높이 그대로)
+        clear_h = float(os.environ.get("SIM_SWING_CLEAR_M", "0"))
+        p_clear = np.asarray(lift, float) + np.array([0.0, 0.0, clear_h])
+        if clear_h > 1e-4:
+            part, _w, err = self.plan_path([(lift, DOWN), (p_clear, DOWN)], qs[-1])
+            if part is None:
+                return None, 0.0, f"스윙 a(clear): {err}"
+            qs.extend(part[1:])
+        n_a = len(qs) - 1
+        # b. swing — j1 만. 나머지 관절은 얼린다 → 손끝이 같은 높이·같은 반지름의 수평 호
+        dphi, err = self._swing_angle(p_clear, transfer, float(qs[-1][0]))
+        if dphi is None:
+            return None, 0.0, f"스윙 b(j1): {err}"
+        q_sw = qs[-1].copy(); q_sw[0] += dphi
+        qs.extend(self._joint_interp(qs[-1], q_sw))
+        n_b = len(qs) - 1 - n_a
+        _p, _R = self.lula.compute_forward_kinematics(BOT.ee_frame, q_sw)
+        p_sw = np.asarray(_p, float); O_sw = quat_from_R(np.asarray(_R, float))
+        # c. reach — 스윙 끝의 손 자세(=DOWN 을 Δφ 만큼 돌린 것)를 유지한 채 transfer 로 직선
+        part, _w, err = self.plan_path([(p_sw, O_sw), (np.asarray(transfer, float), O_sw)], qs[-1])
+        if part is None:
+            return None, 0.0, f"스윙 c(reach): {err}"
+        qs.extend(part[1:])
+        n_c = len(part) - 1
+        # d. reorient — transfer → pre_ins (손 자세 → HORIZ). 직교가 안 되면 관절공간
+        how = "직교"
+        wps_d = [(np.asarray(transfer, float), O_sw), (np.asarray(pre_ins, float), HORIZ)]
+        part, _w, err = self.plan_path(wps_d, qs[-1])
+        if part is None:
+            part, _w, err2 = self.plan_joint_path(wps_d, qs[-1])
+            if part is None:
+                return None, 0.0, f"스윙 d(reorient): 직교 {err} / 관절 {err2}"
+            how = f"관절공간(직교 실패: {err})"
+            self.say(f"[스윙] d(reorient) 직교 실패 → 관절공간으로 — {err}")
+        qs.extend(part[1:])
+        self._swing = {"dphi": dphi, "p_sw": p_sw, "O_sw": O_sw, "p_clear": p_clear}
+        arr = np.asarray(qs, float)
+        worst = float(np.max(np.abs(np.diff(arr, axis=0)))) if len(arr) > 1 else 0.0
+        self.say(f"[스윙] carry_rotate: a clear {clear_h:.3f} m ({n_a}점) · b j1 Δφ "
+                 f"{math.degrees(dphi):+.1f}° ({n_b}점) · c reach {n_c}점 · d reorient "
+                 f"{len(part) - 1}점 [{how}] · 최대걸음 {worst:.3f} rad · 스윙 끝 손끝 "
+                 f"{np.round(p_sw, 3).tolist()}")
+        return qs, worst, ""
+
+    def _plan_swing_return(self, retreat, HORIZ, q_retreat, transfer, lift, DOWN, q_lift):
+        """return 을 스윙의 거울로: retreat → 역 reorient → 역 reach → 역 swing → home"""
+        sw = getattr(self, "_swing", None)
+        if sw is None:
+            # carry 가 스윙이 아니었다 — 같은 값을 여기서 만든다 (j1 축 둘레로 lift 를 돌린 점)
+            dphi, err = self._swing_angle(lift, transfer, float(np.asarray(q_lift, float)[0]))
+            if dphi is None:
+                return None, 0.0, f"역스윙 b(j1): {err}"
+            q_sw = np.asarray(q_lift, float).copy(); q_sw[0] += dphi
+            _p, _R = self.lula.compute_forward_kinematics(BOT.ee_frame, q_sw)
+            sw = {"dphi": dphi, "p_sw": np.asarray(_p, float),
+                  "O_sw": quat_from_R(np.asarray(_R, float))}
+        dphi, p_sw, O_sw = sw["dphi"], sw["p_sw"], sw["O_sw"]
+        qs = [np.asarray(q_retreat, float).copy()]
+        # 역 d — retreat(HORIZ) → transfer(스윙 손 자세)
+        how = "직교"
+        wps_d = [(np.asarray(retreat, float), HORIZ), (np.asarray(transfer, float), O_sw)]
+        part, _w, err = self.plan_path(wps_d, qs[-1])
+        if part is None:
+            part, _w, err2 = self.plan_joint_path(wps_d, qs[-1])
+            if part is None:
+                return None, 0.0, f"역스윙 d(reorient): 직교 {err} / 관절 {err2}"
+            how = f"관절공간(직교 실패: {err})"
+            self.say(f"[스윙] 역 d(reorient) 직교 실패 → 관절공간으로 — {err}")
+        qs.extend(part[1:])
+        # 역 c — transfer → 스윙 끝점 (자세 유지, 직선)
+        part, _w, err = self.plan_path([(np.asarray(transfer, float), O_sw), (p_sw, O_sw)], qs[-1])
+        if part is None:
+            return None, 0.0, f"역스윙 c(reach): {err}"
+        qs.extend(part[1:])
+        # 역 b — j1 만 −Δφ
+        q_b = qs[-1].copy(); q_b[0] -= dphi
+        lo, hi = self._arm_limits()
+        if lo is not None and not (lo[0] + 0.05 <= q_b[0] <= hi[0] - 0.05):
+            return None, 0.0, f"역스윙 b(j1): q1 {q_b[0]:+.3f} 가 한계 {lo[0]:+.3f}~{hi[0]:+.3f} 밖"
+        qs.extend(self._joint_interp(qs[-1], q_b))
+        # 마지막 — 홈까지 관절공간 (트레이 위에서 트레이 위로: 짧아야 한다. 크면 로그로 보인다)
+        d_home = np.abs(np.asarray(self.q_home, float) - q_b)
+        qs.extend(self._joint_interp(q_b, self.q_home))
+        arr = np.asarray(qs, float)
+        worst = float(np.max(np.abs(np.diff(arr, axis=0)))) if len(arr) > 1 else 0.0
+        self.say(f"[스윙] return: 역 d [{how}] · 역 b j1 {math.degrees(-dphi):+.1f}° · 홈까지 관절 Δ "
+                 f"최대 {float(d_home.max()):.3f} rad (관절 {int(np.argmax(d_home)) + 1}) · "
+                 f"최대걸음 {worst:.3f} rad")
+        return qs, worst, ""
+
+    def _audit_plan(self, segs, joint_segs):
+        """계획의 모든 구간을 FK 표본으로 본다 (SIM_TRACE_CARRY / SIM_PATH_AUDIT).
+
+        구간마다 한 줄: z최대(월드·팔기준, 위치 t) · 한계 최소여유(관절) · 최대걸음(위치).
+        SIM_PATH_AUDIT=1 이면 "z최대 > 양 끝 z 최대 + SIM_AUDIT_DZ(0.15)" 또는 "한계 여유 < 0.05"
+        를 위반으로 돌려준다. 트레이·서가 여유 검사는 **아직 없다** (AABB 가 필요, 2-2 남은 일).
+        돌려주는 값: 위반 메시지 (없으면 "")
+        """
+        dz_lim = float(os.environ.get("SIM_AUDIT_DZ", "0.15"))
+        lo, hi = self._arm_limits()
+        viol = ""
+        for name in ["approach", "down", "lift", "carry_rotate", "wedge", "back",
+                     "touch", "push", "retreat", "return"]:
+            qs = segs.get(name)
+            if not qs or len(qs) < 2:
+                continue
+            arr = np.asarray(qs, float)
+            idx = sorted(set(np.linspace(0, len(arr) - 1, min(len(arr), 41)).astype(int).tolist()))
+            zs = []
+            for i in idx:
+                try:
+                    zs.append(float(np.asarray(
+                        self.lula.compute_forward_kinematics(BOT.ee_frame, arr[i])[0], float)[2]))
+                except Exception:      # noqa: BLE001 — 계측이 계획을 막으면 안 된다
+                    zs.append(float("nan"))
+            zs = np.asarray(zs, float)
+            k = int(np.nanargmax(zs)); z_end = max(zs[0], zs[-1])
+            steps = np.max(np.abs(np.diff(arr, axis=0)), axis=1)
+            ks = int(np.argmax(steps))
+            js = int(np.argmax(np.abs(arr[ks + 1] - arr[ks])))
+            if lo is not None:
+                n = min(arr.shape[1], len(lo))
+                marg = np.minimum(arr[:, :n] - lo[:n], hi[:n] - arr[:, :n])
+                mi = np.unravel_index(int(np.argmin(marg)), marg.shape)
+                m_txt = f"{float(marg[mi]):.3f} rad (관절 {mi[1] + 1}, t={mi[0] / (len(arr) - 1):.2f})"
+                m_val = float(marg[mi])
+            else:
+                m_txt, m_val = "한계 모름", float("inf")
+            self.say(f"[경로검사] {name}{'(관절)' if name in joint_segs else ''} · z최대 "
+                     f"{zs[k]:.3f} 월드 / {zs[k] - float(self.l0p[2]):.3f} 팔기준 (t={idx[k] / (len(arr) - 1):.2f}, "
+                     f"양끝 최대 {z_end:.3f}, 초과 {zs[k] - z_end:+.3f}) · 한계 최소여유 {m_txt} · "
+                     f"최대걸음 {float(steps[ks]):.3f} rad (관절 {js + 1}, 점 {ks + 1}/{len(arr) - 1})")
+            if not viol and zs[k] > z_end + dz_lim:
+                viol = (f"경로검사 손끝 높이: {name} 점 {idx[k]}/{len(arr) - 1} z {zs[k]:.3f} > "
+                        f"양끝 {z_end:.3f} + {dz_lim:.2f}")
+            if not viol and m_val < 0.05:
+                viol = f"경로검사 한계 여유: {name} {m_txt} < 0.05"
+        if os.environ.get("SIM_TRACE_CARRY", "0") != "0" and segs.get("carry_rotate"):
+            qa = np.asarray(segs["carry_rotate"][0], float); qb = np.asarray(segs["carry_rotate"][-1], float)
+            self.say(f"[운반] q_lift {np.round(qa, 3).tolist()} → q_pre_ins {np.round(qb, 3).tolist()} "
+                     f"Δ {np.round(qb - qa, 3).tolist()}")
+        return viol
+
     # ---------------------------------------------------------------- 계획
     def plan_job(self, book, place_center_world):
         """책 하나를 집어, 꽂힌 뒤 AABB 중심이 place_center_world 가 되도록 꽂는 경로. 홈 → 홈"""
@@ -1523,9 +1716,18 @@ class BookScene:
         # 실행에서 `404 제한 시간 초과` 가 났다 (2026-09-21 실측). 문제였던 구간만 바꾼다.
         JOINT_SEGS = set(os.environ.get(
             "SIM_JOINT_SEGS", "carry_rotate,return").replace(" ", "").split(","))
+        # 운반·복귀를 스윙으로 (SIM_CARRY_MODE / SIM_RETURN_MODE = swing). 기본은 지금 동작
+        CARRY_MODE = os.environ.get("SIM_CARRY_MODE", "joint").strip()
+        RETURN_MODE = os.environ.get("SIM_RETURN_MODE", "joint").strip()
+        self._swing = None
         segs = {}; q = self.q_home
         for name, wps in order:
-            if name in JOINT_SEGS:
+            if name == "carry_rotate" and CARRY_MODE == "swing":
+                qs, worst, err = self._plan_swing_carry(lift, transfer, pre_ins, DOWN, HORIZ, q)
+            elif name == "return" and RETURN_MODE == "swing":
+                qs, worst, err = self._plan_swing_return(retreat, HORIZ, q, transfer, lift, DOWN,
+                                                         segs["lift"][-1])
+            elif name in JOINT_SEGS:
                 qs, worst, err = self.plan_joint_path(wps, q)
             else:
                 qs, worst, err = self.plan_path(wps, q)
@@ -1544,6 +1746,16 @@ class BookScene:
             if w > MAX_STEP:
                 return None, 402, f"{name}: 인접점 관절변화 {w:.3f} rad"
             worst_all = max(worst_all, w)
+        # 경로 검사 (SIM_TRACE_CARRY=1 은 기록만, SIM_PATH_AUDIT=1 은 위반이면 401)
+        _audit_on = os.environ.get("SIM_PATH_AUDIT", "0") != "0"
+        if _audit_on or os.environ.get("SIM_TRACE_CARRY", "0") != "0":
+            try:
+                _viol = self._audit_plan(segs, JOINT_SEGS)
+            except Exception as _exc:      # noqa: BLE001 — 계측이 계획을 막으면 안 된다
+                _viol = ""
+                self.say(f"[경로검사] 실패(무시): {type(_exc).__name__}: {_exc}")
+            if _audit_on and _viol:
+                return None, 401, _viol
         # **계획 전체를 파일로 덤프한다** (SIM_PLAN_DUMP). Isaac 없이 도는 가지 감사
         # 도구(m0609_plan_audit.py)에 그대로 넣기 위한 것이다.
         if os.environ.get("SIM_PLAN_DUMP"):
@@ -1634,6 +1846,18 @@ class BookScene:
         s = plan["segs"]; book = plan["book"]
         T = plan.get("dims", (self.T, self.L, self.W))[0]
         o = T / 2 + GRIP_CLEAR
+        # **놓는 순서** (SIM_RELEASE_OPEN_FIRST=1): 손을 먼저 벌리고 그다음 책을 동적으로·충돌 켬.
+        # 키네마틱 파지는 운반 동안 책 충돌을 꺼서 손가락이 지령 폭(T/2 − 4 mm)까지 책 **속으로**
+        # 들어가 있다 (2026-09-22 야간 v01: 손가락 13.6 mm = 지령값 그대로, 책 반두께 17.6 mm).
+        # 그 상태로 충돌을 켜면 겹침이 한꺼번에 풀리며 책이 튀어 0.44 s 만에 바닥(z 0.075)에 있었다.
+        # 기본(꺼짐)은 지금 순서 그대로: detach → 벌림.
+        if GRASP_KINEMATIC and os.environ.get("SIM_RELEASE_OPEN_FIRST", "0") != "0":
+            release = [Call("release", lambda: self.trace(book, "놓기직전")),
+                       named(SetGripper(o, settle_s=0.4), "release"), Call("detach", self.detach),
+                       named(Wait(0.4), "release")]
+        else:
+            release = [Call("detach", self.detach), named(SetGripper(o, settle_s=0.4), "release"),
+                       named(Wait(0.4), "release")]
         return Sequence(name, [
             named(SetGripper(o), "approach"), JointPath("approach", s["approach"][1:], 0.5 * SPEED_SCALE),
             JointPath("down", s["down"][1:], 0.25 * SPEED_SCALE),
@@ -1643,7 +1867,7 @@ class BookScene:
             Call("attach", lambda: self.trace(book, "파지")),
             JointPath("lift", s["lift"][1:], 0.25 * SPEED_SCALE),
             JointPath("carry_rotate", s["carry_rotate"][1:], 0.35 * SPEED_SCALE), JointPath("wedge", s["wedge"][1:], 0.35 * SPEED_SCALE),
-            Call("detach", self.detach), named(SetGripper(o, settle_s=0.4), "release"), named(Wait(0.4), "release"),
+            *release,
             Call("release", lambda: self.trace(book, "놓음")),
             JointPath("back", s["back"][1:], 0.3 * SPEED_SCALE), named(SetGripper(0.0, settle_s=0.4), "touch"),
             JointPath("touch", s["touch"][1:], 0.3 * SPEED_SCALE), JointPath("push", s["push"][1:], 0.12 * SPEED_SCALE), named(Wait(0.3), "push"),
@@ -1801,6 +2025,14 @@ class BookScene:
                  f"바닥면 z {float(b[2]):.4f}  중심 ({float(p[0]):.3f}, {float(p[1]):.3f})  "
                  f"앵커 ({float(a[0]):.3f}, {float(a[1]):.3f})  "
                  f"이송중={bool(getattr(self, '_deliver', None))} 작업중={getattr(self, 'job_active', False)}")
+        if os.environ.get("SIM_TRACE_BASE", "0") != "0" and getattr(self, "robot", None) is not None:
+            # 부유 베이스 처짐 추적 (2026-09-22 야간): 루트 XForm 과 물리 팔 베이스를 나란히
+            _rp, _ = SingleXFormPrim(R).get_world_pose()
+            _lp, _lq = SingleXFormPrim(BASE_LINK).get_world_pose()
+            _wp, _wq = SingleXFormPrim(R + "/world").get_world_pose()
+            self.say(f"[베이스] {self._watch_n:5d} 스텝  루트 {np.round(np.asarray(_rp, float), 3).tolist()}  "
+                     f"world링크 {np.round(np.asarray(_wp, float), 3).tolist()} q {np.round(np.asarray(_wq, float), 3).tolist()}  "
+                     f"팔베이스 {np.round(np.asarray(_lp, float), 3).tolist()}")
 
     def _tray_rigid(self):
         """트레이를 강체로 다룰 핸들 (속도를 주려면 필요하다). 없으면 None."""
@@ -1963,6 +2195,20 @@ class BookScene:
         # 고정 조인트로 붙이기 직전에 세운 자세로 맞춘다 (자세만, 위치는 그대로).
         # 트레이 고정을 **먼저 푼다.** 안 풀면 트레이 조인트와 손 조인트가 서로 당긴다
         self.unlock_book(book)
+        if os.environ.get("SIM_TRACE_GRIP", "0") != "0":
+            # 닫힌 직후(충돌이 아직 켜진 상태) 손가락과 책의 AABB 를 나란히 (2026-09-22 야간).
+            # 폭 13.6 mm 가 "책에 안 닿음" 인지 "책 속으로 파고듦" 인지 가른다.
+            try:
+                _bb = self.aabb(book)
+                _txt = [f"폭(한쪽) {self.grip_width() * 1000:.1f} mm",
+                        f"책 AABB {np.round(_bb, 3).tolist()}"]
+                for _fl in BOT.finger_links:
+                    _fb = self.aabb(R + "/" + _fl)
+                    _txt.append(f"{_fl} AABB {np.round(_fb, 3).tolist()} (책 윗면 대비 손가락 최저 "
+                                f"{(float(_fb[2]) - float(_bb[5])) * 100:+.1f} cm)")
+                self.say("[파지추적] " + " | ".join(_txt))
+            except Exception as _exc:      # noqa: BLE001 — 계측이 작업을 막으면 안 된다
+                self.say(f"[파지추적] 실패: {type(_exc).__name__}: {_exc}")
         self._held_book = book      # follow_tray() 가 이 책은 안 건드린다
         getattr(self, "_tray_books", {}).pop(book, None)   # 놓은 뒤에는 서가에 있어야 한다
         if book in self.upright_q:
@@ -2073,6 +2319,22 @@ class BookScene:
     def book_in_hand(self, b):
         hp, hq = SingleXFormPrim(HAND_LINK).get_world_pose()
         return R_from_quat(hq).T @ (self.book_origin(b) - np.asarray(hp, float))
+
+    def book_in_hand_center(self, b):
+        """손 기준 (형상 중심 위치, 책 회전행렬). 406 판정식 비교용 (SIM_DRIFT_LOG / SIM_DRIFT_METRIC).
+
+        `book_in_hand` 는 책 prim **원점**을 본다. 이 레벨의 책은 원점이 형상에서 75~177 cm
+        떨어져 있어 손이 조금만 돌아도 cm 단위로 벌어진다 (v29). 형상 중심 = 책 자세 ⊗ c_loc.
+        c_loc 을 모르는 책(grasp_local 에 없음)은 원점을 그대로 쓴다.
+        """
+        hp, hq = SingleXFormPrim(HAND_LINK).get_world_pose()
+        Rh = R_from_quat(np.asarray(hq, float))
+        bp, bq = SingleXFormPrim(b).get_world_pose()
+        Rb = R_from_quat(np.asarray(bq, float))
+        c = np.asarray(bp, float)
+        if b in self.grasp_local:
+            c = c + Rb @ np.asarray(self.grasp_local[b][0], float)
+        return Rh.T @ (c - np.asarray(hp, float)), Rh.T @ Rb
 
     def verify(self, plan):
         """꽂힌 책 판정 (multi_book 과 같은 기준)"""

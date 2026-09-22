@@ -6,6 +6,7 @@
 
 Isaac 실행 자체(앱 생성·USD 로드·루프)는 `run_simulation.py` 가 맡는다.
 """
+import math
 import os
 import sys
 import time
@@ -129,6 +130,33 @@ class ManipulationExecutor:
         pick_w = scene.to_world(cmd["pick"]["center"])
         place_w = scene.to_world(cmd["place"]["center"])
         book, dist = scene.book_on_tray_near(pick_w)
+        # 야간 시험 드라이버(night/drive_job.py) 전용: 비전 없이 책을 번호로 고른다.
+        # 이 필드는 ROS 노드가 보내지 않으므로 기존 경로는 그대로다.
+        if cmd["pick"].get("book_index") is not None:
+            try:
+                from isaacsim.core.prims import SingleXFormPrim as _X
+                from book_scene import BASE_LINK as _BL, HAND_LINK as _HL
+                _yaw = math.degrees(math.atan2(float(scene.Rl0[1, 0]), float(scene.Rl0[0, 0])))
+                self.say(f"[드라이버] l0p {np.round(scene.l0p, 3).tolist()} yaw {_yaw:+.1f}° | {_BL} USD "
+                         f"{np.round(_X(_BL).get_world_pose()[0], 3).tolist()} | 손 "
+                         f"{np.round(_X(_HL).get_world_pose()[0], 3).tolist()} | 로봇(물리) "
+                         f"{np.round(self.robot.get_world_pose()[0], 3).tolist()}")
+                from book_scene import R as _RR
+                _qj = self.robot.get_joint_positions()
+                self.say(f"[드라이버] 루트 {_RR} {np.round(_X(_RR).get_world_pose()[0], 3).tolist()} "
+                         f"q {np.round(_X(_RR).get_world_pose()[1], 3).tolist()} | 로봇q "
+                         f"{np.round(self.robot.get_world_pose()[1], 3).tolist()} | 베이스관절 "
+                         f"{[(self.robot.dof_names[i], round(float(_qj[i]), 3)) for i in scene.base_idx]} "
+                         f"hold {np.round(scene.base_hold, 3).tolist()}")
+            except Exception as _exc:      # noqa: BLE001
+                self.say(f"[드라이버] 자세 기록 실패 {_exc}")
+            for _i, _b in enumerate(sorted(scene.books)):
+                self.say(f"[드라이버] {_i}: {_b.rsplit('/', 1)[-1]} 월드 {np.round(scene.center(_b), 3).tolist()} "
+                         f"팔기준 {np.round(scene.to_arm(scene.center(_b)), 4).tolist()}")
+            book = sorted(scene.books)[int(cmd["pick"]["book_index"])]
+            dist = float(np.linalg.norm(scene.center(book) - pick_w))
+            self.say(f"[드라이버] 책 번호 {cmd['pick']['book_index']} → {book} "
+                     f"팔기준 {np.round(scene.to_arm(scene.center(book)), 4).tolist()}")
         if book is None:
             # **왜 못 찾았는지 숫자로 남긴다** — "책 없음" 만으로는 좌표 문제인지
             # 책이 정말 없는지 못 가른다 (2026-09-20 M0609 에서 여기서 막혔다)
@@ -261,11 +289,29 @@ class ManipulationExecutor:
                 job.state["phase"] = name
             job.peak = max(job.peak, float(ratio.max()))
             job.spikes += int(ratio.max() > 0.8)
+            # **403 이 어느 구간에서 났는지 남긴다** (SIM_TRACE_SPIKE=1, 판정은 안 바꾼다).
+            # 403 은 작업 전체의 80% 초과 스텝 수를 **끝에서** 한 번 판정한다. 그래서
+            # "RETREATING 에서 403" 은 마지막 구간 이름일 뿐, 튄 곳이 거기라는 뜻이 아니다.
+            if float(ratio.max()) > 0.8 and os.environ.get("SIM_TRACE_SPIKE", "0") != "0":
+                _sp = job.watch.setdefault("spike_by_phase", {})
+                _sp[name] = _sp.get(name, 0) + 1
+                if _sp[name] <= 3:
+                    _j = int(np.argmax(ratio))
+                    self.say(f"[403추적] step {job.steps} {name} 관절 {_j + 1} "
+                             f"{float(ratio[_j]) * 100:.0f}% (|Δq| "
+                             f"{float(ratio[_j] * VEL_LIMIT[_j] * world.get_physics_dt()):.4f} rad/스텝, "
+                             f"q {float(q_now[_j]):+.3f})")
             book = job.plan["book"]
             # M405: 들어 올린 뒤 책이 따라 올라오지 않음 / M406: 운반 중 손 안에서 어긋남
             if name == "lift" and "z0" not in job.watch:
                 job.watch["z0"] = scene.center(book)[2]
                 job.watch["rel0"] = scene.book_in_hand(book)
+                if os.environ.get("SIM_DRIFT_LOG", "0") != "0" or \
+                        os.environ.get("SIM_DRIFT_METRIC", "origin") == "center":
+                    try:
+                        job.watch["relc0"] = scene.book_in_hand_center(book)
+                    except Exception as _exc:      # noqa: BLE001 - 기록이 작업을 막으면 안 된다
+                        self.say(f"[어긋남] 형상중심 기준을 못 잡았다: {type(_exc).__name__}: {_exc}")
             if name == "carry_rotate" and "z0" in job.watch and "rise" not in job.watch:
                 job.watch["rise"] = scene.center(book)[2] - job.watch["z0"]
                 # 기대 상승량은 **실제 들어올림 높이**에 맞춰야 한다. 0.08 이 박혀 있어서
@@ -317,9 +363,39 @@ class ManipulationExecutor:
                 # 원점이 형상에서 75~177 cm 떨어져 있어(2026-09-22 실측) 손이 조금만
                 # 돌아도 cm 단위로 벌어진다. 키네마틱 파지 + 충돌 끄기로 물리적으로
                 # 빠질 수 없는 상태에서도 3.9 cm 가 찍혀 작업이 취소됐다.
-                if dev > float(os.environ.get("SIM_HAND_DRIFT_M", "0.03")) and name != "lift":
+                # 형상중심 기준 (SIM_DRIFT_LOG=1 기록 / SIM_DRIFT_METRIC=center 판정 전환, NIGHTLY 1-1·1-2)
+                _dc = _ang = None
+                if "relc0" in job.watch:
+                    try:
+                        _c, _Rr = scene.book_in_hand_center(book)
+                        _c0, _R0 = job.watch["relc0"]
+                        _dc = float(np.linalg.norm(_c - _c0))
+                        _cos = (float(np.trace(_R0.T @ _Rr)) - 1.0) / 2.0
+                        _ang = float(np.degrees(np.arccos(min(1.0, max(-1.0, _cos)))))
+                        job.watch["dc_max"] = max(job.watch.get("dc_max", 0.0), _dc)
+                        job.watch["ang_max"] = max(job.watch.get("ang_max", 0.0), _ang)
+                        job.watch["dev_max"] = max(job.watch.get("dev_max", 0.0), dev)
+                        job.watch["n_drift"] = job.watch.get("n_drift", 0) + 1
+                        if os.environ.get("SIM_DRIFT_LOG", "0") != "0" and job.watch["n_drift"] % 30 == 1:
+                            self.say(f"[어긋남] step {job.steps} phase={name}  원점기준 {dev * 100:.2f} cm | "
+                                     f"형상중심기준 {_dc * 100:.2f} cm | 손기준 회전 {_ang:.1f}°  "
+                                     f"(최대 {job.watch['dev_max'] * 100:.2f} / {job.watch['dc_max'] * 100:.2f} cm / "
+                                     f"{job.watch['ang_max']:.1f}°)")
+                    except Exception as _exc:      # noqa: BLE001 - 기록이 작업을 막으면 안 된다
+                        _dc = _ang = None
+                        if not job.watch.get("drift_err"):
+                            job.watch["drift_err"] = True
+                            self.say(f"[어긋남] 형상중심 계산 실패: {type(_exc).__name__}: {_exc}")
+                if os.environ.get("SIM_DRIFT_METRIC", "origin") == "center" and _dc is not None:
+                    _bad = (_dc > float(os.environ.get("SIM_DRIFT_CENTER_M", "0.01"))
+                            or _ang > float(os.environ.get("SIM_DRIFT_ROT_DEG", "5")))
+                    _msg = f"운반 중 손 안에서 책 형상중심 {_dc * 100:.1f}cm · 회전 {_ang:.1f}° 어긋남 (원점기준 {dev * 100:.1f}cm)"
+                else:
+                    _bad = dev > float(os.environ.get("SIM_HAND_DRIFT_M", "0.03"))
+                    _msg = f"운반 중 손 안에서 책 {dev * 100:.1f}cm 어긋남"
+                if _bad and name != "lift":
                     arm.cancel()
-                    self.finish(SIM_FAILED, error_code=406, message=f"운반 중 손 안에서 책 {dev * 100:.1f}cm 어긋남")
+                    self.finish(SIM_FAILED, error_code=406, message=_msg)
 
         # 위 감시에서 이미 끝냈으면 이번 스텝에 다시 판정하지 않는다
         running = running and job.state["status"] == SIM_RUNNING
@@ -350,6 +426,8 @@ class ManipulationExecutor:
                          "fallen_books": [f["book"] for f in fallen], "scene_books": states,
                          "book_aabb_center_arm": np.round(scene.to_arm((bb[:3] + bb[3:]) / 2), 4).tolist(),
                          "joint_peak_ratio": round(job.peak, 3), "joint_over80_steps": job.spikes}
+                if job.watch.get("spike_by_phase"):
+                    self.say(f"[403추적] 구간별 80% 초과 스텝: {job.watch['spike_by_phase']}")
                 if job.spikes:
                     self.finish(SIM_FAILED, error_code=403,
                                 message=f"관절 각속도 80% 초과 {job.spikes}스텝 (최대 {job.peak * 100:.0f}%)",

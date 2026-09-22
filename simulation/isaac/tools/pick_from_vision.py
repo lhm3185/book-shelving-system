@@ -17,6 +17,7 @@
 `--dry-run` 은 **좌표만 확인하고 보내지 않는다.** 처음 볼 때 쓰면 좋다.
 """
 import argparse
+import os
 import sys
 
 from geometry_msgs.msg import PointStamped
@@ -33,9 +34,9 @@ BOOK = {'thickness': 0.0353, 'height': 0.2374, 'width': 0.1631}
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--goal-x', type=float, default=FRANKA_SLOTS[0], help='꽂을 칸 x (팔 기준)')
-    ap.add_argument('--goal-y', type=float, default=0.5495)
-    ap.add_argument('--goal-z', type=float, default=0.3399)
+    ap.add_argument('--goal-x', type=float, default=float(os.environ.get('SIM_GOAL_X', FRANKA_SLOTS[0])), help='꽂을 칸 x (팔 기준)')
+    ap.add_argument('--goal-y', type=float, default=float(os.environ.get('SIM_GOAL_Y', 0.5495)))  # 야간: SIM_GOAL_Y (기본 불변)
+    ap.add_argument('--goal-z', type=float, default=float(os.environ.get('SIM_GOAL_Z', 0.3399)))
     ap.add_argument('--book-id', default='book_0')
     ap.add_argument('--wait', type=float, default=20.0, help='비전 좌표를 기다릴 시간(초)')
     ap.add_argument('--dry-run', action='store_true', help='좌표만 보고 보내지 않는다')
