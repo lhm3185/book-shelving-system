@@ -1,60 +1,36 @@
-"""Depth 영상으로 책장 각 단의 빈 공간을 찾는 보조 모듈."""
+"""Depth 영상에서 책장 빈 공간의 중심과 전면 좌표를 찾는 모듈."""
 
-# 깊이값이 유한하고 양수인지 확인할 때 사용하는 수학 모듈입니다.
 import math
 
-# 깊이 영상 배열 처리와 중앙값 계산에 사용하는 NumPy입니다.
+import cv2
 import numpy as np
 
 
 class TargetDetector:
-    """정면에서 본 5단 책장의 빈 단을 깊이값으로 판별합니다."""
+    """책장 ROI에서 중심과 좌우 Depth를 비교해 빈 공간을 찾습니다."""
 
     def __init__(
         self,
-        row_count=5,
-        depth_margin=0.05,
-        inner_width_ratio=0.70,
-        inner_height_ratio=0.60,
-        sample_radius_px=10,
-        empty_depth_margin=0.04,
-        occupied_depth_margin=0.03,
-        min_far_ratio=0.50,
-        max_near_ratio=0.25,
+        sample_radius_px=5,
+        side_offset_px=25,
+        min_side_depth_difference=0.05,
     ):
-        # 책장 단의 개수입니다. 현재 학습 데이터는 5단 책장입니다.
-        if row_count <= 0:
-            # 0단 이하의 책장은 검사할 수 없으므로 오류를 발생시킵니다.
-            raise ValueError('row_count must be positive \n책장을 감지할 수 없음')
-        # 외부 파라미터를 정수형 단 개수로 저장합니다.
-        self.row_count = int(row_count)
+        if sample_radius_px < 1:
+            raise ValueError('sample_radius_px must be positive')
+        if side_offset_px < 1:
+            raise ValueError('side_offset_px must be positive')
+        if min_side_depth_difference < 0:
+            raise ValueError(
+                'min_side_depth_difference must be non-negative')
 
-        # 가까운 책 표면과 먼 배경을 구분할 최소 깊이 차이(m)입니다.
-        if depth_margin < 0:
-            # 음수 깊이 차이는 판정 기준으로 사용할 수 없으므로 오류를 냅니다.
-            raise ValueError('depth_margin must be non-negative')
-        # 깊이 차이 기준을 실수형으로 저장합니다.
-        self.depth_margin = float(depth_margin)
-
-        # 각 삽입 후보 주변에서 깊이를 샘플링할 픽셀 반경입니다.
+        # 목표점과 좌우 지점 주변에서 깊이를 샘플링할 픽셀 반경입니다.
         self.sample_radius_px = int(sample_radius_px)
-        # 예상 삽입점보다 이 거리 이상 먼 값이 많으면 빈 칸으로 판정합니다.
-        self.empty_depth_margin = float(empty_depth_margin)
-        # 예상 삽입점보다 이 거리 이상 가까운 값이 많으면 책이 있는 칸으로 판정합니다.
-        self.occupied_depth_margin = float(occupied_depth_margin)
-        # 빈 칸으로 인정할 먼 깊이값의 최소 비율입니다.
-        self.min_far_ratio = float(min_far_ratio)
-        # 빈 칸으로 인정할 가까운 깊이값의 최대 비율입니다.
-        self.max_near_ratio = float(max_near_ratio)
+        # 목표점 좌우의 깊이를 읽을 때 중심에서 떨어질 픽셀 거리입니다.
+        self.side_offset_px = int(side_offset_px)
+        # 중심이 좌우보다 이 값 이상 멀어야 빈 공간 경계로 인정합니다.
+        self.min_side_depth_difference = float(min_side_depth_difference)
 
-        # 책장 bbox 안에서 좌우 가장자리와 프레임을 제외할 비율입니다.
-        # 책이 들어가는 내부 가로 영역의 비율을 저장합니다.
-        self.inner_width_ratio = float(inner_width_ratio)
-        # 책장 한 단 안에서 위아래 선반판을 제외할 비율입니다.
-        # 깊이를 읽을 내부 세로 영역의 비율을 저장합니다.
-        self.inner_height_ratio = float(inner_height_ratio)
-
-    def find_empty_slots(
+    def find_empty_position(
         self,
         depth_image,
         shelf_box,
@@ -63,219 +39,218 @@ class TargetDetector:
         cx,
         cy,
         depth_scale=1.0,
-        shelf_class='unknown',
     ):
-        """책장 bbox를 5개 단으로 나누고 빈 단의 카메라 좌표를 반환합니다.
-
-        정면 관찰을 가정합니다. 각 단의 중앙 영역에서 깊이를 읽어,
-        책장 안에서 가장 가까운 깊이보다 ``depth_margin`` 이상 먼 단을
-        빈 공간으로 판정합니다. ``shelf_open``은 학습 데이터상 전체가 빈
-        책장이므로 모든 단을 빈 공간으로 취급합니다.
-        """
-        # 깊이 영상과 책장 bbox가 없으면 빈 결과를 반환합니다.
+        """책장 ROI에서 좌우보다 깊은 빈 공간의 중심을 찾습니다."""
         if depth_image is None or shelf_box is None:
-            return []
+            return None
 
-        # bbox를 정수 픽셀 좌표로 변환합니다.
-        x1, y1, x2, y2 = map(int, shelf_box)
-        # 깊이 영상 크기를 가져옵니다.
         height, width = depth_image.shape[:2]
-        # bbox가 영상 밖으로 나가지 않도록 잘라냅니다.
+        x1, y1, x2, y2 = map(int, shelf_box)
         x1 = max(0, min(width - 1, x1))
-        x2 = max(0, min(width, x2))
+        x2 = max(x1 + 1, min(width, x2))
         y1 = max(0, min(height - 1, y1))
-        y2 = max(0, min(height, y2))
-        # 잘못된 bbox이면 처리할 수 없습니다.
-        if x1 >= x2 or y1 >= y2:
-            return []
+        y2 = max(y1 + 1, min(height, y2))
 
-        # 책장 bbox를 좌우 프레임을 제외한 내부 영역으로 줄입니다.
-        box_width = x2 - x1
-        # 좌우 프레임을 제외한 샘플 영역의 왼쪽 x를 계산합니다.
-        inner_x1 = int(x1 + box_width * (1.0 - self.inner_width_ratio) / 2.0)
-        # 좌우 프레임을 제외한 샘플 영역의 오른쪽 x를 계산합니다.
-        inner_x2 = int(x2 - box_width * (1.0 - self.inner_width_ratio) / 2.0)
+        radius = max(1, self.sample_radius_px)
+        offset = max(radius + 1, self.side_offset_px)
+        if x2 - x1 <= 2 * offset:
+            return None
 
-        # 각 단의 깊이와 픽셀 중심을 계산합니다.
-        row_measurements = []
-        # 책장 전체 높이를 단 개수로 나누어 한 단의 높이를 계산합니다.
-        row_height = (y2 - y1) / self.row_count
-        # 위쪽 단부터 아래쪽 단까지 순서대로 검사합니다.
-        for row_index in range(self.row_count):
-            # 위에서부터 현재 단의 세로 범위를 계산합니다.
-            row_y1 = int(y1 + row_index * row_height)
-            row_y2 = int(y1 + (row_index + 1) * row_height)
-            # 선반판을 피하기 위해 단 내부의 중앙 세로 영역만 사용합니다.
-            usable_height = max(1, row_y2 - row_y1)
-            sample_y1 = int(
-                row_y1 + usable_height * (1.0 - self.inner_height_ratio) / 2.0)
-            sample_y2 = int(
-                row_y2 - usable_height * (1.0 - self.inner_height_ratio) / 2.0)
-            sample_y1 = max(0, min(height, sample_y1))
-            sample_y2 = max(0, min(height, sample_y2))
+        depth_m = depth_image.astype(np.float32) * float(depth_scale)
+        valid = np.isfinite(depth_m) & (depth_m > 0.0)
+        # Isaac depth는 이 테스트에서 조밀하지만, invalid가 섞여도 blur에
+        # 전파되지 않도록 0으로 둔 뒤 최종 mask에서 다시 제외합니다.
+        filtered = np.where(valid, depth_m, 0.0).astype(np.float32)
+        kernel = 2 * radius + 1
+        # OpenCV 5의 medianBlur는 float32 단일 채널을 받지 않으므로,
+        # 작은 box 평균으로 센서 노이즈만 완화합니다.
+        filtered = cv2.blur(filtered, (kernel, kernel))
 
-            # 현재 단의 중앙 영역에서 유효한 깊이값만 추출합니다.
-            values = depth_image[sample_y1:sample_y2, inner_x1:inner_x2]
-            # NaN, 무한대, 0 이하인 깊이값을 제거합니다.
-            valid_values = values[np.isfinite(values) & (values > 0)]
-            # 이 단에서 쓸 수 있는 깊이값이 없으면 다음 단으로 넘어갑니다.
-            if valid_values.size == 0:
+        candidate = np.zeros((height, width), dtype=np.uint8)
+        xs = slice(x1 + offset, x2 - offset)
+        ys = slice(y1, y2)
+        center = filtered[ys, xs]
+        left = filtered[ys, slice(x1, x2 - 2 * offset)]
+        right = filtered[ys, slice(x1 + 2 * offset, x2)]
+        local_valid = (
+            valid[ys, xs]
+            & valid[ys, slice(x1, x2 - 2 * offset)]
+            & valid[ys, slice(x1 + 2 * offset, x2)]
+        )
+        local_candidate = (
+            local_valid
+            & ((center - left) >= self.min_side_depth_difference)
+            & ((center - right) >= self.min_side_depth_difference)
+        )
+        candidate[ys, xs] = local_candidate.astype(np.uint8)
+
+        count, labels, stats, centroids = cv2.connectedComponentsWithStats(
+            candidate, connectivity=8)
+        best = None
+        for label in range(1, count):
+            comp_x, comp_y, comp_w, comp_h, area = map(int, stats[label])
+            # 한두 픽셀의 depth 노이즈나 선반 모서리를 빈 칸으로 보지 않습니다.
+            if area < 30 or comp_w < 3 or comp_h < 10:
                 continue
+            rank = (area, comp_h, comp_w)
+            if best is None or rank > best[0]:
+                best = (rank, label, (comp_x, comp_y, comp_w, comp_h))
 
-            # 일부 책 표면이나 노이즈의 영향을 줄이기 위해 중앙값을 사용합니다.
-            depth_m = float(np.median(valid_values)) * float(depth_scale)
-            # 단 중심 픽셀을 계산합니다.
-            center_u = int((inner_x1 + inner_x2) / 2)
-            center_v = int((row_y1 + row_y2) / 2)
-            # 깊이와 픽셀 위치를 저장합니다.
-            row_measurements.append({
-                # 책장 내부에서의 단 번호입니다.
-                'row_index': row_index,
-                # 해당 단을 대표하는 중심 픽셀의 x 좌표입니다.
-                'u': center_u,
-                # 해당 단을 대표하는 중심 픽셀의 y 좌표입니다.
-                'v': center_v,
-                # 해당 단 중앙 영역의 대표 깊이(m)입니다.
-                'depth': depth_m,
-            })
+        if best is None:
+            return None
 
-        # 깊이값을 읽을 수 있는 단이 없으면 빈 결과를 반환합니다.
-        if not row_measurements:
-            return []
+        _, label, bounds = best
+        u_float, v_float = centroids[label]
+        u, v = int(round(u_float)), int(round(v_float))
+        sample = self._sample_depth_window(
+            depth_image, u, v, radius, depth_scale)
+        center_depth = sample['median']
+        if center_depth is None:
+            return None
 
-        # 전체가 비어 있다고 학습된 shelf_open은 모든 유효 단을 빈 단으로 처리합니다.
-        if shelf_class == 'shelf_open':
-            empty_rows = row_measurements
-        else:
-            # 가장 가까운 깊이는 책 표면일 가능성이 높습니다.
-            nearest_depth = min(row['depth'] for row in row_measurements)
-            # 가까운 표면보다 충분히 먼 단을 빈 단으로 선택합니다.
-            empty_rows = [
-                row for row in row_measurements
-                if row['depth'] >= nearest_depth + self.depth_margin
-            ]
+        background_xyz = (
+            (u - float(cx)) * center_depth / float(fx),
+            (v - float(cy)) * center_depth / float(fy),
+            center_depth,
+        )
+        inspection = self.inspect_target_position(
+            depth_image,
+            {'target_xyz': background_xyz, 'camera_xyz': background_xyz},
+            fx, fy, cx, cy, depth_scale,
+        )
+        side_depths = [
+            value for value in (
+                inspection.get('left_depth'), inspection.get('right_depth'))
+            if value is not None and math.isfinite(value) and value > 0.0
+        ]
+        if len(side_depths) != 2:
+            return None
+        # 책장 뒤가 열린 구조이므로 중앙 depth는 뒤쪽 배경까지의 거리입니다.
+        # 반환점은 양옆 책/기둥으로 추정한 책장 전면 평면에 놓습니다.
+        shelf_front_depth = float(np.median(side_depths))
+        camera_xyz = (
+            (u - float(cx)) * shelf_front_depth / float(fx),
+            (v - float(cy)) * shelf_front_depth / float(fy),
+            shelf_front_depth,
+        )
+        inspection['background_xyz'] = background_xyz
+        inspection['camera_xyz'] = camera_xyz
+        inspection['target_xyz'] = camera_xyz
+        inspection['expected_depth'] = shelf_front_depth
+        inspection['shelf_front_depth'] = shelf_front_depth
+        inspection['type'] = 'detected_empty_shelf_position'
+        inspection['component_bounds'] = bounds
+        inspection['component_area'] = int(stats[label, cv2.CC_STAT_AREA])
+        return inspection
 
-            # 깊이 차이가 전혀 없고 shelf_filled로 분류된 경우 빈 단이 없습니다.
-            if shelf_class == 'shelf_filled' and not empty_rows:
-                empty_rows = []
-
-        # 픽셀 중심과 깊이로 각 빈 단의 카메라 기준 xyz를 계산합니다.
-        empty_slots = []
-        for row in empty_rows:
-            # 대표 깊이를 카메라 좌표계의 z 거리로 사용합니다.
-            z = float(row['depth'])
-            # 잘못된 깊이는 좌표 변환에서 제외합니다.
-            if not math.isfinite(z) or z <= 0:
-                continue
-            # 핀홀 카메라 모델로 x 좌표를 계산합니다.
-            x = (row['u'] - cx) * z / fx
-            # 핀홀 카메라 모델로 y 좌표를 계산합니다.
-            y = (row['v'] - cy) * z / fy
-            # 빈 단의 픽셀·깊이·3D 좌표를 결과 목록에 추가합니다.
-            empty_slots.append({
-                # 책장 내 단 번호를 보존합니다.
-                'row_index': row['row_index'],
-                # 디버그 화면에 표시할 중심 픽셀입니다.
-                'pixel': (row['u'], row['v']),
-                # 미터 단위의 대표 깊이입니다.
-                'depth': z,
-                # 카메라 기준 x/y/z 좌표입니다.
-                'xyz': (x, y, z),
-                # 결과의 의미를 구분하는 타입 문자열입니다.
-                'type': 'empty_shelf_position',
-            })
-
-        # 위쪽 단부터 아래쪽 단 순서로 반환합니다.
-        return empty_slots
-
-    def find_empty_slots_at_positions(
+    def inspect_target_position(
         self,
         depth_image,
-        candidate_slots,
+        target,
         fx,
         fy,
         cx,
         cy,
         depth_scale=1.0,
     ):
-        """고정된 두 슬롯 후보를 Depth로 개별 판정합니다.
-
-        ``candidate_slots``의 각 항목은 ``slot_id``와 카메라 기준
-        ``camera_xyz``를 가져야 합니다. 빈 칸은 후보 중심 주변에서
-        예상 삽입점보다 약 0.15 m 먼 깊이값이 충분히 많고,
-        책 등 두께인 0.03 m 이상 가까운 값이 적은 경우입니다.
-
-        후보 좌표 자체는 카메라가 아니라 고정 world 좌표계에 두고,
-        호출부에서 현재 손목 카메라 좌표계로 변환해야 합니다.
         """
-        # 입력 영상이나 후보가 없으면 빈 결과를 반환합니다.
-        if depth_image is None or not candidate_slots:
-            return []
+        월드 목표점의 투영 위치와 중심/좌/우 Depth 차이를 측정합니다.
 
-        # 깊이 영상의 높이와 너비를 가져옵니다.
+        ``target``은 ``target_xyz``와 현재 카메라 기준 ``camera_xyz``를
+        가져야 합니다. 결과는 판정 성공 여부와 무관하게 반환하므로, 화면에서
+        투영점이 맞는지 먼저 확인할 수 있습니다.
+        """
+        if depth_image is None or not target:
+            return None
+
         height, width = depth_image.shape[:2]
-        # 최종적으로 빈 칸으로 판정된 후보를 저장합니다.
-        empty_slots = []
+        camera_x, camera_y, camera_z = map(float, target['camera_xyz'])
+        result = {
+            'target_xyz': tuple(map(float, target['target_xyz'])),
+            'camera_xyz': (camera_x, camera_y, camera_z),
+            'expected_depth': camera_z,
+            'pixel': None,
+            'visible': False,
+            'center_depth': None,
+            'left_depth': None,
+            'right_depth': None,
+            'left_difference': None,
+            'right_difference': None,
+            'left_edge': False,
+            'right_edge': False,
+            'is_empty': False,
+            'sample_windows': {},
+            'type': 'empty_shelf_position_diagnostic',
+        }
+        if not math.isfinite(camera_z) or camera_z <= 0:
+            return result
 
-        # 등록된 각 삽입 후보를 순회합니다.
-        for candidate in candidate_slots:
-            # 후보의 카메라 기준 xyz를 읽습니다.
-            camera_x, camera_y, camera_z = map(
-                float,
-                candidate['camera_xyz'],
-            )
-            # 카메라 뒤쪽이거나 깊이가 없으면 화면에 투영할 수 없습니다.
-            if not math.isfinite(camera_z) or camera_z <= 0:
+        u = int(round(fx * camera_x / camera_z + cx))
+        v = int(round(fy * camera_y / camera_z + cy))
+        result['pixel'] = (u, v)
+        if not (0 <= u < width and 0 <= v < height):
+            return result
+        result['visible'] = True
+
+        radius = max(1, self.sample_radius_px)
+        offset = max(radius + 1, self.side_offset_px)
+        samples = {
+            'left': self._sample_depth_window(
+                depth_image, u - offset, v, radius, depth_scale),
+            'center': self._sample_depth_window(
+                depth_image, u, v, radius, depth_scale),
+            'right': self._sample_depth_window(
+                depth_image, u + offset, v, radius, depth_scale),
+        }
+        result['sample_windows'] = {
+            name: sample['bounds'] for name, sample in samples.items()
+        }
+        result['left_depth'] = samples['left']['median']
+        result['center_depth'] = samples['center']['median']
+        result['right_depth'] = samples['right']['median']
+
+        center_depth = result['center_depth']
+        if center_depth is None:
+            return result
+        for side in ('left', 'right'):
+            side_depth = result[f'{side}_depth']
+            if side_depth is None:
                 continue
+            difference = center_depth - side_depth
+            result[f'{side}_difference'] = difference
+            result[f'{side}_edge'] = (
+                difference >= self.min_side_depth_difference)
 
-            # 핀홀 카메라 모델로 후보의 화면 픽셀 위치를 계산합니다.
-            u = int(round(fx * camera_x / camera_z + cx))
-            v = int(round(fy * camera_y / camera_z + cy))
-            # 화면 밖 후보는 깊이를 읽을 수 없으므로 건너뜁니다.
-            if not (0 <= u < width and 0 <= v < height):
-                continue
+        result['is_empty'] = bool(
+            result['left_edge'] and result['right_edge'])
+        return result
 
-            # 후보 중심 주변의 작은 정사각형 범위를 계산합니다.
-            radius = max(1, self.sample_radius_px)
-            x1 = max(0, u - radius)
-            x2 = min(width, u + radius + 1)
-            y1 = max(0, v - radius)
-            y2 = min(height, v + radius + 1)
-            # 후보 주변 깊이값을 1차원으로 펼칩니다.
-            values = depth_image[y1:y2, x1:x2].reshape(-1)
-            # 유효한 양수 깊이값만 남깁니다.
-            valid_values = values[np.isfinite(values) & (values > 0)]
-            # 유효한 깊이가 없으면 이 후보의 상태를 알 수 없습니다.
-            if valid_values.size == 0:
-                continue
+    @staticmethod
+    def _sample_depth_window(
+        depth_image,
+        center_u,
+        center_v,
+        radius,
+        depth_scale,
+    ):
+        """한 픽셀 주변의 유효 Depth 중앙값과 실제 샘플 범위를 반환합니다."""
+        height, width = depth_image.shape[:2]
+        x1 = max(0, int(center_u) - radius)
+        x2 = min(width, int(center_u) + radius + 1)
+        y1 = max(0, int(center_v) - radius)
+        y2 = min(height, int(center_v) + radius + 1)
+        bounds = (x1, y1, x2, y2)
+        if x1 >= x2 or y1 >= y2:
+            return {'median': None, 'valid_count': 0, 'bounds': bounds}
 
-            # 센서 깊이 단위를 미터로 변환합니다.
-            depths_m = valid_values.astype(float) * float(depth_scale)
-            # 예상 삽입점보다 먼 배경 깊이값의 비율을 계산합니다.
-            far_ratio = float(np.mean(
-                depths_m >= camera_z + self.empty_depth_margin))
-            # 예상 삽입점보다 가까운 책/팔 깊이값의 비율을 계산합니다.
-            near_ratio = float(np.mean(
-                depths_m <= camera_z - self.occupied_depth_margin))
+        values = depth_image[y1:y2, x1:x2].reshape(-1)
+        valid_values = values[np.isfinite(values) & (values > 0)]
+        if valid_values.size == 0:
+            return {'median': None, 'valid_count': 0, 'bounds': bounds}
 
-            # 먼 값이 충분하고 가까운 물체가 적을 때만 빈 칸으로 판정합니다.
-            if (
-                far_ratio < self.min_far_ratio
-                or near_ratio > self.max_near_ratio
-            ):
-                continue
-
-            # 빈 후보의 좌표·픽셀·깊이 통계를 결과에 저장합니다.
-            empty_slots.append({
-                'slot_id': candidate['slot_id'],
-                'pixel': (u, v),
-                'camera_xyz': (camera_x, camera_y, camera_z),
-                'target_xyz': candidate['target_xyz'],
-                'observed_depth': float(np.median(depths_m)),
-                'far_ratio': far_ratio,
-                'near_ratio': near_ratio,
-                'type': 'empty_shelf_position',
-            })
-
-        # 설정된 후보 순서를 유지한 채 빈 칸만 반환합니다.
-        return empty_slots
+        depths_m = valid_values.astype(float) * float(depth_scale)
+        return {
+            'median': float(np.median(depths_m)),
+            'valid_count': int(depths_m.size),
+            'bounds': bounds,
+        }

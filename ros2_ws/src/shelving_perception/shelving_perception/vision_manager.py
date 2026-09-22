@@ -177,6 +177,14 @@ class VisionManager(Node):
         # 검출 상자와 confidence를 그린 디버그 영상을 발행할 토픽입니다.
         self.debug_image_topic = self.declare_parameter(
             'debug_image_topic', '/perception/debug_image').value
+        # 목표점 투영과 좌/중/우 Depth 샘플을 그린 전용 디버그 영상입니다.
+        self.depth_debug_image_topic = self.declare_parameter(
+            'depth_debug_image_topic',
+            '/perception/depth_debug_image',
+        ).value
+        # Depth 디버그 영상을 흰색으로 포화시킬 최대 거리(m)입니다.
+        self.depth_debug_max_m = float(self.declare_parameter(
+            'depth_debug_max_m', 3.0).value)
         # 책장 빈 단의 3D 점을 발행할 토픽입니다.
         self.empty_slot_topic = self.declare_parameter(
             'empty_slot_topic', '/perception/empty_shelf_position').value
@@ -199,39 +207,14 @@ class VisionManager(Node):
         # 책장 검출을 인정할 최소 confidence입니다.
         self.shelf_confidence_threshold = float(self.declare_parameter(
             'shelf_confidence_threshold', 0.50).value)
-        # 현재 학습된 책장은 5단이므로 기본값을 5로 둡니다.
-        self.shelf_row_count = int(self.declare_parameter(
-            'shelf_row_count', 5).value)
-        # 책 표면과 빈 칸의 배경 깊이를 구분할 최소 차이(m)입니다.
-        self.shelf_depth_margin = float(self.declare_parameter(
-            'shelf_depth_margin', 0.05).value)
-        # 고정 슬롯 좌표가 정의된 기준 frame입니다. 아래 좌표는 world frame에
-        # 직접 입력하고, 이 값은 반드시 해당 좌표의 frame 이름과 맞춰야 합니다.
-        self.slot_position_frame = self.declare_parameter(
-            'slot_position_frame', 'world').value
-        # x,y,z가 반복되는 평탄화된 고정 슬롯 좌표 2개입니다.
-        # TODO: 여기에 책장 빈 공간 1번과 2번의 world 좌표를 직접 입력하세요.
-        # 책장 깊이는 0.30 m이며, 좌표는 책을 넣을 목표 위치로 지정합니다.
-        self.slot_positions = list(self.declare_parameter(
-            'slot_positions', [
-                2.61545, -2.50246, 1.58288,  # slot 0 world x,y,z 입력
-                1.48105, -2.46581, 1.04401,  # slot 1 world x,y,z 입력
-            ]).value)
-        # 후보 중심 주변에서 깊이를 샘플링할 픽셀 반경입니다.
-        self.slot_sample_radius_px = int(self.declare_parameter(
-            'slot_sample_radius_px', 10).value)
-        # 예상 삽입점보다 먼 값이 빈 칸임을 나타내는 거리 기준입니다.
-        self.slot_empty_depth_margin = float(self.declare_parameter(
-            'slot_empty_depth_margin', 0.15).value)
-        # 예상 삽입점보다 가까운 값이 점유를 나타내는 거리 기준입니다.
-        self.slot_occupied_depth_margin = float(self.declare_parameter(
-            'slot_occupied_depth_margin', 0.03).value)
-        # 샘플 중 먼 깊이값이 차지해야 하는 최소 비율입니다.
-        self.slot_min_far_ratio = float(self.declare_parameter(
-            'slot_min_far_ratio', 0.50).value)
-        # 샘플 중 가까운 물체 깊이가 허용되는 최대 비율입니다.
-        self.slot_max_near_ratio = float(self.declare_parameter(
-            'slot_max_near_ratio', 0.25).value)
+        # 중심(C)과 좌/우(L/R) Depth 샘플 창의 반경과 간격입니다.
+        self.target_sample_radius_px = int(self.declare_parameter(
+            'target_sample_radius_px', 5).value)
+        self.target_side_offset_px = int(self.declare_parameter(
+            'target_side_offset_px', 25).value)
+        # 중심 Depth가 좌우보다 이 값 이상 멀면 경계가 있다고 판정합니다.
+        self.target_min_depth_difference = float(self.declare_parameter(
+            'target_min_depth_difference', 0.05).value)
         # 결과 pose에 적용할 gripper roll 보정값입니다.
         self.gripper_roll = float(self.declare_parameter(
             'gripper_roll', 0.0).value)
@@ -293,10 +276,8 @@ class VisionManager(Node):
             raise ValueError(
                 'model_path parameter is required, for example '
                 '-p model_path:=/path/to/book_best.pt')
-        # 삽입 후보는 x,y,z 세 값이 한 묶음이어야 하므로 길이를 검증합니다.
-        if len(self.slot_positions) % 3 != 0:
-            raise ValueError(
-                'slot_positions must contain x,y,z triples')
+        if self.depth_debug_max_m <= 0:
+            raise ValueError('depth_debug_max_m must be positive')
 
         # 학습된 YOLO 모델을 메모리에 로드합니다.
         self.model = YOLO(self.model_path)
@@ -304,15 +285,11 @@ class VisionManager(Node):
         self.shelf_model = YOLO(self.shelf_model_path)
         # 검출 상자와 깊이로 3차원 좌표를 계산하는 객체를 생성합니다.
         self.book_detector = BookDetector()
-        # 책장 각 단의 빈 공간을 깊이로 판단하는 객체를 생성합니다.
+        # 단일 월드 목표점의 좌/중/우 Depth 차이를 측정하는 객체입니다.
         self.target_detector = TargetDetector(
-            row_count=self.shelf_row_count,
-            depth_margin=self.shelf_depth_margin,
-            sample_radius_px=self.slot_sample_radius_px,
-            empty_depth_margin=self.slot_empty_depth_margin,
-            occupied_depth_margin=self.slot_occupied_depth_margin,
-            min_far_ratio=self.slot_min_far_ratio,
-            max_near_ratio=self.slot_max_near_ratio,
+            sample_radius_px=self.target_sample_radius_px,
+            side_offset_px=self.target_side_offset_px,
+            min_side_depth_difference=self.target_min_depth_difference,
         )
         # TF 변환을 조회할 버퍼와 listener를 생성합니다.
         self.tf_buffer = Buffer()
@@ -327,6 +304,8 @@ class VisionManager(Node):
         self._active_goal = None
         # 센서 처리 결과를 action 콜백에 전달하기 위한 변수입니다.
         self._action_result = None
+        # 책을 잡은 뒤 사용할 빈 위치를 검출 프레임 사이에 보존합니다.
+        self._remembered_empty_position = None
         # task_manager가 보내는 DetectTargetSlot goal을 받는 action 서버입니다.
         self._action_server = ActionServer(
             self,
@@ -345,6 +324,9 @@ class VisionManager(Node):
         # 검출 결과를 그린 디버그 영상을 Image 메시지로 발행합니다.
         self.debug_image_pub = self.create_publisher(
             Image, self.debug_image_topic, 10)
+        # Depth 자체 위에서 목표점과 세 샘플 범위를 확인할 디버그 영상입니다.
+        self.depth_debug_image_pub = self.create_publisher(
+            Image, self.depth_debug_image_topic, 10)
         # 찾은 빈 단마다 카메라/로봇 기준 3D 점을 발행합니다.
         self.empty_slot_pub = self.create_publisher(
             PointStamped, self.empty_slot_topic, 10)
@@ -558,15 +540,11 @@ class VisionManager(Node):
                 detected_targets, rgb_msg.header.frame_id, rgb_msg.header.stamp)
             # 책장 전체의 bbox와 클래스를 책장 YOLO 모델로 검출합니다.
             shelf_detection = self._detect_shelf(rgb_image)
-            # 로봇 기준의 삽입 후보들을 현재 카메라 기준 좌표로 변환합니다.
-            candidate_slots = self._candidate_slots_in_camera(
-                rgb_msg.header.frame_id,
-                rgb_msg.header.stamp,
-            )
-            # 각 후보 주변의 Depth를 비교해 빈 칸만 선택합니다.
-            empty_slots = self.target_detector.find_empty_slots_at_positions(
+            # 책장 ROI 안에서 좌우보다 깊은 연결영역을 찾아 빈 공간의 중심과
+            # 좌/중/우 Depth를 얻습니다. 고정 index/월드 좌표는 사용하지 않습니다.
+            target_inspection = self.target_detector.find_empty_position(
                 depth_image,
-                candidate_slots,
+                shelf_detection['box'] if shelf_detection else None,
                 fx,
                 fy,
                 cx,
@@ -579,12 +557,18 @@ class VisionManager(Node):
                 rgb_msg.header,
                 detections,
                 shelf_detection,
-                empty_slots,
+                target_inspection,
                 roi_px=self._book_roi_pixels(
                     rgb_msg.header.frame_id, rgb_msg.header.stamp,
                     fx, fy, cx, cy, rgb_image.shape),
                 keep_boxes=[t['box'] for t in detected_targets],
                 dropped=roi_dropped,
+            )
+            self._publish_depth_debug_image(
+                depth_image,
+                depth_scale,
+                depth_msg.header,
+                target_inspection,
             )
         except (IndexError, ValueError) as error:
             # 모델 출력 또는 깊이 계산 오류를 action 실패 결과로 전달합니다.
@@ -651,33 +635,50 @@ class VisionManager(Node):
                 f"yaw={target['image_angle']:.3f} rad "
                 f"(후보 {len(detected_targets)}권)")
 
-        # 찾은 빈 단들을 하나씩 target_frame으로 변환하고 토픽으로 발행합니다.
-        transformed_empty_slots = []
-        for empty_slot in empty_slots:
-            # 후보가 정의된 로봇 frame의 좌표를 최종 target frame으로 변환합니다.
-            empty_point = self._transform_xyz(
-                empty_slot['target_xyz'],
-                self.slot_position_frame,
+        # 투영 및 좌/우 깊이 경계가 모두 확인된 경우에만 목표점을 빈 위치로 사용합니다.
+        transformed_empty_position = None
+        if target_inspection is not None:
+            self._log_target_inspection(target_inspection)
+        if target_inspection and target_inspection['is_empty']:
+            transformed_empty_position = self._transform_xyz(
+                target_inspection['target_xyz'],
+                rgb_msg.header.frame_id,
                 rgb_msg.header.stamp,
             )
-            if empty_point is None:
-                continue
+        if transformed_empty_position is not None:
             empty_msg = PointStamped()
-            empty_msg.header = empty_point.header
-            empty_msg.point = empty_point.point
-            self.empty_slot_pub.publish(empty_msg)
-            transformed_empty_slots.append(empty_point)
+            empty_msg.header = transformed_empty_position.header
+            empty_msg.point = transformed_empty_position.point
+            # 책이 없는 책장 스캔에서는 검출 즉시 슬롯을 발행합니다.
+            # 책도 검출된 프레임에서는 아래에서 책 처리 후 다시 발행합니다.
+            if not detected_targets:
+                self.empty_slot_pub.publish(empty_msg)
             self.get_logger().info(
-                f"Empty shelf slot={empty_slot['slot_id']}: "
-                f"xyz=({empty_point.point.x:.3f}, "
-                f"{empty_point.point.y:.3f}, "
-                f"{empty_point.point.z:.3f})")
+                f'Empty shelf target: '
+                f'xyz=({transformed_empty_position.point.x:.3f}, '
+                f'{transformed_empty_position.point.y:.3f}, '
+                f'{transformed_empty_position.point.z:.3f})')
 
-        # action 요청이었다면 첫 번째 빈 단을 TargetSlot 결과로 반환합니다.
+        # 현재 스캔에서 빈 위치를 확인했을 때만 캐시를 갱신합니다.
+        # 다음 책 검출 프레임에서 깊이를 다시 읽지 못해도 이 좌표를 사용합니다.
+        if transformed_empty_position is not None:
+            self._remembered_empty_position = transformed_empty_position
+
+        # 현재 프레임의 결과를 우선하고, 없으면 이전 검출에서 기억한 좌표를 사용합니다.
+        placement_position = (
+            transformed_empty_position or self._remembered_empty_position)
+
+        # 책 검출 후에도 기억한 삽입 좌표를 다시 발행해 로봇 팔이 받도록 합니다.
+        if detected_targets and placement_position is not None:
+            self.empty_slot_pub.publish(placement_position)
+            self.get_logger().info(
+                'Resent remembered empty shelf position after book detection')
+
+        # action 요청이었다면 기억된 단일 빈 위치를 반환합니다.
         if active_goal is not None:
-            self._complete_action_from_empty_slots(
+            self._complete_action_from_empty_position(
                 active_goal,
-                transformed_empty_slots,
+                placement_position,
             )
 
     def _detect_shelf(self, rgb_image):
@@ -722,7 +723,7 @@ class VisionManager(Node):
         try:
             return self.tf_buffer.lookup_transform(
                 camera_frame,
-                self.slot_position_frame,
+                self.target_frame,
                 rclpy.time.Time.from_msg(stamp),
                 timeout=rclpy.duration.Duration(seconds=0.2),
             )
@@ -759,7 +760,7 @@ class VisionManager(Node):
             self.get_logger().info(
                 f'ROI 밖 책 {dropped}권 제외 (남은 {len(kept)}권). '
                 f'ROI {self.book_roi_min} ~ {self.book_roi_max} @'
-                f'{self.slot_position_frame}')
+                f'{self.target_frame}')
         return kept, dropped
 
     def _book_roi_pixels(self, camera_frame, stamp, fx, fy, cx, cy, shape):
@@ -775,7 +776,7 @@ class VisionManager(Node):
             for y in (lo[1], hi[1]):
                 for z in (lo[2], hi[2]):
                     pt = PointStamped()
-                    pt.header.frame_id = self.slot_position_frame
+                    pt.header.frame_id = self.target_frame
                     pt.point.x, pt.point.y, pt.point.z = x, y, z
                     c = do_transform_point(pt, transform).point
                     if c.z <= 1e-6:          # 카메라 뒤쪽은 투영할 수 없다
@@ -787,57 +788,6 @@ class VisionManager(Node):
         h, w = shape[:2]
         return (max(0, int(min(us))), max(0, int(min(vs))),
                 min(w - 1, int(max(us))), min(h - 1, int(max(vs))))
-
-    def _candidate_slots_in_camera(self, camera_frame, stamp):
-        """로봇 기준 삽입 후보 좌표를 현재 카메라 기준으로 변환합니다."""
-        # 카메라 시각에 맞는 TF를 한 번만 조회합니다.
-        try:
-            transform = self.tf_buffer.lookup_transform(
-                camera_frame,
-                self.slot_position_frame,
-                rclpy.time.Time.from_msg(stamp),
-                timeout=rclpy.duration.Duration(seconds=0.2),
-            )
-        except TransformException as error:
-            # 카메라와 슬롯 frame의 TF가 없으면 모든 후보를 건너뜁니다.
-            self.get_logger().warning(
-                f'Could not transform slot frame '
-                f'{self.slot_position_frame} to {camera_frame}: {error}')
-            return []
-
-        # 변환된 후보를 저장할 목록입니다.
-        candidates = []
-        # 평탄화된 좌표 목록을 x,y,z 세 값씩 나눠 처리합니다.
-        for index in range(0, len(self.slot_positions), 3):
-            # 후보의 고유 번호를 생성합니다.
-            slot_id = index // 3
-            # 로봇 기준 삽입 후보 좌표를 읽습니다.
-            target_xyz = tuple(
-                float(value) for value in self.slot_positions[index:index + 3]
-            )
-            # TF 변환을 적용할 PointStamped를 생성합니다.
-            point = PointStamped()
-            # 점의 원래 frame을 후보 좌표 frame으로 설정합니다.
-            point.header.frame_id = self.slot_position_frame
-            # 센서 timestamp를 사용해 같은 시각의 TF를 적용합니다.
-            point.header.stamp = stamp
-            # 후보 좌표를 메시지에 기록합니다.
-            point.point.x, point.point.y, point.point.z = target_xyz
-            # 후보를 카메라 frame으로 변환합니다.
-            camera_point = do_transform_point(point, transform)
-            # 깊이 판정기가 사용할 정보를 저장합니다.
-            candidates.append({
-                'slot_id': slot_id,
-                'target_xyz': target_xyz,
-                'camera_xyz': (
-                    camera_point.point.x,
-                    camera_point.point.y,
-                    camera_point.point.z,
-                ),
-            })
-
-        # 카메라 기준으로 변환된 후보 목록을 반환합니다.
-        return candidates
 
     def _transform_xyz(self, xyz, source_frame, stamp):
         """카메라 기준 점을 target_frame 기준 점으로 변환합니다."""
@@ -886,12 +836,12 @@ class VisionManager(Node):
         header,
         detections,
         shelf_detection=None,
-        empty_slots=None,
+        target_inspection=None,
         roi_px=None,
         keep_boxes=None,
         dropped=0,
     ):
-        """책장·책·빈 단 표시를 그린 영상을 ROS Image로 발행합니다."""
+        """책장·책·월드 목표점 표시를 그린 RGB 영상을 발행합니다."""
         # 원본 영상을 복사해 디버그 표시가 원본 데이터에 영향을 주지 않게 합니다.
         debug_image = rgb_image.copy()
         # **트레이 ROI** 를 노란 상자로 그립니다 (팔 기준 3D 상자를 화면에 투영한 것).
@@ -969,27 +919,7 @@ class VisionManager(Node):
                 2,
                 cv2.LINE_AA,
             )
-        # 빈 단의 중심 픽셀을 빨간색 원으로 표시합니다.
-        # **없는 열쇠에 죽지 않습니다.** 빈 단 정보의 구성은 경로마다 다른데,
-        # 그림을 그리다 KeyError 로 노드 전체가 내려간 적이 있습니다
-        # (2026-09-21 GPU PC: KeyError 'row_index' 로 vision_manager 종료 → 파지 중단).
-        for empty_slot in empty_slots or []:
-            pixel = empty_slot.get('pixel')
-            if pixel is None:
-                continue
-            u, v = pixel
-            row_index = empty_slot.get('row_index', '?')
-            cv2.circle(debug_image, (u, v), 8, (0, 0, 255), -1)
-            cv2.putText(
-                debug_image,
-                f"empty row {row_index}",
-                (u + 10, v),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (0, 0, 255),
-                2,
-                cv2.LINE_AA,
-            )
+        self._draw_target_inspection(debug_image, target_inspection)
         # OpenCV BGR 영상을 ROS Image 메시지로 변환합니다.
         # **cv_bridge 를 쓰지 않습니다.** OpenCV 5 에서 CV_CN_SHIFT 가 3→5 로 바뀌어,
         # cv_bridge 의 타입 표(키 32..36)와 자체 계산값(16)이 어긋나 cv2_to_imgmsg 가
@@ -1000,6 +930,115 @@ class VisionManager(Node):
         debug_msg.header = header
         # 다른 PC의 rqt_image_view가 구독할 수 있도록 발행합니다.
         self.debug_image_pub.publish(debug_msg)
+
+    def _publish_depth_debug_image(
+        self,
+        depth_image,
+        depth_scale,
+        header,
+        target_inspection,
+    ):
+        """미터 Depth를 회색조로 바꾸고 목표점 및 L/C/R 측정을 표시합니다."""
+        try:
+            depth_m = depth_image.astype(np.float32) * float(depth_scale)
+            valid = np.isfinite(depth_m) & (depth_m > 0.0)
+            gray = np.zeros(depth_m.shape, dtype=np.uint8)
+            gray[valid] = np.clip(
+                depth_m[valid] / self.depth_debug_max_m * 255.0,
+                0.0,
+                255.0,
+            ).astype(np.uint8)
+            debug_image = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+            self._draw_target_inspection(debug_image, target_inspection)
+            debug_msg = _bgr8_to_imgmsg(debug_image)
+            debug_msg.header = header
+            self.depth_debug_image_pub.publish(debug_msg)
+        except Exception as error:       # noqa: BLE001 - 화면 때문에 노드가 죽으면 안 됩니다
+            self.get_logger().warning(
+                f'Depth 디버그 영상 표시 실패(검출은 계속합니다): '
+                f'{type(error).__name__}: {error}',
+                throttle_duration_sec=10.0,
+            )
+
+    @staticmethod
+    def _draw_target_inspection(image, inspection):
+        """목표 픽셀, L/C/R 샘플 창, 깊이값과 판정 결과를 그립니다."""
+        if not inspection or inspection.get('pixel') is None:
+            return
+
+        u, v = inspection['pixel']
+        height, width = image.shape[:2]
+        if not (0 <= u < width and 0 <= v < height):
+            return
+
+        colors = {
+            'left': (255, 128, 0),
+            'center': (0, 0, 255),
+            'right': (0, 255, 255),
+        }
+        names = {'left': 'L', 'center': 'C', 'right': 'R'}
+        for name, bounds in inspection.get('sample_windows', {}).items():
+            x1, y1, x2, y2 = bounds
+            color = colors[name]
+            cv2.rectangle(image, (x1, y1), (x2 - 1, y2 - 1), color, 2)
+            depth = inspection.get(f'{name}_depth')
+            depth_text = 'n/a' if depth is None else f'{depth:.3f}m'
+            cv2.putText(
+                image,
+                f'{names[name]} {depth_text}',
+                (max(0, x1 - 2), max(16, y1 - 5)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                color,
+                1,
+                cv2.LINE_AA,
+            )
+
+        # 사용자가 그림판에서 표시한 것과 같은 빨간 중심점을 항상 찍습니다.
+        cv2.circle(image, (u, v), 7, (0, 0, 255), -1)
+        passed = bool(inspection.get('is_empty'))
+        status_color = (0, 255, 0) if passed else (0, 128, 255)
+        left_diff = inspection.get('left_difference')
+        right_diff = inspection.get('right_difference')
+        left_text = 'n/a' if left_diff is None else f'{left_diff:+.3f}'
+        right_text = 'n/a' if right_diff is None else f'{right_diff:+.3f}'
+        label_y = min(height - 8, v + 35)
+        cv2.putText(
+            image,
+            f'dL={left_text}m dR={right_text}m '
+            f'{"PASS" if passed else "CHECK"}',
+            (max(0, min(width - 280, u - 120)), label_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            status_color,
+            2,
+            cv2.LINE_AA,
+        )
+
+    def _log_target_inspection(self, inspection):
+        """한 프레임의 목표점 투영 및 Depth 대비를 사람이 읽기 쉽게 기록합니다."""
+        pixel = inspection.get('pixel')
+        camera_xyz = inspection['camera_xyz']
+        if pixel is None or not inspection.get('visible'):
+            self.get_logger().warning(
+                f'Target projection is outside the depth image: pixel={pixel}, '
+                f'camera_xyz=({camera_xyz[0]:.3f}, {camera_xyz[1]:.3f}, '
+                f'{camera_xyz[2]:.3f})')
+            return
+
+        def format_value(value):
+            return 'n/a' if value is None else f'{value:.3f}'
+
+        self.get_logger().info(
+            f'Empty center pixel={pixel}, shelf_front_z={camera_xyz[2]:.3f}m; '
+            f'Depth L/C/R='
+            f'{format_value(inspection["left_depth"])}/'
+            f'{format_value(inspection["center_depth"])}/'
+            f'{format_value(inspection["right_depth"])}m; '
+            f'center-left={format_value(inspection["left_difference"])}m, '
+            f'center-right={format_value(inspection["right_difference"])}m; '
+            f'contrast={"PASS" if inspection["is_empty"] else "CHECK"}')
+
     def _make_book_pose(self, xyz, source_frame, stamp, image_angle):
         """책 위치와 영상 각도로 target_frame 기준 PoseStamped를 만듭니다."""
         # 영상에서 구한 책 방향에 gripper yaw 보정값을 더합니다.
@@ -1037,34 +1076,31 @@ class VisionManager(Node):
                 f'{self.target_frame}: {error}')
             return None
 
-    def _complete_action_from_empty_slots(self, goal_handle, empty_points):
-        """첫 번째 빈 책장 단을 DetectTargetSlot 결과로 반환합니다."""
+    def _complete_action_from_empty_position(self, goal_handle, empty_point):
+        """검증된 단일 빈 책장 위치를 DetectTargetSlot 결과로 반환합니다."""
         # action 결과 메시지를 생성합니다.
         result = DetectTargetSlot.Result()
-        # 찾은 빈 단의 개수를 action 후보 개수로 기록합니다.
-        result.candidate_count = len(empty_points)
-        # 빈 단을 하나도 찾지 못하면 action을 실패시킵니다.
-        if not empty_points:
+        result.candidate_count = int(empty_point is not None)
+        # 좌우 Depth 경계를 확인하지 못했으면 action을 실패시킵니다.
+        if empty_point is None:
             result.error_code = 3003
             result.message = 'No empty shelf position was detected.'
             self._set_action_result(result)
             return
 
-        # 현재는 위쪽에서부터 첫 번째 빈 단을 선택합니다.
-        point = empty_points[0]
         self._publish_action_feedback(
             goal_handle,
             'CALCULATING_POSE',
-            len(empty_points),
+            1,
             1.0,
         )
 
         # action 결과의 TargetSlot에 빈 단 위치를 기록합니다.
         slot = result.target_slot
-        slot.header = point.header
-        slot.pose.position.x = point.point.x
-        slot.pose.position.y = point.point.y
-        slot.pose.position.z = point.point.z
+        slot.header = empty_point.header
+        slot.pose.position.x = empty_point.point.x
+        slot.pose.position.y = empty_point.point.y
+        slot.pose.position.z = empty_point.point.z
         # 로봇팔 삽입 규약인 yaw +90도 회전을 quaternion으로 설정합니다.
         slot.pose.orientation.x = 0.0
         slot.pose.orientation.y = 0.0
@@ -1092,7 +1128,7 @@ class VisionManager(Node):
         self._publish_action_feedback(
             goal_handle,
             'TRANSFORMING_FRAME',
-            len(empty_points),
+            1,
             slot.confidence,
         )
         # execute callback이 결과를 받아 action을 끝내도록 저장합니다.
