@@ -10,7 +10,9 @@ source "${WS:-$REPO_ROOT/ros2_ws}/install/setup.bash"
 export FASTRTPS_DEFAULT_PROFILES_FILE="${FASTRTPS_DEFAULT_PROFILES_FILE:-$HOME/.ros/fastdds_whitelist.xml}"
 LOG=/tmp/vision_test; mkdir -p $LOG
 # 팀 프레임 별칭 + 광학 프레임 (Isaac 이 카메라 TF 를 이미 광학 규약으로 내므로 항등)
-ros2 run tf2_ros static_transform_publisher --frame-id panda_link0 --child-frame-id arm_base_link \
+# 부모 프레임은 로봇마다 다르다 (franka=panda_link0, m0609=base_link).
+# ARM_BASE_FRAME 로 바꾼다 — 기본은 현재 쓰는 M0609 (2026-09-20)
+ros2 run tf2_ros static_transform_publisher --frame-id "${ARM_BASE_FRAME:-base_link}" --child-frame-id arm_base_link \
     --ros-args -p use_sim_time:=true > $LOG/tf_arm.log 2>&1 &
 ros2 run tf2_ros static_transform_publisher --frame-id wrist_camera --child-frame-id wrist_camera_optical_frame \
     --ros-args -p use_sim_time:=true > $LOG/tf_optical.log 2>&1 &

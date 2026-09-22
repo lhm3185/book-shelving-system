@@ -92,5 +92,8 @@ def tucked_joint_moves(q_now, q_goal, q_stow, turn_threshold=0.5):
     if abs(q_goal[0] - q_now[0]) <= turn_threshold:
         return [q_goal]
     tuck = q_stow.copy(); tuck[0] = q_now[0]
-    turned = q_stow.copy(); turned[0] = q_goal[0]; turned[6] = q_goal[6]
+    # 1번(베이스 회전)과 **마지막 관절**(손목 돌림)은 목표값을 미리 맞춰 둔다.
+    # 예전에는 turned[6] 로 박아 두어 7축 전용이었다 — 6축에서는 인덱스가 없어 죽는다
+    # (2026-09-20 M0609 에서 IndexError). 관절 수에서 마지막을 집는다.
+    turned = q_stow.copy(); turned[0] = q_goal[0]; turned[-1] = q_goal[-1]
     return [tuck, turned, q_goal]

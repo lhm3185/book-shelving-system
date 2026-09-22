@@ -1,1 +1,21 @@
+# nav_manager 파라미터.
+# 실행: ros2 run shelving_navigation nav_manager --ros-args --params-file <이 파일>
+nav_manager:
+  ros__parameters:
+    target_action: /navigate_to_target
+    nav2_action: /navigate_to_pose
+    navigation_timeout_sec: 300.0
+    default_frame_id: map
 
+    # isaac_map 지도 파일. 비우면 패키지 config/waypoints.yaml
+    waypoints_file: ""
+
+    # moving_planner 서가 수평 주차 보정
+    parking_distance: 1.2
+    keep_lateral: true
+    correct_yaw: true
+    clamp_side: true
+
+    # task_manager 가 허용오차를 0 으로 보내면 사용하는 기본값
+    position_tolerance: 0.10
+    yaw_tolerance: 0.10

@@ -40,8 +40,16 @@
 
 ## 3. 프레임 트리 (1차, Isaac Sim)
 
+> **2026-09-20 주의.** 아래 트리는 **Franka 시절** 이름이다. M0609 결합체에서는
+> 맨 윗줄의 부모가 `panda_link0` 이 아니라 **`base_link`** 다 (Isaac 은 팔 베이스
+> prim 의 *이름*을 frame 으로 낸다 — `m0609/base_link` → `base_link`).
+> **`arm_base_link` 라는 계약 이름은 바뀌지 않는다.** 붙는 대상만 바뀐다.
+> 자세한 것은 `FRAMES_CONTRACT.md` §2. 부모 이름을 코드에 박지 말 것.
+
 ```
-panda_link0 ──(정적, 항등)──▶ arm_base_link              ← 모든 좌표의 기준
+<팔 베이스> ──(정적, 항등)──▶ arm_base_link              ← 모든 좌표의 기준
+  franka: panda_link0  /  m0609: base_link
+panda_link0 ──(정적, 항등)──▶ arm_base_link              ← (Franka 시절 표기)
 panda_link0 ──(Isaac TF)────▶ wrist_camera              ← Isaac 이 발행
 wrist_camera ─(정적, 항등)──▶ wrist_camera_optical_frame ← 이미지 frame_id
 panda_hand ───(정적, 항등)──▶ tool0
