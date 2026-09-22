@@ -46,6 +46,14 @@ BOOK_SRC = "/World/books/book_encyclopedia_set_01_2k__book_encyclopedia_set_01_b
 ARM_JOINTS = BOT.arm_joints
 FINGERS = BOT.grip_joints
 TRAY_FOLLOW_MIN_M = float(os.environ.get("SIM_TRAY_FOLLOW_MIN", "0.002"))
+
+#: 반납기에서 트레이가 로봇 위로 미끄러져 오는 연출. 레벨에 반납기 트레이가 있을 때만 돈다.
+#: `SIM_TRAY_DELIVERY=0` 으로 끄면 예전처럼 트레이가 처음부터 로봇 위에 있다.
+TRAY_DELIVERY = os.environ.get("SIM_TRAY_DELIVERY", "1") != "0"
+#: 레벨에서 반납기 위 트레이를 찾을 경로 (이것이 출발 자리가 된다)
+KIOSK_TRAY = os.environ.get("SIM_KIOSK_TRAY", "/World/tray_books/tray_v1")
+#: 미끄러져 오는 데 걸리는 시간 (초). 컨베이어처럼 일정한 속도로 온다
+TRAY_DELIVERY_S = float(os.environ.get("SIM_TRAY_DELIVERY_S", "2.5"))
 DECK_Z = BOT.deck_z         # 트레이가 놓이는 면의 월드 높이 (로봇별)
 # 링크가 이보다 낮으면 받침판을 뚫는 것으로 본다 (팔 베이스가 판 위에 바로 붙어 있다)
 # 팔이 받침판을 이만큼까지 파고드는 것은 눈감아 준다 (충돌 구가 근사값이라 여유가 필요하다)
@@ -242,6 +250,28 @@ class BookScene:
         self._tray_rel = _tray_rel.copy()
         say(f"트레이 배치: 팔 기준 {np.round(_tray_rel[:2], 4).tolist()} "
             f"→ 월드 {np.round(_tray_w[:2], 3).tolist()}, 면 z {DECK_Z:.3f}")
+        # **반납기에서 미끄러져 오게 한다.** 레벨의 반납기 트레이를 출발 자리로 삼고,
+        # 우리 트레이(bs_tray)를 거기서 시작시킨다. 레벨 쪽 트레이는 숨긴다 —
+        # 안 그러면 트레이가 두 개로 보인다.
+        self._deliver = None
+        if TRAY_DELIVERY:
+            _k = st.GetPrimAtPath(KIOSK_TRAY)
+            if _k and _k.IsValid():
+                _kp, _kq = SingleXFormPrim(KIOSK_TRAY).get_world_pose()
+                _kp = np.asarray(_kp, float)
+                # 출발 높이는 반납기 위, 도착은 데크. 자세(yaw)는 도착 자세로 고정한다 —
+                # 오는 도중에 돌면 책이 칸에서 밀린다
+                self._deliver = {
+                    "from": np.array([_kp[0], _kp[1], _kp[2]]),
+                    "to": np.array([_tray_w[0], _tray_w[1], DECK_Z]),
+                    "q": _tray_q, "t": 0, "n": 1,
+                }
+                _k.SetActive(False)
+                say(f"반납기 트레이를 출발 자리로 쓴다: {np.round(_kp, 3).tolist()} "
+                    f"→ 데크 {np.round(self._deliver['to'], 3).tolist()} "
+                    f"({TRAY_DELIVERY_S:.1f}초) [SIM_TRAY_DELIVERY]")
+            else:
+                say(f"반납기 트레이가 없다 ({KIOSK_TRAY}) — 트레이를 처음부터 로봇 위에 둔다")
         # **트레이를 키네마틱 강체로** 만든다. 동적 강체 + 고정 조인트로 묶어 봤더니
         # 트레이가 흔들려 책이 칸에서 36cm 벗어났다 (2026-09-21 실측).
         # 키네마틱은 물리가 밀지 못하고 우리가 매 스텝 자세를 준다 — 북엔드와 같은 방식이다.
@@ -611,12 +641,14 @@ class BookScene:
             self.say(f"트레이 기준 링크: {_anchor.rsplit(chr(47), 1)[-1]} "
                      f"(SIM_TRAY_ANCHOR={os.environ.get(chr(83)+chr(73)+chr(77)+chr(95)+'TRAY_ANCHOR', 'body')})")
             self.say(f"트레이가 로봇을 따라간다: {os.path.basename(_anchor)} ↔ bs_tray (키네마틱)")
+            self.start_delivery()
             # world.step() 을 부르는 곳이 셋이다 (run_simulation, manipulation_executor 2군데).
             # 물리 콜백에 물리면 어디서 돌리든 한 번씩만 불린다.
             try:
                 self.world.add_physics_callback(
                     "bs_tray_follow",
-                    lambda _dt: (self.follow_hand(), self.follow_tray(), self.diag_attach_tick()))
+                    lambda _dt: (self.follow_hand(), self.deliver_tick(),
+                                 self.follow_tray(), self.diag_attach_tick()))
             except Exception as exc:     # noqa: BLE001
                 self.say(f"[경고] 트레이 추종 콜백 등록 실패 — 주행하면 트레이가 뒤에 남는다: {exc}")
 
@@ -1363,6 +1395,52 @@ class BookScene:
         except Exception as exc:      # noqa: BLE001 - 계측이 작업을 막으면 안 된다
             self.say(f"[DIAG] attach_offset 못 쟀다: {type(exc).__name__}: {exc}")
 
+    def start_delivery(self):
+        """트레이를 출발 자리(반납기 위)로 옮기고 이송을 시작한다. 앵커가 잡힌 뒤 부른다."""
+        if not self._deliver or self._deliver["n"] > 1:
+            return
+        d = self._deliver
+        d["n"] = max(1, int(TRAY_DELIVERY_S / max(1e-4, float(self.world.get_physics_dt()))))
+        self._move_tray_group(d["from"], d["q"])
+        self.say(f"[이송] 트레이가 반납기에서 출발한다 ({d['n']} 스텝)")
+
+    def _move_tray_group(self, world_p, world_q):
+        """트레이와 **그 위의 책을 같은 강체처럼** 옮긴다 (follow_tray 와 같은 방식)."""
+        cur_p, cur_q = SingleXFormPrim(self.tray).get_world_pose()
+        Rc = R_from_quat(np.asarray(cur_q, float))
+        Rw = R_from_quat(np.asarray(world_q, float))
+        held = getattr(self, "_held_book", None)
+        rel = {}
+        for b in getattr(self, "_tray_books", {}):
+            if b == held:
+                continue
+            bp, bq = SingleXFormPrim(b).get_world_pose()
+            rel[b] = (Rc.T @ (np.asarray(bp, float) - np.asarray(cur_p, float)),
+                      Rc.T @ R_from_quat(np.asarray(bq, float)))
+        SingleXFormPrim(self.tray).set_world_pose(np.asarray(world_p, float),
+                                                  np.asarray(world_q, float))
+        for b, (rp, rR) in rel.items():
+            SingleXFormPrim(b).set_world_pose(np.asarray(world_p, float) + Rw @ rp,
+                                              quat_from_R(Rw @ rR))
+
+    def deliver_tick(self):
+        """이송 한 스텝. 끝나면 **그 자리에서 앵커를 다시 잡는다**.
+
+        컨베이어처럼 일정한 속도로 간다. 도중에는 `follow_tray()` 가 손대지 않는다 —
+        둘이 같은 물체를 서로 다른 목표로 옮기면 책이 칸에서 튄다.
+        """
+        d = self._deliver
+        if not d or d["n"] <= 1:
+            return
+        d["t"] += 1
+        u = min(1.0, d["t"] / d["n"])
+        self._move_tray_group(d["from"] + (d["to"] - d["from"]) * u, d["q"])
+        if u >= 1.0:
+            self._deliver = None
+            # 도착 자리에서 앵커와의 관계를 다시 잡는다 — 이후 주행하면 따라온다
+            self.rebase_tray_to(d["to"], d["q"])
+            self.say(f"[이송] 트레이 안착 {np.round(d['to'], 3).tolist()}")
+
     def rebase_tray_to(self, world_p, world_q):
         """다음 스텝에 **트레이를 이 월드 자세에 그대로 두고**, 앵커와의 관계만 다시 잡는다.
 
@@ -1388,6 +1466,10 @@ class BookScene:
         # (실측: 책만 얼렸을 때 상승 3.2~4.1cm, 기준 5.0cm 미달).
         # 작업 중에는 AMR 이 서 있으므로 따라갈 것도 없다.
         if getattr(self, "job_active", False):
+            return
+        # **이송 중에는 손대지 않는다.** 둘이 같은 트레이를 서로 다른 목표로 옮기면
+        # 책이 칸에서 튄다 (deliver_tick 이 끝나면서 앵커를 다시 잡아 준다)
+        if getattr(self, "_deliver", None):
             return
         ap, aq = SingleXFormPrim(self._tray_anchor).get_world_pose()
         Ra = R_from_quat(np.asarray(aq, float))
