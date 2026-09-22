@@ -238,8 +238,17 @@ class NavigationExecutor:
         if drift < REALIGN_DONE_M and abs(dyaw) < 1e-4:
             return
         if drift > RETURN_SNAP_M:
-            self.say(f"[주행] 팔 베이스가 출발 자리에서 {drift*100:.1f}cm 떨어져 있다 "
-                     f"— {RETURN_SNAP_M*100:.0f}cm 를 넘어 손대지 않는다 (제자리 복귀가 아니다)")
+            # **조용히 넘어가지 않는다.** 보정을 건너뛰면 좌표계가 틀어진 채 파지에 들어가고,
+            # 2026-09-21 의 406 기제로 그대로 돌아간다 — 주행은 "도착" 이라 보고하고
+            # 엉뚱한 단계에서 터진다. 처짐은 주행 **시간**에 비례하므로(≈0.155 cm/s,
+            # 9/22 실측: 0.6 m/s 8.1 cm / 0.3 m/s 17.1 cm) 느린 주행이나 긴 경로에서
+            # 이 문턱을 넘을 수 있다. 0.15 m/s 면 34 cm 로 넘는다
+            self.status = "failed"
+            msg = (f"팔 베이스가 출발 자리에서 {drift*100:.1f}cm 떨어져 있다 — "
+                   f"{RETURN_SNAP_M*100:.0f}cm 를 넘어 보정하지 않는다. "
+                   f"이대로 파지하면 좌표계가 틀어진 채 집는다")
+            self.say(f"[주행] **{msg}**")
+            self.publish(message=msg)
             return
 
         # **자세까지 되돌린다.** 위치만 맞추면 팔 기준 좌표계가 돌아간 채로 남아,
