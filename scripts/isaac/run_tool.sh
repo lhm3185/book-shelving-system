@@ -8,7 +8,7 @@
 # 저장소 코드를 그대로 실행한다 (~/arm 으로 복사하지 않는다).
 # Isaac 설치 위치만 시스템마다 다르므로 ISAAC_SIM_PATH 로 받는다.
 set -e
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ISAAC_SIM_PATH="${ISAAC_SIM_PATH:-$HOME/isaacsim}"
 [ -x "$ISAAC_SIM_PATH/python.sh" ] || {
     echo "Isaac 을 찾을 수 없다: $ISAAC_SIM_PATH"

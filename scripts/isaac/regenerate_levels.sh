@@ -16,7 +16,7 @@
 #     - Nova Carter 본체가 Isaac 클라우드 에셋을 참조한다 → **첫 실행 때 몇 분 멈춘다. 인터넷 필요.**
 #       멈춘 게 아니니 기다릴 것
 set -u
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LV="${LV:-$HOME/Desktop/Collected_ing_library_env_v5-firstFinal}"
 SRC="${SRC:-ing_library_env_v5.usd}"
 
