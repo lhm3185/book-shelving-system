@@ -474,6 +474,7 @@ class BookScene:
             self.tray_center_w[1],
             tray_top + 0.30,
         ])
+        self.home_tip_arm = self.to_arm(self.home_tip)
 
         # 시작 홈 자세는 검증된 관절각을 그대로 사용한다.
         # IK를 실행하면 다른 해가 선택되어 팔이 트레이를 가로지를 수 있다.
@@ -592,6 +593,49 @@ class BookScene:
     def to_arm(self, p_world):
         return self.Rl0.T @ (np.asarray(p_world, float) - self.l0p)
 
+    def refresh_arm_frame(self):
+        """AMR 주행 후 현재 arm_base_link 좌표와 IK 기준을 갱신한다."""
+        l0p, l0q = SingleXFormPrim(BASE_LINK).get_world_pose()
+
+        self.l0p = np.asarray(l0p, dtype=float)
+        self.Rl0 = R_from_quat(np.asarray(l0q, dtype=float))
+        self.lula.set_robot_base_pose(l0p, l0q)
+
+        yaw = math.atan2(
+            float(self.Rl0[1, 0]),
+            float(self.Rl0[0, 0]),
+        )
+        self.tray_yaw = yaw
+
+        arm_x_world = np.array([
+            math.cos(yaw),
+            math.sin(yaw),
+            0.0,
+        ])
+        arm_y_world = np.array([
+            -math.sin(yaw),
+            math.cos(yaw),
+            0.0,
+        ])
+
+        self.DOWN = self.orientation(
+            [0.0, 0.0, -1.0],
+            arm_x_world,
+        )
+        self.HORIZ = self.orientation(
+            arm_y_world,
+            arm_x_world,
+        )
+
+        if hasattr(self, "home_tip_arm"):
+            self.home_tip = self.to_world(self.home_tip_arm)
+
+        self.say(
+            "현재 팔 기준 갱신: "
+            f"위치={np.round(self.l0p, 3).tolist()}, "
+            f"yaw={math.degrees(yaw):.1f}°"
+        )
+
     def orientation(self, approach, closing):
         b_l = np.cross(self._a_loc, self._c_loc); a_w = np.array(approach, float); c_w = np.array(closing, float)
         Lm = np.stack([self._a_loc, self._c_loc, b_l], axis=1); Wm = np.stack([a_w, c_w, np.cross(a_w, c_w)], axis=1)
@@ -693,14 +737,37 @@ class BookScene:
                  ("wedge", [(pre_ins, HORIZ), (wedge, HORIZ)]), ("back", [(wedge, HORIZ), (back, HORIZ)]),
                  ("touch", [(back, HORIZ), (touch, HORIZ)]), ("push", [(touch, HORIZ), (push, HORIZ)]),
                  ("retreat", [(push, HORIZ), (retreat, HORIZ)]), ("return", [(retreat, HORIZ), (self.home_tip, DOWN)])]
-        segs = {}; q = self.q_home; worst_all = 0.0
+        demo_allow_discontinuous = os.environ.get(
+            "SIM_DEMO_ALLOW_DISCONTINUOUS",
+            "0",
+        ) == "1"
+
+        segs = {}
+        q = self.q_home
+        worst_all = 0.0
+
         for name, wps in order:
             qs, worst, err = self.plan_path(wps, q)
+
             if qs is None:
                 return None, 401, f"{name}: {err}"
+
             if worst > MAX_STEP:
-                return None, 402, f"{name}: 인접점 관절변화 {worst:.3f} rad"
-            segs[name] = qs; q = qs[-1]; worst_all = max(worst_all, worst)
+                if not demo_allow_discontinuous:
+                    return (
+                        None,
+                        402,
+                        f"{name}: 인접점 관절변화 {worst:.3f} rad",
+                    )
+
+                self.say(
+                    "시연 모드: 불연속 경로 허용 "
+                    f"{name} {worst:.3f} rad"
+                )
+
+            segs[name] = qs
+            q = qs[-1]
+            worst_all = max(worst_all, worst)
         return {"segs": segs, "worst": worst_all, "spine_final": spine_final, "place_x": place_x,
                 "floor_z": floor_z, "book": book, "dims": (T, Lb, W)}, 0, ""
 
