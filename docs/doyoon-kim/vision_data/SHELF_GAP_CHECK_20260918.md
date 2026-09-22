@@ -4,7 +4,7 @@
 | --- | --- |
 | 작성 | 2026-09-18 저녁, D 김도윤 |
 | 대상 | `origin/vision` `c4032be` 의 `target_detector.TargetDetector` (서가 bbox 를 5단으로 나눠 깊이로 빈 칸 판정) |
-| 방법 | Isaac 에서 **서가 정면 깊이 영상 + 서가 bbox + 단별 정답**을 뽑아 모듈을 그대로 돌림 (`simulation/isaac/tools/shelf_gap_probe.py`) |
+| 방법 | Isaac 에서 **서가 정면 깊이 영상 + 서가 bbox + 단별 정답**을 뽑아 모듈을 그대로 돌림 (`isaac_sim/isaac/tools/shelf_gap_probe.py`) |
 | 결과 | **8회 시점 모두 정답과 불일치.** 원인 3가지를 수치로 확인 |
 
 서가 모델(`shelf_model_path: ~/livrary_datas/260918_train/best.pt`)이 저희 쪽에 없어 **bbox 는 Isaac 정답값**을 넣었습니다. 즉 이 시험은 **검출 실패가 아니라 판정 로직만** 본 것입니다.
@@ -72,7 +72,7 @@ bbox(y 42~611)를 5등분하면 경계가 실제 선반판과 어긋납니다. �
 ```bash
 # GPU PC — 깊이·bbox·정답 뽑기 (Isaac)
 SIM_USD=~/Desktop/ing_library_env_v5.usd \
-ISAAC_ENTRY=simulation/isaac/tools/shelf_gap_probe.py ./scripts/run_isaac_tool.sh \
+ISAAC_ENTRY=isaac_sim/isaac/tools/shelf_gap_probe.py ./scripts/run_isaac_tool.sh \
     --views 4 --dist 1.4 2.2 --out ~/shelf_probe
 
 # 판정 모듈만 돌려 비교 (ROS 없이)

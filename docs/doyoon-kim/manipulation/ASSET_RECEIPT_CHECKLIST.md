@@ -25,10 +25,10 @@
 
 ```bash
 cd ~/book-shelving-system
-ISAAC_ENTRY=simulation/isaac/tools/probe_carter_deck.py ./scripts/run_isaac_tool.sh --usd <에셋>.usd
+ISAAC_ENTRY=isaac_sim/isaac/tools/probe_carter_deck.py ./scripts/run_isaac_tool.sh --usd <에셋>.usd
 ```
 
-`simulation/isaac/config/robot_profiles.py` 의 `M0609` 항목과 대조한다.
+`isaac_sim/isaac/config/robot_profiles.py` 의 `M0609` 항목과 대조한다.
 
 | 프로파일 항목 | 현재 값 (우리 결합체 기준) |
 | --- | --- |
@@ -42,7 +42,7 @@ ISAAC_ENTRY=simulation/isaac/tools/probe_carter_deck.py ./scripts/run_isaac_tool
 ### 2. 재생 후 안정 (5분) — 이게 제일 중요하다
 
 ```bash
-ISAAC_ENTRY=simulation/isaac/tools/settle_test_carter.py ./scripts/run_isaac_tool.sh --usd <에셋>.usd
+ISAAC_ENTRY=isaac_sim/isaac/tools/settle_test_carter.py ./scripts/run_isaac_tool.sh --usd <에셋>.usd
 ```
 
 | 통과 기준 | 값 |

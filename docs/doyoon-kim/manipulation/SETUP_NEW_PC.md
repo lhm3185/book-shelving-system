@@ -10,7 +10,7 @@
 | 종류 | 어디에 | 크기 |
 | --- | --- | --- |
 | 코드·설정·문서 | **git** | 작음 |
-| **책 USD 6종·트레이·서가·바닥** | **git** (`simulation/assets/book_dataset/`) | 작음 |
+| **책 USD 6종·트레이·서가·바닥** | **git** (`isaac_sim/assets/book_dataset/`) | 작음 |
 | 비전 모델 `.pt` | **git LFS** (`git lfs pull`) | 6MB × 2 |
 | **레벨 USD (통합 씬)** | **git 에 없다** — USB 나 `scp` | 130MB × N |
 | **M0609 기술서·URDF** | **git 에 없다** (외부 소유) | 작음 |
@@ -140,11 +140,11 @@ cd ~/<저장소>
 LV=~/Desktop/Collected_ing_library_env_v5-firstFinal
 
 # ① 로봇 yaw 를 0 으로 — 경로 계산이 월드 축을 쓰기 때문 (임시 조치, 도구 주석 참조)
-ARM_ROBOT=m0609 ISAAC_ENTRY=simulation/isaac/tools/set_robot_yaw.py \
+ARM_ROBOT=m0609 ISAAC_ENTRY=isaac_sim/isaac/tools/set_robot_yaw.py \
   ./scripts/run_isaac_tool.sh --usd $LV/ing_library_env_v5.usd --out $LV/level_yaw0.usd --yaw 0
 
 # ② 서가 앞으로 로봇 배치 (서가 삽입용). ①의 결과를 입력으로 쓴다
-ARM_ROBOT=m0609 ISAAC_ENTRY=simulation/isaac/tools/place_robot_at_shelf.py \
+ARM_ROBOT=m0609 ISAAC_ENTRY=isaac_sim/isaac/tools/place_robot_at_shelf.py \
   ./scripts/run_isaac_tool.sh --usd $LV/level_yaw0.usd --out $LV/level_shelf01.usd \
   --shelf /World/bookshelves/shelf_brown__book_shelf_01 --row-z 1.042
 ```
@@ -201,7 +201,7 @@ export FASTRTPS_DEFAULT_PROFILES_FILE=<저장소>/config/fastdds_local.xml
 Isaac 까지 왔으면 게이트 하나를 돌려 본다 — **팔이 좌표에 닿는지**만 IK 로 본다 (약 1분):
 
 ```bash
-ARM_ROBOT=m0609 ISAAC_ENTRY=simulation/isaac/tools/check_reach.py \
+ARM_ROBOT=m0609 ISAAC_ENTRY=isaac_sim/isaac/tools/check_reach.py \
   SIM_USD=~/Desktop/Collected_ing_library_env_v5-firstFinal/level_shelf01.usd \
   ./scripts/run_isaac_tool.sh --shelf-z 0.5097 --shelf-x-shift 0.04
 ```

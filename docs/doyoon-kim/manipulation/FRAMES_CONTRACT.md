@@ -38,13 +38,13 @@ frame 이름이 같이 바뀐다. 우리는 그 위에 static TF 로 `arm_base_l
 <팔 베이스 frame> → arm_base_link      # 부모는 robot_profiles 에서 읽는다 (박아두지 말 것)
 ```
 
-`simulation/isaac/tools/run_demo_pc.sh` 가 자동으로 처리하고, 실행 시 화면에 찍는다:
+`isaac_sim/isaac/tools/run_demo_pc.sh` 가 자동으로 처리하고, 실행 시 화면에 찍는다:
 
 ```
 팔 기준 프레임: base_link → arm_base_link (ARM_ROBOT=m0609)
 ```
 
-회귀 테스트가 있다 — `simulation/isaac/tests/test_frame_contract.py`.
+회귀 테스트가 있다 — `isaac_sim/isaac/tests/test_frame_contract.py`.
 부모 프레임을 다시 박아 두면 테스트가 실패한다.
 
 ### ⚠️ `base_link` 를 직접 쓰지 말 것

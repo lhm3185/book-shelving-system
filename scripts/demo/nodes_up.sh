@@ -8,4 +8,4 @@
 . "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 say "### 도메인 $ROS_DOMAIN_ID 로 노드를 띄운다 (Ctrl+C 로 전부 종료)"
 [ -n "${SHOW_VISION:-}" ] && export VISION_EXTRA="-p show_debug_window:=true"
-exec "$REPO_ROOT/simulation/isaac/tools/run_demo_pc.sh"
+exec "$REPO_ROOT/isaac_sim/isaac/tools/run_demo_pc.sh"

@@ -94,7 +94,7 @@ if book in self.upright_q:
 
 ## 6. 관련
 
-- 실패 코드 정의: `simulation/isaac/controllers/arm_errors.py:45`
+- 실패 코드 정의: `isaac_sim/isaac/controllers/arm_errors.py:45`
 - 판정: `manipulation_executor.py:202`
 - 파지 순서: `book_scene.py` `plan_job` 의 `grip` → `attach` → `lift`
 - 2/4 정정 경위: `docs/doyoon-kim/web_claude/trial_and_error_arm.md` §7

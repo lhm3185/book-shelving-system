@@ -30,7 +30,7 @@ retreat  = [place_x, y_front - 0.13, push_z]
 
 ## 2. 지금 어떻게 피하고 있나
 
-`simulation/isaac/tools/set_robot_yaw.py` 로 **레벨에서 로봇을 돌려** yaw 0 으로 만든다.
+`isaac_sim/isaac/tools/set_robot_yaw.py` 로 **레벨에서 로봇을 돌려** yaw 0 으로 만든다.
 `place_robot_at_shelf.py` 는 yaw 가 0 이 아니면 아예 멈춘다.
 
 로봇 배치는 우리 담당이라 "시연 구성의 선택"으로 넘어갈 수 있었지만,
@@ -96,7 +96,7 @@ yaw 와 무관하게 정의된다.
 ```bash
 # 같은 레벨을 yaw 0 / 45 / 90 으로 만들고
 for Y in 0 45 90; do
-  ARM_ROBOT=m0609 ISAAC_ENTRY=simulation/isaac/tools/set_robot_yaw.py \
+  ARM_ROBOT=m0609 ISAAC_ENTRY=isaac_sim/isaac/tools/set_robot_yaw.py \
     ./scripts/run_isaac_tool.sh --usd <원본> --out /tmp/lv_$Y.usd --yaw $Y
 done
 # 각각에서 같은 팔 기준 좌표로 꽂아 본다. 셋 다 같은 결과여야 한다
@@ -106,7 +106,7 @@ done
 
 단위 테스트도 붙일 수 있다 — `plan_job` 의 경유점 계산만 떼어내
 yaw 0 / 45 / 90 에서 **팔 기준 경유점이 동일한지** 확인하는 식이다.
-(`simulation/isaac/tests/` 는 Isaac 없이 도는 테스트다)
+(`isaac_sim/isaac/tests/` 는 Isaac 없이 도는 테스트다)
 
 ## 6. 왜 지금 안 하나
 
@@ -117,6 +117,6 @@ yaw 0 / 45 / 90 에서 **팔 기준 경유점이 동일한지** 확인하는 식
 
 ## 7. 관련
 
-- 임시 조치: `simulation/isaac/tools/set_robot_yaw.py` (주석에 같은 내용이 있다)
+- 임시 조치: `isaac_sim/isaac/tools/set_robot_yaw.py` (주석에 같은 내용이 있다)
 - 파지 쪽 선례: `book_scene.py` 389~393, `_tray_w` 계산
 - 변환 도우미: `book_scene.to_world()`

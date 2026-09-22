@@ -59,4 +59,4 @@
 | --- | --- |
 | `isaac_sim/…` | `ros2_ws/src/shelving_manipulation/isaac_sim/…` |
 | GPU PC `~/arm/…` | 위 `isaac_sim/` 을 GPU PC 에 복사한 위치 (`isaac_sim/README.md`) |
-| 에셋 | `simulation/assets/doyoon-kim/` |
+| 에셋 | `isaac_sim/assets/doyoon-kim/` |

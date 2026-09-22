@@ -59,7 +59,7 @@ tail -f /tmp/b1_demo/vision.log       # 검출
 ## 집 PC 에서
 
 **클론만 하면 돌아간다.** 레벨은 `~/Desktop/assets/level/` 에 없으면
-저장소 사본(`simulation/assets/level/ing_library_env_v4.usd`)으로 떨어지고,
+저장소 사본(`isaac_sim/assets/level/ing_library_env_v4.usd`)으로 떨어지고,
 YOLO 모델 두 개도 저장소 안에 있다. Isaac Sim 5.1 만 따로 깔면 된다
 (설치 전체는 `SETUP_NEW_PC.md`).
 

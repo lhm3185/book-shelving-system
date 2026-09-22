@@ -18,7 +18,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LEVEL_CANDIDATES=(
     "${SIM_LEVEL:-}"
     "$HOME/Desktop/assets/level/ing_library_env_v4.usd"
-    "$REPO/simulation/assets/level/ing_library_env_v4.usd"
+    "$REPO/isaac_sim/assets/level/ing_library_env_v4.usd"
 )
 LEVEL=""
 for cand in "${LEVEL_CANDIDATES[@]}"; do
@@ -115,7 +115,7 @@ echo "      준비 완료"
 # ------------------------------------------------------------------ 2. 비전·로봇팔 노드
 echo "[2/4] 비전·로봇팔 노드"
 ARM_BASE=$(ARM_ROBOT=franka python3 -c \
-    "import sys; sys.path.insert(0, '$REPO/simulation/isaac/config'); \
+    "import sys; sys.path.insert(0, '$REPO/isaac_sim/isaac/config'); \
      from robot_profiles import profile; print(profile().base_link.split('/')[-1])")
 [ -n "$ARM_BASE" ] || { echo "팔 기준 프레임을 못 구했다"; exit 1; }
 echo "      팔 기준 프레임: $ARM_BASE → arm_base_link"
@@ -148,7 +148,7 @@ sleep 5
 # ------------------------------------------------------------------ 3. 순회
 if [ "$DO_PATROL" -eq 1 ]; then
     echo "[3/4] 도서관 한 바퀴 (약 $(python3 -c "print(int(32.04/$SPEED))")초)"
-    python3 "$REPO/simulation/isaac/tools/patrol.py" --speed "$SPEED" || {
+    python3 "$REPO/isaac_sim/isaac/tools/patrol.py" --speed "$SPEED" || {
         echo "**주행 실패** — 여기서 멈춘다"; exit 1; }
 else
     echo "[3/4] 주행 건너뜀"
@@ -160,7 +160,7 @@ ARGS=()
 [ -n "$GOAL_X" ] && ARGS+=(--goal-x "$GOAL_X")
 # **":-" 를 붙이지 않는다.** 빈 배열에 붙이면 빈 문자열 하나로 펼쳐져
 # pick_from_vision.py 가 "unrecognized arguments: " 로 죽는다 (bash 4.4+ 는 그냥 안전하다)
-python3 "$REPO/simulation/isaac/tools/pick_from_vision.py" "${ARGS[@]}"
+python3 "$REPO/isaac_sim/isaac/tools/pick_from_vision.py" "${ARGS[@]}"
 RC=$?
 
 echo

@@ -9,7 +9,7 @@
 ## 우리 쪽 준비 상태
 
 로봇팔 코드는 이미 **로봇 이름을 한 파일에서만 바꾸면 되도록** 정리해 두었습니다
-(`simulation/isaac/config/robot_profiles.py`). 아래 네 가지만 채우면 바로 돌립니다.
+(`isaac_sim/isaac/config/robot_profiles.py`). 아래 네 가지만 채우면 바로 돌립니다.
 
 ## 1. prim 경로 4개
 
@@ -59,9 +59,9 @@ USD 를 주시면 저희가 직접 읽어서 확인할 수도 있습니다. **�
 ```bash
 cd ~/book-shelving-system
 # 실제로 재생해서 이동·기울기·팔 어긋남을 잽니다 (정지 상태 검사로는 안 잡힙니다)
-ISAAC_ENTRY=simulation/isaac/tools/settle_test_carter.py ./scripts/run_isaac_tool.sh --usd <에셋>.usd
+ISAAC_ENTRY=isaac_sim/isaac/tools/settle_test_carter.py ./scripts/run_isaac_tool.sh --usd <에셋>.usd
 # 상판 높이 지도 + 센서 발자국
-ISAAC_ENTRY=simulation/isaac/tools/probe_carter_deck.py ./scripts/run_isaac_tool.sh --usd <에셋>.usd
+ISAAC_ENTRY=isaac_sim/isaac/tools/probe_carter_deck.py ./scripts/run_isaac_tool.sh --usd <에셋>.usd
 ```
 
 통과 기준: **기울기 1° 미만, 팔–베이스 어긋남 5 mm 미만** (저희 마지막 값은 0.15° / 1.4 mm).
@@ -71,7 +71,7 @@ ISAAC_ENTRY=simulation/isaac/tools/probe_carter_deck.py ./scripts/run_isaac_tool
 USD 가 팔을 **절대경로**로 참조하면 다른 PC 에서 팔이 통째로 빠집니다. 상대경로로 바꾸는 도구가 있습니다:
 
 ```bash
-ISAAC_ENTRY=simulation/isaac/tools/relativize_usd_refs.py ./scripts/run_isaac_tool.sh --root <에셋 폴더>
+ISAAC_ENTRY=isaac_sim/isaac/tools/relativize_usd_refs.py ./scripts/run_isaac_tool.sh --root <에셋 폴더>
 ```
 
 ## 우리가 에셋을 받은 뒤 하는 일 (참고)

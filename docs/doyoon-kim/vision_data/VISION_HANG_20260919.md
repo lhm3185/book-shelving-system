@@ -86,7 +86,7 @@ py-spy dump --pid $(pgrep -f vision_manager | tail -1)
   --sensor-policy always
 
 # 이 PC
-ROS_DOMAIN_ID=130 ./simulation/isaac/tools/run_demo_pc.sh
+ROS_DOMAIN_ID=130 ./isaac_sim/isaac/tools/run_demo_pc.sh
 ros2 topic pub --once /perception/detect_request std_msgs/msg/Bool "{data: true}"
 # 두 번째 요청을 보내고 CPU 를 봅니다
 top -p $(pgrep -f vision_manager | tail -1)

@@ -39,24 +39,24 @@ SIM_TRAY_FOLLOW=0 SIM_BRANCH_GUARD=0 ...
 | 파일 | 하는 일 |
 | --- | --- |
 | `scripts/run_isaac_sim.sh` | Isaac 실행 껍데기. ROS 환경·USD 경로·트레이 경로를 맞춰 준다 |
-| `simulation/isaac/run_simulation.py` | 본체. USD 를 열고 장면을 만들고 ROS 를 띄운다 |
-| `simulation/isaac/world_loader.py` | USD 경로 결정 (`인자 > SIM_USD > 저장소 기본값`) |
+| `isaac_sim/isaac/run_simulation.py` | 본체. USD 를 열고 장면을 만들고 ROS 를 띄운다 |
+| `isaac_sim/isaac/world_loader.py` | USD 경로 결정 (`인자 > SIM_USD > 저장소 기본값`) |
 
 ### 카메라·ROS (비전이 실제로 볼 곳)
 
 | 파일 | 하는 일 |
 | --- | --- |
-| **`simulation/isaac/sensors/camera_bridge.py`** | 손목 카메라 생성 + ROS 그래프. **발행 토픽이 여기서 정해진다** |
-| `simulation/isaac/ros_bridge.py` | rclpy 노드·실행기 |
+| **`isaac_sim/isaac/sensors/camera_bridge.py`** | 손목 카메라 생성 + ROS 그래프. **발행 토픽이 여기서 정해진다** |
+| `isaac_sim/isaac/ros_bridge.py` | rclpy 노드·실행기 |
 
 ### 로봇팔 동작 (참고용 — 비전이 고칠 일은 없다)
 
 | 파일 | 하는 일 |
 | --- | --- |
-| `simulation/isaac/controllers/book_scene.py` | 장면·IK·경로 계획 |
-| `simulation/isaac/controllers/manipulation_executor.py` | `/manipulation/sim/command` 를 받아 실행, `/manipulation/sim/state` 발행 |
-| `simulation/isaac/config/robot_profiles.py` | 로봇별 prim 이름·프레임 (`FRANKA` / `M0609`) |
-| `simulation/isaac/config/arm.yaml` | Franka 자세·속도·허용오차 |
+| `isaac_sim/isaac/controllers/book_scene.py` | 장면·IK·경로 계획 |
+| `isaac_sim/isaac/controllers/manipulation_executor.py` | `/manipulation/sim/command` 를 받아 실행, `/manipulation/sim/state` 발행 |
+| `isaac_sim/isaac/config/robot_profiles.py` | 로봇별 prim 이름·프레임 (`FRANKA` / `M0609`) |
+| `isaac_sim/isaac/config/arm.yaml` | Franka 자세·속도·허용오차 |
 
 ---
 

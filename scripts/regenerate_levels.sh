@@ -63,7 +63,7 @@ fi
 # 백업에서 복원한 폴더에 이 트리가 빠져 있으면 USD 가 'Could not open asset' 경고만 내고
 # **판정은 그대로 통과한다** — 바닥 없는 레벨이 조용히 저장된다 (2026-09-21 실제로 겪었다).
 # 저장소에 같은 상대경로로 들어 있으므로(바이트 동일) 없으면 채운다.
-_REPO_BD="$REPO_ROOT/simulation/assets/book_dataset"
+_REPO_BD="$REPO_ROOT/isaac_sim/assets/book_dataset"
 _need_fill=0
 for _rel in assets/env_wall_floor dataset/env_wall_floor; do
     [ -d "$LV/book_dataset/$_rel" ] || _need_fill=1
@@ -106,11 +106,11 @@ step() {   # step <번호> <설명> <출력파일> <명령...>
 }
 
 step "1/2" "로봇 yaw 를 0 으로 (경로 계산이 월드 축을 쓴다)" "$LV/level_yaw0.usd" \
-    env ARM_ROBOT=m0609 ISAAC_ENTRY=simulation/isaac/tools/set_robot_yaw.py \
+    env ARM_ROBOT=m0609 ISAAC_ENTRY=isaac_sim/isaac/tools/set_robot_yaw.py \
         ./scripts/run_isaac_tool.sh --usd "$LV/$SRC" --out "$LV/level_yaw0.usd" --yaw 0
 
 step "2/2" "로봇을 서가 앞으로 (자기검증을 스스로 돌린다)" "$LV/level_shelf01.usd" \
-    env ARM_ROBOT=m0609 ISAAC_ENTRY=simulation/isaac/tools/place_robot_at_shelf.py \
+    env ARM_ROBOT=m0609 ISAAC_ENTRY=isaac_sim/isaac/tools/place_robot_at_shelf.py \
         ./scripts/run_isaac_tool.sh --usd "$LV/level_yaw0.usd" --out "$LV/level_shelf01.usd" \
             --shelf "$SHELF" --row-z "$ROW_Z"
 

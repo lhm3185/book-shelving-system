@@ -11,7 +11,7 @@
 
 ## 준비 — 도구 검증 (전부 통과)
 
-`simulation/isaac/tools/branch/` (numpy·scipy 만 필요, Isaac 불필요)
+`isaac_sim/isaac/tools/branch/` (numpy·scipy 만 필요, Isaac 불필요)
 
 | 확인 | 기대 | 실측 | 판정 |
 | --- | --- | --- | --- |
@@ -41,7 +41,7 @@
 
 ## 단계 1 — 홈 교체
 
-`simulation/isaac/config/arm_m0609.yaml`
+`isaac_sim/isaac/config/arm_m0609.yaml`
 
 ```yaml
 home:  [-0.1513, -0.2792, -1.2832, 0.0, -1.5795, -3.2930]   # 팔꿈치↑ (윗팔 +74°)
@@ -83,7 +83,7 @@ approach 에서 j6 ≈ 5.94 로 한계(±2π)에 붙어 감김 문제가 다시 
 
 ## 단계 5 — 불변성 시험에 추가 (코드만, 아직 실행 못 함)
 
-`simulation/isaac/tools/random_pose_check.py`
+`isaac_sim/isaac/tools/random_pose_check.py`
 
 - **가지 불변 단언** — 모든 경유점이 팔꿈치↑ 인지. 하나라도 ↓ 면 그 구간 이름을 찍고 실패
 - **정착 시간 비교** — `--settle 0 0.5 1 2` 로 여러 번 재서 **언제부터 같아지는지** 본다

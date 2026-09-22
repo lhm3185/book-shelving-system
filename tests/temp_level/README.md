@@ -8,7 +8,7 @@
 ~/book_dataset/assets/shelf/usd/        ← 이 폴더의 book_dataset/assets/shelf/usd 를 그대로 복사
 ~/book_dataset/assets/franka_camera.usd ← v4 만 필요 (카메라·라이다 탑재 로봇)
 ```
-선반 파일은 저장소 `simulation/assets/doyoon-kim/shelf/` 와 같은 파일이다.
+선반 파일은 저장소 `isaac_sim/assets/doyoon-kim/shelf/` 와 같은 파일이다.
 
 ## 바뀐 점
 - 선반 16개 경로: `../Downloads/shelf-20260916T122706Z-1-001/...` (GPU PC 전용 폴더라 다른 PC 에서 안 보였음) → `../book_dataset/assets/shelf/usd/...`

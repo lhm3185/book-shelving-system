@@ -12,7 +12,7 @@
 ## 1. 옮긴 구조
 
 ```
-simulation/isaac/
+isaac_sim/isaac/
   run_simulation.py                    공식 진입점 (앱·USD·브리지·센서·실행기·루프)
   world_loader.py                      USD 열기 + Prim 검사
   ros_bridge.py                        브리지 활성화·노드·정리
@@ -50,7 +50,7 @@ GPU PC, 헤드리스, 책 6종, 카메라 prim 사용.
 
 ### 3-1. 통합 USD
 
-현재 `simulation/library_system.usd` 와 `simulation/assets/*.usd` 는 자리 파일(1 byte)입니다. 실행기는 이 상태를 **조용히 지나치지 않고 "USD 가 빈 파일이다" 라고 알리고 멈추도록** 해 두었습니다. 지금은 아래처럼 시험 레벨을 지정해 돌립니다.
+현재 `isaac_sim/library_system.usd` 와 `isaac_sim/assets/*.usd` 는 자리 파일(1 byte)입니다. 실행기는 이 상태를 **조용히 지나치지 않고 "USD 가 빈 파일이다" 라고 알리고 멈추도록** 해 두었습니다. 지금은 아래처럼 시험 레벨을 지정해 돌립니다.
 
 ```bash
 SIM_USD=~/Desktop/ing_library_env_v5.usd ./scripts/run_isaac_sim.sh --headless

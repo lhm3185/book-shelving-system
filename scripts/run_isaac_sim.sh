@@ -17,12 +17,12 @@ ISAAC_SIM_PATH="${ISAAC_SIM_PATH:-$HOME/isaacsim}"
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-130}"
 
 # PC 마다 다른 경로(레벨 USD 등)는 이 파일에 둔다. git 에 올리지 않는다.
-[ -f "$REPO_ROOT/simulation/isaac/config/sim_local.env" ] && . "$REPO_ROOT/simulation/isaac/config/sim_local.env"
+[ -f "$REPO_ROOT/isaac_sim/isaac/config/sim_local.env" ] && . "$REPO_ROOT/isaac_sim/isaac/config/sim_local.env"
 
 # 통합 USD 가 아직 자리 파일이면, 이 PC 에 있는 시험 레벨로 자동 대체한다.
 # (시연 당일 다른 터미널에서 SIM_USD 를 빠뜨려 실행이 막히는 것을 막기 위함 — 2026-09-18)
 if [ -z "${SIM_USD:-}" ]; then
-    REPO_USD="$REPO_ROOT/simulation/library_system.usd"
+    REPO_USD="$REPO_ROOT/isaac_sim/library_system.usd"
     if [ ! -s "$REPO_USD" ] || [ "$(stat -c%s "$REPO_USD" 2>/dev/null || echo 0)" -lt 4096 ]; then
         for cand in "$HOME/Desktop/ing_library_env_v5.usd" "$HOME/b1_assets/level/ing_library_env_v5.usd"; do
             if [ -f "$cand" ]; then
@@ -33,11 +33,11 @@ if [ -z "${SIM_USD:-}" ]; then
         done
     fi
 fi
-# 트레이는 **저장소 안에 있다** (simulation/assets/book_dataset/). 예전에는 개인 홈 경로만 봐서,
+# 트레이는 **저장소 안에 있다** (isaac_sim/assets/book_dataset/). 예전에는 개인 홈 경로만 봐서,
 # 새로 클론한 PC 에서는 파일이 저장소에 있는데도 "없다" 가 됐다 (2026-09-20).
 # 저장소 사본을 먼저 보고, 없으면 홈 경로로 넘어간다.
 if [ -z "${SIM_TRAY:-}" ]; then
-    for _t in "$REPO_ROOT/simulation/assets/book_dataset/assets/tray/tray_v1.usdc" \
+    for _t in "$REPO_ROOT/isaac_sim/assets/book_dataset/assets/tray/tray_v1.usdc" \
               "$HOME/book_dataset/assets/tray/tray_v1.usdc"; do
         [ -f "$_t" ] && { export SIM_TRAY="$_t"; break; }
     done
@@ -74,4 +74,4 @@ if [ "$GUI" = "1" ] && [ -z "${DISPLAY:-}" ]; then
 fi
 
 cd "$ISAAC_SIM_PATH"
-exec ./python.sh "$REPO_ROOT/simulation/isaac/run_simulation.py" "${ARGS[@]}"
+exec ./python.sh "$REPO_ROOT/isaac_sim/isaac/run_simulation.py" "${ARGS[@]}"

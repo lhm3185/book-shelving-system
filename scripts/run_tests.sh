@@ -23,7 +23,7 @@ run() {   # run <이름> <작업디렉터리> <경로>
 
 # --- 시뮬 쪽: 순수 파이썬. ROS 도 Isaac 도 필요 없다 -------------------------
 if [ "$WHAT" = "all" ] || [ "$WHAT" = "sim" ]; then
-    run "시뮬 (경로 계획·프레임 계약)" "$REPO_ROOT" "simulation/isaac/tests"
+    run "시뮬 (경로 계획·프레임 계약)" "$REPO_ROOT" "isaac_sim/isaac/tests"
 fi
 
 # --- 로봇팔 노드: ROS 가 필요하다 ---------------------------------------------

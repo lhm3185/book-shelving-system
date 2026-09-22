@@ -67,18 +67,18 @@ done
 head_ "5-1. 저장소 안에 있는 에셋 (클론하면 따라온다)"
 # 책·트레이·서가는 git 에 들어 있다. 2026-09-20 까지 스크립트가 개인 홈 경로만 봐서
 # "저장소에 있는데 없다" 가 됐었다 — 지금은 저장소 사본을 먼저 본다.
-_n=$(ls "$REPO_ROOT"/simulation/assets/book_dataset/usd_v2/*book0[1-6].usdc 2>/dev/null | wc -l)
+_n=$(ls "$REPO_ROOT"/isaac_sim/assets/book_dataset/usd_v2/*book0[1-6].usdc 2>/dev/null | wc -l)
 [ "$_n" -eq 6 ] && ok "책 USD 6종" || bad "책 USD ($_n/6) — git 클론이 온전한지 확인"
-[ -f "$REPO_ROOT/simulation/assets/book_dataset/assets/tray/tray_v1.usdc" ] \
+[ -f "$REPO_ROOT/isaac_sim/assets/book_dataset/assets/tray/tray_v1.usdc" ] \
     && ok "트레이 USD" || bad "트레이 USD"
-[ -f "$REPO_ROOT/simulation/assets/cobot3_ws/isaacpjt/M0609/descriptor/m0609_description.yaml" ] \
+[ -f "$REPO_ROOT/isaac_sim/assets/cobot3_ws/isaacpjt/M0609/descriptor/m0609_description.yaml" ] \
     && ok "M0609 Lula 기술서" || bad "M0609 Lula 기술서"
-[ -f "$REPO_ROOT/simulation/assets/cobot3_ws/isaacpjt/M0609/doosan-robot2/urdf/m0609.urdf" ] \
+[ -f "$REPO_ROOT/isaac_sim/assets/cobot3_ws/isaacpjt/M0609/doosan-robot2/urdf/m0609.urdf" ] \
     && ok "M0609 URDF" || bad "M0609 URDF"
 
 head_ "5-2. 최종 통합 월드 (저장소 기본값)"
 # world_loader.py의 기본값과 같은 파일을 본다. 외부 Desktop 경로는 기본 실행에 필요 없다.
-_LV="$REPO_ROOT/simulation/assets"
+_LV="$REPO_ROOT/isaac_sim/assets"
 for _f in ing_library_env_v5-test.usd Nova_Carter_ROS.usd \
     cobot3_ws/isaacpjt/M0609/doosan-robot2/urdf/m0609_isaac_sim/m0609_isaac_sim.usd \
     cobot3_ws/isaacpjt/M0609/onrobot_rg2/urdf/onrobot_rg2/onrobot_rg2.usd; do

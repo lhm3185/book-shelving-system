@@ -17,15 +17,15 @@
 ## 0. 왜 경로가 바뀌었나
 
 9/18 에 시뮬 코드를 `ros2_ws/src/shelving_manipulation/isaac_sim/` 에서
-저장소 최상위 `simulation/` 으로 옮겼다 (`SIM_RESTRUCTURE_20260918.md`).
+저장소 최상위 `isaac_sim/` 으로 옮겼다 (`SIM_RESTRUCTURE_20260918.md`).
 **파일은 그대로다** — `git mv` 로 옮겨 이력도 남아 있다.
 
 | 최초 시연 때 | 지금 |
 | --- | --- |
 | `~/arm/isaac/run_demo_gpu.sh` | `scripts/run_isaac_sim.sh` (아래 t1 에 인자 그대로 풀어 뒀다) |
-| `…/isaac_sim/tools/run_demo_pc.sh` | `simulation/isaac/tools/run_demo_pc.sh` |
-| `…/isaac_sim/tools/detect_view.py` | `simulation/isaac/tools/detect_view.py` |
-| `…/isaac_sim/tools/place_books.sh` | `simulation/isaac/tools/place_books.sh` |
+| `…/isaac_sim/tools/run_demo_pc.sh` | `isaac_sim/isaac/tools/run_demo_pc.sh` |
+| `…/isaac_sim/tools/detect_view.py` | `isaac_sim/isaac/tools/detect_view.py` |
+| `…/isaac_sim/tools/place_books.sh` | `isaac_sim/isaac/tools/place_books.sh` |
 
 ---
 
@@ -51,7 +51,7 @@ SIM_USD=$HOME/Desktop/ing_library_env_v5.usd \
 ## 2. t2 — 이 PC : 정적 TF + 비전 노드 + 로봇팔 노드
 
 ```bash
-cd ~/ws_cobot_pjt/book-shelving-system/simulation/isaac/tools
+cd ~/ws_cobot_pjt/book-shelving-system/isaac_sim/isaac/tools
 ROS_DOMAIN_ID=129 ./run_demo_pc.sh
 ```
 
@@ -75,7 +75,7 @@ ROS_DOMAIN_ID=129 ./run_demo_pc.sh
 ```bash
 source /opt/ros/jazzy/setup.bash
 source ~/ws_cobot_pjt/book-shelving-system/ros2_ws/install/setup.bash
-python3 ~/ws_cobot_pjt/book-shelving-system/simulation/isaac/tools/detect_view.py
+python3 ~/ws_cobot_pjt/book-shelving-system/isaac_sim/isaac/tools/detect_view.py
 ```
 
 창에서 **`d`** = 비전 노드에 검출 요청, **`s`** = 화면 저장, **`q`** = 종료.
@@ -91,7 +91,7 @@ python3 ~/ws_cobot_pjt/book-shelving-system/simulation/isaac/tools/detect_view.p
 ## 4. t4 — 이 PC : 책 넣기
 
 ```bash
-cd ~/ws_cobot_pjt/book-shelving-system/simulation/isaac/tools
+cd ~/ws_cobot_pjt/book-shelving-system/isaac_sim/isaac/tools
 ROS_DOMAIN_ID=129 ./place_books.sh 1        # 1권. 숫자를 바꾸면 그만큼
 ```
 
@@ -103,7 +103,7 @@ ROS_DOMAIN_ID=129 ./place_books.sh 1        # 1권. 숫자를 바꾸면 그만�
 cd ~/ws_cobot_pjt/book-shelving-system/ros2_ws
 colcon build --packages-select shelving_perception
 # t2 를 Ctrl+C 로 끄고 다시:
-cd ../simulation/isaac/tools && ROS_DOMAIN_ID=129 ./run_demo_pc.sh
+cd ../isaac_sim/isaac/tools && ROS_DOMAIN_ID=129 ./run_demo_pc.sh
 ```
 
 **t1(Isaac)은 끄지 않아도 된다.** Isaac 은 토픽만 내고 있어서, 이 PC 쪽 노드만

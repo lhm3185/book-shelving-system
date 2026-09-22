@@ -57,7 +57,7 @@ ros2 topic list --no-daemon | grep -E "^/(rgb|depth|camera_info)$"
 ## 2. 비전·로봇팔 노드 (이 PC)
 
 ```bash
-cd ~/ws_cobot_pjt/book-shelving-system/simulation/isaac/tools
+cd ~/ws_cobot_pjt/book-shelving-system/isaac_sim/isaac/tools
 ROS_DOMAIN_ID=129 ./run_demo_pc.sh
 ```
 
@@ -100,7 +100,7 @@ cd ~/ws_cobot_pjt/book-shelving-system
 source /opt/ros/jazzy/setup.bash; source ros2_ws/install/setup.bash
 export ROS_DOMAIN_ID=129 FASTRTPS_DEFAULT_PROFILES_FILE=$HOME/.ros/fastdds_whitelist.xml
 
-python3 simulation/isaac/tools/pick_from_vision.py
+python3 isaac_sim/isaac/tools/pick_from_vision.py
 ```
 
 출력:

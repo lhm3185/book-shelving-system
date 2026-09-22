@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # B-1 Isaac 도구 실행 — 통합 실행기와 같은 환경으로 임의의 Isaac 스크립트를 돌린다.
-#   ISAAC_ENTRY=simulation/isaac/tools/capture_spines.py ./scripts/run_isaac_tool.sh --views 10
+#   ISAAC_ENTRY=isaac_sim/isaac/tools/capture_spines.py ./scripts/run_isaac_tool.sh --views 10
 #   ./scripts/run_isaac_sim.sh --gui        # 화면 있음
 #   ./scripts/run_isaac_sim.sh --headless   # 화면 없음 (기본)
 #   ./scripts/run_isaac_sim.sh --gui --book-variants mixed
@@ -49,7 +49,7 @@ if [ "$GUI" = "1" ] && [ -z "${DISPLAY:-}" ]; then
     export XAUTHORITY="${XAUTHORITY:-/run/user/$(id -u)/gdm/Xauthority}"
 fi
 
-ENTRY="${ISAAC_ENTRY:?ISAAC_ENTRY 로 실행할 파일을 지정할 것 (예: simulation/isaac/tools/capture_spines.py)}"
+ENTRY="${ISAAC_ENTRY:?ISAAC_ENTRY 로 실행할 파일을 지정할 것 (예: isaac_sim/isaac/tools/capture_spines.py)}"
 # Isaac 설치 폴더로 옮겨가서 실행하므로, 상대경로는 **저장소 기준**으로 바꿔 둔다
 [[ "$ENTRY" = /* ]] || ENTRY="$REPO_ROOT/$ENTRY"
 [ -f "$ENTRY" ] || { echo "실행할 파일이 없다: $ENTRY"; exit 1; }

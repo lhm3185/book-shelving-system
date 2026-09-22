@@ -9,7 +9,7 @@
 ## 1. 다행인 것 — M0609 설정이 이미 있다
 
 실행에 필요한 M0609 Lula 입력과 결합 로봇 USD는 저장소의
-`simulation/assets/cobot3_ws/isaacpjt/M0609/` 아래에 함께 둡니다.
+`isaac_sim/assets/cobot3_ws/isaacpjt/M0609/` 아래에 함께 둡니다.
 
 | 있는 것 | 내용 |
 | --- | --- |

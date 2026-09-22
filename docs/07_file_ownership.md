@@ -18,7 +18,7 @@
 - 주 담당자는 자신의 패키지에 필요한 Python, YAML, package.xml, setup.py와 시험 파일을 함께 관리한다.
 - shelving_interfaces 변경은 이현민이 반영하지만 영향을 받는 담당자 전원의 검토가 필요하다.
 - launch 파일은 이현민이 관리하고, 각 기능 담당자가 자신의 노드명·파라미터·실행 조건을 검증한다.
-- simulation/library_system.usd는 통합 자산이므로 이현민이 병합한다. 개별 USD는 아래에 지정된 담당자가 관리한다.
+- isaac_sim/library_system.usd는 통합 자산이므로 이현민이 병합한다. 개별 USD는 아래에 지정된 담당자가 관리한다.
 - tests/integration과 정상 시나리오는 이현민이 취합하지만, 각 단계의 성공 조건은 기능 담당자가 작성한다.
 - 한 Pull Request에서 unrelated package를 함께 수정하지 않는다.
 - 다른 패키지의 내부 Python 모듈을 직접 import하지 않고 ROS2 메시지와 액션으로 연결한다.
@@ -82,8 +82,8 @@ launch 파일 수정 시 pc_b.launch.py는 윤재민·이동준·김도윤이 �
 
 | 파일·폴더 | 이현민의 책임 | 협업 |
 | --- | --- | --- |
-| simulation/library_system.usd | 개별 자산 reference, prim 경로, 전체 stage 통합 | 모든 자산 담당자가 검증 |
-| simulation/assets/return_machine.usd | 무인반납기 위치, 트레이 인계 영역 | 김도윤이 파지 접근성 검토 |
+| isaac_sim/library_system.usd | 개별 자산 reference, prim 경로, 전체 stage 통합 | 모든 자산 담당자가 검증 |
+| isaac_sim/assets/return_machine.usd | 무인반납기 위치, 트레이 인계 영역 | 김도윤이 파지 접근성 검토 |
 | scripts/build.sh | 전체 workspace 빌드 진입점 | 전원 사용성 확인 |
 | scripts/run_all.sh | 한 PC 통합 실행 | 전원 노드 실행 확인 |
 | scripts/run_pc_a.sh | PC A 실행 | 이현민 검증 |
@@ -116,8 +116,8 @@ launch 파일 수정 시 pc_b.launch.py는 윤재민·이동준·김도윤이 �
 
 | 파일 | 책임 |
 | --- | --- |
-| simulation/assets/bookshelf.usd | 서가 크기·칸 구조가 detector의 가정과 일치하도록 관리 |
-| simulation/assets/library_background.usd | 조명·배경·서가 주변 환경이 RGB-D 시험 조건에 맞도록 관리 |
+| isaac_sim/assets/bookshelf.usd | 서가 크기·칸 구조가 detector의 가정과 일치하도록 관리 |
+| isaac_sim/assets/library_background.usd | 조명·배경·서가 주변 환경이 RGB-D 시험 조건에 맞도록 관리 |
 
 mobile_manipulator.usd의 카메라 prim, optical frame과 장착 pose를 변경할 때에는 이동준과 함께 검토한다. TargetSlot 좌표계를 변경할 때에는 이현민·김도윤의 승인이 필요하다.
 
@@ -144,7 +144,7 @@ mobile_manipulator.usd의 카메라 prim, optical frame과 장착 pose를 변경
 
 | 파일 | 책임 |
 | --- | --- |
-| simulation/assets/mobile_manipulator.usd | AMR base, articulation, 센서·팔 장착 기준과 이동 충돌체의 주 관리 |
+| isaac_sim/assets/mobile_manipulator.usd | AMR base, articulation, 센서·팔 장착 기준과 이동 충돌체의 주 관리 |
 | scripts/run_pc_b.sh | PC B 실행 환경, source와 pc_b launch 호출의 주 관리 |
 
 mobile_manipulator.usd에서 로봇팔 관절·그리퍼 충돌체는 김도윤이, 카메라 frame은 윤재민이 함께 검토한다. waypoint를 변경하면 shelf_map.yaml과 정상 시나리오의 목표가 일치하는지 이현민과 확인한다.
@@ -171,8 +171,8 @@ mobile_manipulator.usd에서 로봇팔 관절·그리퍼 충돌체는 김도윤�
 
 | 파일 | 책임 |
 | --- | --- |
-| simulation/assets/book.usd | 책 크기, 질량, 마찰과 collision |
-| simulation/assets/tray.usd | 책 대기 위치, 파지 접근 공간과 collision |
+| isaac_sim/assets/book.usd | 책 크기, 질량, 마찰과 collision |
+| isaac_sim/assets/tray.usd | 책 대기 위치, 파지 접근 공간과 collision |
 
 return_machine.usd의 트레이 인계 위치는 이현민과 함께 정하고, mobile_manipulator.usd의 팔·그리퍼 articulation과 collision은 이동준과 함께 검토한다.
 
@@ -182,7 +182,7 @@ return_machine.usd의 트레이 인계 위치는 이현민과 함께 정하고, 
 | --- | --- | --- |
 | shelving_interfaces/msg, action | 이현민 반영 | 영향을 받는 기능 담당자 전원 |
 | shelving_system/launch | 이현민 반영 | 실행되는 노드 담당자 |
-| simulation/library_system.usd | 이현민 병합 | 변경된 asset 담당자 |
+| isaac_sim/library_system.usd | 이현민 병합 | 변경된 asset 담당자 |
 | mobile_manipulator.usd | 이동준 병합 | 윤재민·김도윤 |
 | tests/integration | 이현민 병합 | 관련 CP 담당자 |
 | docs/05_test_plan_and_results.md | 이현민 형식 관리 | 각 담당자가 자기 측정값 입력 |
@@ -296,7 +296,7 @@ book-shelving-system/
 │               ├── test_flake8.py
 │               └── test_pep257.py
 │
-├── simulation/
+├── isaac_sim/
 │   ├── library_system.usd
 │   └── assets/
 │       └── return_machine.usd
@@ -357,7 +357,7 @@ book-shelving-system/
 │               ├── test_flake8.py
 │               └── test_pep257.py
 │
-└── simulation/
+└── isaac_sim/
     └── assets/
         ├── bookshelf.usd
         └── library_background.usd
@@ -399,7 +399,7 @@ book-shelving-system/
 │               ├── test_flake8.py
 │               └── test_pep257.py
 │
-├── simulation/
+├── isaac_sim/
 │   └── assets/
 │       └── mobile_manipulator.usd
 │
@@ -440,7 +440,7 @@ book-shelving-system/
 │               ├── test_flake8.py
 │               └── test_pep257.py
 │
-└── simulation/
+└── isaac_sim/
     └── assets/
         ├── book.usd
         └── tray.usd
