@@ -1,4 +1,4 @@
-"""Launch Nav2 and the shelving navigation action server."""
+"""Launch Ridgeback-Franka Nav2 and the shelving navigation server."""
 
 import os
 
@@ -12,139 +12,141 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    """Build the complete navigation launch description."""
+    """Build the Ridgeback-Franka navigation launch description."""
     package_share = get_package_share_directory("shelving_navigation")
-    nav2_launch_dir = os.path.join(
-        get_package_share_directory("nav2_bringup"), "launch"
-    )
+    nav2_share = get_package_share_directory("nav2_bringup")
 
-    default_map = os.path.join(package_share, "maps", "library_map.yaml")
-    default_params = os.path.join(package_share, "config", "nav2.yaml")
-    default_rviz = os.path.join(package_share, "rviz", "navigation.rviz")
+    default_map = os.path.join(
+        package_share,
+        "maps",
+        "library_map.yaml",
+    )
+    default_params = os.path.join(
+        package_share,
+        "config",
+        "nav2_ridgeback_franka.yaml",
+    )
+    default_lidar_params = os.path.join(
+        package_share,
+        "config",
+        "pointcloud_to_laserscan.yaml",
+    )
     default_waypoints = os.path.join(
-        package_share, "config", "waypoints.yaml"
+        package_share,
+        "config",
+        "waypoints.yaml",
+    )
+    default_rviz = os.path.join(
+        package_share,
+        "rviz",
+        "navigation.rviz",
     )
 
     map_file = LaunchConfiguration("map")
     params_file = LaunchConfiguration("params_file")
+    lidar_params_file = LaunchConfiguration("lidar_params_file")
+    waypoints_file = LaunchConfiguration("waypoints_file")
     use_sim_time = LaunchConfiguration("use_sim_time")
-    action_name = LaunchConfiguration("action_name")
-    nav2_action_name = LaunchConfiguration("nav2_action_name")
-    waypoints_path = LaunchConfiguration("waypoints_path")
-    frame_id = LaunchConfiguration("frame_id")
-    nav2_server_timeout_sec = LaunchConfiguration(
-        "nav2_server_timeout_sec"
+    start_rviz = LaunchConfiguration("start_rviz")
+    pointcloud_topic = LaunchConfiguration("pointcloud_topic")
+    scan_topic = LaunchConfiguration("scan_topic")
+
+    nav2_launch = os.path.join(
+        nav2_share,
+        "launch",
+        "bringup_launch.py",
     )
 
     return LaunchDescription([
         DeclareLaunchArgument(
             "map",
             default_value=default_map,
-            description="Full path to the map file.",
+            description="Occupancy map YAML file.",
         ),
         DeclareLaunchArgument(
             "params_file",
             default_value=default_params,
-            description="Full path to the Nav2 parameter file.",
+            description="Ridgeback-Franka Nav2 parameter file.",
+        ),
+        DeclareLaunchArgument(
+            "lidar_params_file",
+            default_value=default_lidar_params,
+            description="PointCloud2 to LaserScan parameter file.",
+        ),
+        DeclareLaunchArgument(
+            "waypoints_file",
+            default_value=default_waypoints,
+            description="Shelving navigation waypoint file.",
         ),
         DeclareLaunchArgument(
             "use_sim_time",
             default_value="true",
-            description="Use the Isaac Sim clock when true.",
+            description="Use Isaac Sim clock.",
         ),
         DeclareLaunchArgument(
-            "action_name",
-            default_value="/navigate_to_target",
-            description="Shelving navigation action server name.",
+            "start_rviz",
+            default_value="true",
+            description="Start RViz.",
         ),
         DeclareLaunchArgument(
-            "nav2_action_name",
-            default_value="navigate_to_pose",
-            description="Nav2 action server name.",
+            "pointcloud_topic",
+            default_value="/lidar/points_raw",
+            description="Ridgeback LiDAR PointCloud2 topic.",
         ),
         DeclareLaunchArgument(
-            "waypoints_path",
-            default_value=default_waypoints,
-            description="Path to the fixed waypoint YAML file.",
+            "scan_topic",
+            default_value="/scan",
+            description="Generated LaserScan topic.",
         ),
-        DeclareLaunchArgument(
-            "frame_id",
-            default_value="map",
-            description="Frame of the navigation targets.",
-        ),
-        DeclareLaunchArgument(
-            "nav2_server_timeout_sec",
-            default_value="10.0",
-            description="Timeout for connecting to Nav2.",
-        ),
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(nav2_launch_dir, "rviz_launch.py")
-            ),
-            launch_arguments={
-                "namespace": "",
-                "use_namespace": "false",
-                "rviz_config": default_rviz,
-                "use_sim_time": use_sim_time,
-            }.items(),
-        ),
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(nav2_launch_dir, "bringup_launch.py")
-            ),
-            launch_arguments={
-                "map": map_file,
-                "use_sim_time": use_sim_time,
-                "params_file": params_file,
-            }.items(),
-        ),
-        Node(
-            package="shelving_navigation",
-            executable="sensor_stamp_to_clock",
-            name="sensor_stamp_to_clock",
-            condition=IfCondition(use_sim_time),
-            parameters=[{
-                "source_topic": "/front_3d_lidar/lidar_points",
-                "clock_topic": "/clock",
-                "use_sim_time": use_sim_time,
-            }],
-        ),
+
         Node(
             package="pointcloud_to_laserscan",
             executable="pointcloud_to_laserscan_node",
             name="pointcloud_to_laserscan",
-            remappings=[
-                ("cloud_in", "/front_3d_lidar/lidar_points"),
-                ("scan", "/scan"),
+            output="screen",
+            parameters=[
+                lidar_params_file,
+                {"use_sim_time": use_sim_time},
             ],
-            parameters=[{
-                "target_frame": "front_3d_lidar",
-                "transform_tolerance": 0.01,
-                "min_height": -0.05,
-                "max_height": 0.05,
-                "angle_min": -1.5708,
-                "angle_max": 1.5708,
-                "angle_increment": 0.0087,
-                "scan_time": 0.1,
-                "range_min": 0.05,
-                "range_max": 20.0,
-                "use_inf": True,
-                "inf_epsilon": 1.0,
-                "use_sim_time": use_sim_time,
-            }],
+            remappings=[
+                ("cloud_in", pointcloud_topic),
+                ("scan", scan_topic),
+            ],
         ),
+
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(nav2_launch),
+            launch_arguments={
+                "map": map_file,
+                "params_file": params_file,
+                "use_sim_time": use_sim_time,
+                "autostart": "true",
+                "use_composition": "False",
+            }.items(),
+        ),
+
         Node(
             package="shelving_navigation",
             executable="navigation_node",
             name="navigation_node",
             output="screen",
             parameters=[{
-                "action_name": action_name,
-                "nav2_action_name": nav2_action_name,
-                "waypoints_path": waypoints_path,
-                "frame_id": frame_id,
-                "nav2_server_timeout_sec": nav2_server_timeout_sec,
+                "action_name": "/navigate_to_target",
+                "nav2_action_name": "/navigate_to_pose",
+                "waypoints_path": waypoints_file,
+                "frame_id": "map",
+                "nav2_server_timeout_sec": 10.0,
                 "use_sim_time": use_sim_time,
             }],
+        ),
+
+        Node(
+            package="rviz2",
+            executable="rviz2",
+            name="rviz2",
+            output="screen",
+            arguments=["-d", default_rviz],
+            parameters=[{"use_sim_time": use_sim_time}],
+            condition=IfCondition(start_rviz),
         ),
     ])

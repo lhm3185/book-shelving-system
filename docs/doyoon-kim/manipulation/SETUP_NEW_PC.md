@@ -77,25 +77,21 @@ cd ros2_ws && colcon build --symlink-install && cd ..
 
 ---
 
-## 5. 시뮬레이션 자산
+## 5. git 에 없는 자산 — 이 경로 그대로 둬야 한다
 
-M0609의 Lula 입력은 저장소에 포함된다. 별도 강의 폴더나 다른 팀원 홈 디렉터리를
-복사할 필요가 없다.
+경로는 `robot_profiles.py` 와 스크립트 기본값이다. 다른 곳에 두려면 환경변수로 알려줘야 한다.
 
-| 무엇 | 위치 |
+| 무엇 | 놓을 곳 |
 | --- | --- |
-| M0609 기술서 | `simulation/assets/cobot3_ws/isaacpjt/M0609/descriptor/m0609_description.yaml` |
-| M0609 URDF | `simulation/assets/cobot3_ws/isaacpjt/M0609/doosan-robot2/urdf/m0609.urdf` |
-| 최종 레벨 | `simulation/assets/ing_library_env_v5-test.usd` |
-| 결합 로봇 | `simulation/assets/Nova_Carter_ROS.usd` 및 하위 M0609/RG2 USD |
+| M0609 기술서 | `~/Isaac_Sim_b-1/src_pra/M0609/descriptor/m0609_description.yaml` |
+| M0609 URDF | `~/Isaac_Sim_b-1/src_pra/M0609/doosan-robot2/urdf/m0609.urdf` |
+| 레벨 USD 폴더 | `~/Desktop/Collected_ing_library_env_v5-firstFinal/` |
 
-### M0609 기술서·URDF
+### ⚠️ M0609 기술서·URDF 가 없으면 **팔이 아예 안 움직인다**
 
 Lula(IK)가 이 두 파일을 읽는다 (`robot_profiles.py` 의 `lula=("files", ...)`).
 Franka 는 Isaac 내장 설정(`lula=("supported", "Franka")`)을 써서 파일이 필요 없지만,
-M0609는 이 파일이 필요하다. USD 변환본은 형상·물리용이라 Lula 입력을 대신할 수 없다.
-`robot_profiles.py`는 위 저장소 경로를 코드 파일 위치에서 계산하므로 프로젝트를 어디에
-클론해도 동작한다.
+M0609 는 외부 파일이다. **저장소에 없고 USD 변환본으로 대체할 수 없다.**
 
 없이도 되는 것 / 안 되는 것:
 
@@ -104,11 +100,6 @@ M0609는 이 파일이 필요하다. USD 변환본은 형상·물리용이라 Lu
 | 되는 것 | 설치, 빌드, `run_tests.sh`, **레벨 재생성**(`set_robot_yaw.py`, `place_robot_at_shelf.py` — Lula 를 안 쓴다) |
 | 안 되는 것 | `check_reach.py`, 시뮬 실행 전체 (IK 가 필요한 모든 것) |
 
-<<<<<<< HEAD
-(책 USD·트레이·최종 레벨·결합 로봇·M0609 Lula 입력은 모두 저장소에 있으므로
-별도 강의 폴더나 바탕화면 자산을 옮길 필요가 없다. USD와 텍스처는 Git LFS 대상이므로
-새 PC에서는 반드시 `git lfs pull`을 실행한다.)
-=======
 > **할 일 (연구실에서)**: 이 두 파일은 작다. **저장소에 넣어** 다시는 이것 때문에
 > 막히지 않게 하는 편이 낫다. doosan-robot2 는 공개 저장소이므로 라이선스만 확인하고 반영할 것.
 
@@ -160,7 +151,6 @@ ARM_ROBOT=m0609 ISAAC_ENTRY=simulation/isaac/tools/place_robot_at_shelf.py \
 
 ②는 자기검증(왕복 일치·오답 주입·0 가정 깨기)을 스스로 돌린다.
 **`오차 0.0 mm`, `여유 +4.8 cm` 가 나와야 맞게 선 것이다.**
->>>>>>> origin/feature/amr_patrol_pickplace
 
 ---
 
@@ -212,6 +202,7 @@ Isaac 까지 왔으면 게이트 하나를 돌려 본다 — **팔이 좌표에 
 
 ```bash
 ARM_ROBOT=m0609 ISAAC_ENTRY=simulation/isaac/tools/check_reach.py \
+  SIM_USD=~/Desktop/Collected_ing_library_env_v5-firstFinal/level_shelf01.usd \
   ./scripts/run_isaac_tool.sh --shelf-z 0.5097 --shelf-x-shift 0.04
 ```
 

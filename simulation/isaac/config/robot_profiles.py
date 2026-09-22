@@ -9,23 +9,18 @@
     profile("m0609")                                      # 코드에서 직접
 
 M0609 값의 출처 (2026-09-19 실측 / `M0609_PORT_PLAN.md`)
-    - 관절 이름·한계: 저장소 `simulation/assets/cobot3_ws/isaacpjt/M0609/` 의 descriptor·URDF
+    - 관절 이름·한계: GPU PC `~/Isaac_Sim_b-1/src_pra/M0609/` 의 descriptor·URDF
     - 그리퍼: **`finger_joint` 은 명령해도 0.0008 rad 밖에 안 움직인다** — 명령 대상이 아니다.
       실제로 도는 것은 양쪽 knuckle (0.256 / 0.300 rad). 폐루프 링크라 연동이 깔끔하지 않다.
       우리 파이프라인은 파지할 때 **고정 조인트로 책을 붙이므로** 그리퍼가 물리적으로 쥘 필요는 없다.
     - 손목 카메라: RG2 의 `angle_bracket` 에 RealSense D455 가 이미 붙어 있고,
       카메라 prim 이름이 기존과 같다(`Camera_OmniVision_OV9782_Color`). link_6 기준 오프셋 실측.
 
-**경로는 2026-09-19 수령한 AMR 담당 에셋을 프로젝트에 이식한 구조로 확정했다.**
-최종 레벨: `simulation/assets/ing_library_env_v5-test.usd`
-결합 로봇과 하위 M0609/RG2 USD도 `simulation/assets/` 아래의 상대 참조로 함께 둔다.
+**경로는 2026-09-19 수령한 AMR 담당 에셋 기준으로 확정했다.**
+레벨: `~/Desktop/Collected_ing_library_env_v5-firstFinal/ing_library_env_v5.usd`
+(같은 이름의 바탕화면 단독 USD 에는 **로봇이 없다** — 참조가 안 풀린다. 자립본 폴더를 쓸 것)
 """
 import os
-from pathlib import Path
-
-
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-_M0609_ASSET_ROOT = _REPO_ROOT / "simulation/assets/cobot3_ws/isaacpjt/M0609"
 
 # 이 파일은 <저장소>/simulation/isaac/config/ 에 있다 → 세 단계 올라가면 저장소 루트
 _REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -42,8 +37,7 @@ def _first_existing(*paths):
 
 class RobotProfile:
     def __init__(self, name, root, base_link, arm_joints, grip_joints, grip_open, grip_close,
-                 ee_frame, hand_link, finger_links, vel_limit, lula, camera_prim, lidar_prim,
-                 camera_offset,
+                 ee_frame, hand_link, finger_links, vel_limit, lula, camera_prim, camera_offset,
                  deck_z, drive_stiffness=0.0, drive_damping=0.0, art_root="",
                  tray_match_tol=0.03, ik_seed_limit=0.0):
         self.name = name
@@ -59,7 +53,6 @@ class RobotProfile:
         self.vel_limit = vel_limit
         self.lula = lula                  # ("supported", "Franka") 또는 ("files", descriptor, urdf)
         self.camera_prim = camera_prim
-        self.lidar_prim = lidar_prim
         self.camera_offset = camera_offset  # 손목 링크 기준 (x, y, z) m
         # 트레이가 놓이는 면의 **월드 높이**. 로봇마다 다르다 — 예전에는 코드에 0.286 이
         # 박혀 있어 새 로봇에서 트레이가 37 cm 아래에 놓였다 (2026-09-20).
@@ -124,7 +117,6 @@ FRANKA = RobotProfile(
     vel_limit=[2.175] * 4 + [2.61] * 3,          # URDF 실측
     lula=("supported", "Franka"),
     camera_prim="panda_hand/rsd455/RSD455/Camera_OmniVision_OV9782_Color",
-    lidar_prim="front_laser/Lidar",
     camera_offset=(0.0, 0.0, 0.0),               # 기존 경로는 카메라 오프셋을 따로 쓰지 않는다
     deck_z=0.286,                                # ridgeback 데크 윗면
     # Franka 는 에셋 게인 그대로 4/4 가 나왔다 — 건드리지 않는다
@@ -148,12 +140,6 @@ M0609 = RobotProfile(
                   "m0609/onrobot_rg2ft/right_inner_finger"],
     vel_limit=[2.618, 2.618, 3.1416, 3.927, 3.927, 3.927],   # M0609 URDF
     # verify_carter_m0609.py 에서 IK 가 실제로 풀린 조합 (2026-09-18 확인)
-<<<<<<< HEAD
-    # IK 입력도 결합 로봇 USD 와 같은 저장소 자산 트리에서 읽는다. 개인 홈 경로에
-    # 의존하면 새 PC/다른 팀원 환경에서 시뮬 시작 직후 Lula 로드가 실패한다.
-    lula=("files", str(_M0609_ASSET_ROOT / "descriptor/m0609_description.yaml"),
-          str(_M0609_ASSET_ROOT / "doosan-robot2/urdf/m0609.urdf")),
-=======
     # Lula 운동학 파일. **저장소 사본을 먼저 본다** — 2026-09-20 까지 연구실 PC 에만 있어서
     # 새 PC 를 세울 때마다 막혔다 (USB 백업 11GB 에도 없었다). 옛 개인 경로는 뒤로 남긴다.
     lula=("files", _first_existing(
@@ -162,9 +148,7 @@ M0609 = RobotProfile(
           _first_existing(
               os.path.join(_REPO, "simulation/assets/m0609/urdf/m0609.urdf"),
               os.path.expanduser("~/Isaac_Sim_b-1/src_pra/M0609/doosan-robot2/urdf/m0609.urdf"))),
->>>>>>> origin/feature/amr_patrol_pickplace
     camera_prim="m0609/onrobot_rg2ft/angle_bracket/realsense_d455/RSD455/Camera_OmniVision_OV9782_Color",
-    lidar_prim="chassis_link/sensors/XT_32/PandarXT_32_10hz",
     camera_offset=(0.0115, 0.0450, 0.0525),      # link_6 기준, 회전 X축 180° (2026-09-19 실측)
     deck_z=0.655,                                # 받침판(Cube) 윗면 — 팔 베이스와 같은 높이
     # 받은 에셋은 URDF 임포트 기본값(강성 40~1135)이라 위치 지령을 못 따라간다.
@@ -182,8 +166,8 @@ _ALL = {p.name: p for p in (FRANKA, M0609)}
 
 
 def profile(name=None):
-    """이름으로 프로파일을 고른다. 안 주면 ARM_ROBOT 환경변수, 그것도 없으면 통합 월드의 m0609."""
-    key = (name or os.environ.get("ARM_ROBOT") or "m0609").strip().lower()
+    """이름으로 프로파일을 고른다. 안 주면 ARM_ROBOT 환경변수, 그것도 없으면 검증된 franka."""
+    key = (name or os.environ.get("ARM_ROBOT") or "franka").strip().lower()
     if key not in _ALL:
         raise ValueError(f"모르는 로봇 '{key}' — 있는 것: {sorted(_ALL)}")
     return _ALL[key]

@@ -1,37 +1,22 @@
-# 고정 좌표 내비게이션 waypoint
-<<<<<<< HEAD
-# 현재 서가·반납구 좌표는 임시 고정값이다.
-# Isaac Sim 통합 후 실제 prim 위치로 calibration 한 값을 넣으면 된다.
-=======
-# isaac_map(isaac_map.py)이 component 단위로 읽는다. 구성 요소 pose 의
-# orientation 은 "요소의 앞면이 바라보는 방향"이다.
+# map 기준 고정 내비게이션 waypoint.
 #
-# behavior:
-#   - as_is          : 보정 없이 받은 좌표 그대로 이동 (home 등)
-#   - approach_front : 구성 요소 앞면을 정면으로 마주보게 보정 (반납구)
-#   - park_parallel  : 책장과 수평으로 주차하도록 보정 (서가)
-# parking_distance: 요소 앞면에서 로봇이 물러나 있을 거리(m). 없으면
-#                   nav_manager 의 parking_distance 파라미터를 쓴다.
->>>>>>> origin/feature/amr_patrol_pickplace
+# home은 FRANKA_NEW에서 검증한 Ridgeback-Franka 초기 위치다.
+# return_station과 shelf 좌표는 기존 값이므로 실제 Nav2Goal로 재검증해야 한다.
+
 frame_id: map
 
 waypoints:
   home:
     position:
-      x: 0.06556940078735352
-      y: -4.773948669433594
+      x: 2.03174
+      y: -5.64259
       z: 0.0
     orientation:
       x: 0.0
       y: 0.0
-      z: 0.0
-      w: 1.0
-<<<<<<< HEAD
-      
-=======
-    behavior: as_is
+      z: 0.7071068
+      w: 0.7071068
 
->>>>>>> origin/feature/amr_patrol_pickplace
   return_station:
     position:
       x: -6.0
@@ -42,11 +27,6 @@ waypoints:
       y: 0.0
       z: 0.7071068
       w: 0.7071068
-<<<<<<< HEAD
-=======
-    behavior: approach_front
-    parking_distance: 1.0
->>>>>>> origin/feature/amr_patrol_pickplace
 
   shelf_01:
     position:
@@ -58,11 +38,6 @@ waypoints:
       y: 0.0
       z: 0.7071068
       w: 0.7071068
-<<<<<<< HEAD
-=======
-    behavior: park_parallel
-    parking_distance: 1.2
->>>>>>> origin/feature/amr_patrol_pickplace
 
   shelf_02:
     position:
@@ -73,52 +48,4 @@ waypoints:
       x: 0.0
       y: 0.0
       z: 0.7071068
-<<<<<<< HEAD
       w: 0.7071068
-=======
-      w: 0.7071068
-    behavior: park_parallel
-    parking_distance: 1.2
-
-# ------------------------------------------------------------------ 순회 경로
-# 2026-09-21 받은 좌표. **도서관 테두리를 따라 책장 바깥으로 크게 한 바퀴**를 돈다.
-# 시작 위치에서 출발해 wp1~wp4 를 지나 다시 시작 위치로 돌아온다.
-#
-# **1단계는 회전 없이 간다** — 모든 점의 yaw 가 0 이다. Ridgeback 은 전방향(홀로노믹)
-# 이라 몸통을 돌리지 않고 옆으로도 갈 수 있다. 로봇팔과 트레이가 같은 방향을 유지하므로
-# 돌아온 뒤 곧바로 파지할 수 있다. 회전은 이것이 되고 나서 붙인다.
-  patrol_start:
-    position: {x: 2.53495, y: -3.01885, z: 0.0}
-    orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
-    behavior: as_is
-
-  patrol_wp1:
-    position: {x: 4.0, y: -3.01885, z: 0.0}
-    orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
-    behavior: as_is
-
-  patrol_wp2:
-    position: {x: 4.0, y: 5.0, z: 0.0}
-    orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
-    behavior: as_is
-
-  patrol_wp3:
-    position: {x: -4.0, y: 5.0, z: 0.0}
-    orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
-    behavior: as_is
-
-  patrol_wp4:
-    position: {x: -4.0, y: -3.01885, z: 0.0}
-    orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
-    behavior: as_is
-
-# 순회 순서. 마지막에 출발점으로 돌아와 그 자리에서 파지·반납한다
-routes:
-  library_loop:
-    - patrol_start
-    - patrol_wp1
-    - patrol_wp2
-    - patrol_wp3
-    - patrol_wp4
-    - patrol_start
->>>>>>> origin/feature/amr_patrol_pickplace

@@ -1,0 +1,22 @@
+pointcloud_to_laserscan:
+  ros__parameters:
+    use_sim_time: true
+    target_frame: lidar_link
+    transform_tolerance: 0.05
+
+    # Select a horizontal obstacle band around the lidar. The floor is about
+    # 0.325 m below lidar_link and is therefore excluded by min_height.
+    min_height: -0.10
+    max_height: 0.50
+
+    angle_min: -3.14159
+    angle_max: 3.14159
+    angle_increment: 0.00872665
+    scan_time: 0.10
+
+    # /scan is for SLAM. Close-range safety will use /lidar/points_raw in the
+    # Nav2 local voxel layer. 1.05 m removes the observed Ridgeback/arm return.
+    range_min: 1.05
+    range_max: 30.0
+    use_inf: true
+    inf_epsilon: 1.0

@@ -99,41 +99,15 @@ class ManipulationExecutor:
             return self.finish(SIM_FAILED, error_code=411, message="Isaac 작업 실행기 초기화 중 (시작 홈 이동)")
         if cmd.get("frame_id") != "arm_base_link":
             return self.finish(SIM_FAILED, error_code=410, message=f"frame_id {cmd.get('frame_id')}")
-<<<<<<< HEAD
-
-        scene.refresh_arm_frame()
-=======
         # **좌표를 월드로 바꾸기 전에** 팔 베이스 자세를 다시 읽는다. 주행한 뒤라면
         # 시작할 때 읽은 값이 그만큼 낡아 있어 pick/place 가 통째로 어긋난다 (2026-09-21).
         scene.job_active = True          # follow_tray 가 책을 건드리지 않게 한다
         _moved = scene.refresh_base()
         if _moved > 0.01:
             self.say(f"팔 베이스가 {_moved*100:.1f}cm 움직였다 — 좌표 기준을 다시 잡았다")
->>>>>>> origin/feature/amr_patrol_pickplace
         pick_w = scene.to_world(cmd["pick"]["center"])
         place_w = scene.to_world(cmd["place"]["center"])
         book, dist = scene.book_on_tray_near(pick_w)
-
-        # 시연 전용: 계산된 트레이 칸에서 멀어도 실제 가장 가까운 책을 사용한다.
-        demo_nearest = os.environ.get(
-            "SIM_DEMO_NEAREST_BOOK",
-            "0",
-        ) == "1"
-
-        if book is None and demo_nearest and scene.books:
-            book = min(
-                scene.books,
-                key=lambda path: float(
-                    np.linalg.norm(scene.center(path) - pick_w)
-                ),
-            )
-            dist = float(np.linalg.norm(scene.center(book) - pick_w))
-            self.say(
-                "시연 모드: 트레이 칸 거리 검사를 무시하고 "
-                f"{book.rsplit('/', 1)[-1]} 선택 "
-                f"(기준점과 {dist * 100:.1f}cm)"
-            )
-
         if book is None:
             # **왜 못 찾았는지 숫자로 남긴다** — "책 없음" 만으로는 좌표 문제인지
             # 책이 정말 없는지 못 가른다 (2026-09-20 M0609 에서 여기서 막혔다)
