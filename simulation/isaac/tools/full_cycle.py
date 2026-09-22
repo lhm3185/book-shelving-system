@@ -132,6 +132,11 @@ def main():
     if not a.no_pick:
         print("=" * 60)
         print("③④ 비전 좌표로 파지·반납")
+        # **출발 자리를 노드 밖에 보관한다.** 아래에서 노드를 껐다 다시 만들면
+        # c.home 이 None 이 되고, 그 상태로는 ⑤ 복귀가 '출발 자리를 못 읽었다' 로
+        # 건너뛴다 (2026-09-23 take2 에서 확인). 주행 보고는 움직일 때만 오므로
+        # 새 노드는 이 값을 다시 받지 못한다.
+        _home = c.home
         c.destroy_node()
         rclpy.shutdown()
         import subprocess
@@ -143,6 +148,8 @@ def main():
         rclpy.init()
         c = Cycle(a)
         c.wait_for(c.nav_pub)
+        if c.home is None:
+            c.home = _home
 
     if not a.no_return:
         print("=" * 60)
