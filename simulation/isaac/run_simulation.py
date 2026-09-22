@@ -52,7 +52,7 @@ ap.add_argument("--camera-hz", type=float, default=10.0)
 ap.add_argument("--sensor-policy", choices=["gated", "always"], default="gated")
 ap.add_argument("--amr-test-overrides", action="store_true",
                 help="AMR 에셋의 라이다 fullScan·TF 네임스페이스를 실행에서만 보완 (파일 미수정)")
-ap.add_argument("--start-home", choices=["move", "snap"], default="move",
+ap.add_argument("--start-home", choices=["move", "snap", "keep"], default="move",
                 help="move: 접은 채 홈으로 이동(검증된 경로). snap 은 첫 작업이 M406 으로 실패한다")
 ap.add_argument("--max-seconds", type=float, default=0.0, help="0 이면 계속 실행")
 ap.add_argument("--no-manipulation", action="store_true", help="로봇팔 실행기를 붙이지 않는다 (월드만 확인)")

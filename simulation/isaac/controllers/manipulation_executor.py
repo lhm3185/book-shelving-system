@@ -69,8 +69,17 @@ class ManipulationExecutor:
         self.last_pub = 0.0
         self.q_prev = self.robot.get_joint_positions()[scene.idx_arm].copy()
 
-        # 시작 자세: 기본은 접은 채 홈으로 이동(검증된 경로). snap 은 시작이 빠르지만 첫 작업이 실패한다
-        if start_home == "snap":
+        # 시작 자세
+        #   move : 접은 채 홈으로 이동 (검증된 경로, 느리다)
+        #   snap : 홈으로 순간이동 뒤 한 번 더 맞춘다 (빠르지만 첫 작업이 실패한 적 있다)
+        #   keep : **레벨에 배치된 자세를 그대로 둔다.** 아무것도 건드리지 않는다.
+        #
+        # keep 이 필요한 이유: 레벨에 놓인 로봇 자세·각도가 시작하자마자 바뀌면
+        # 장면이 설계와 달라진다. 홈 자세는 예전 배치(트레이가 뒤쪽)에 맞춘 값이라
+        # 지금 배치에서는 팔이 뒤로 161° 돌아간 모양이 된다.
+        if start_home == "keep":
+            self.say("시작 자세: **레벨 그대로** (팔을 건드리지 않는다) [--start-home keep]")
+        elif start_home == "snap":
             scene.snap_to_home()
             self.arm.enqueue(MoveJoint(scene.q_home, speed_scale=0.6, timeout_s=5))
         else:
@@ -303,7 +312,12 @@ class ManipulationExecutor:
                     if len(job.watch["slip"]) % 3 == 1:
                         self.say(f"[어긋남] step {job.steps} {name} {dev*100:.2f}cm "
                                  f"손기준차 {[round(float(v)*100, 1) for v in (_rel - job.watch['rel0'])]}")
-                if dev > 0.03 and name != "lift":
+                # **문턱을 설정으로 뺀다** (`SIM_HAND_DRIFT_M`, 기본 0.03).
+                # 이 값은 손 좌표계에서 본 책 **원점**의 이동량인데, 이 레벨의 책들은
+                # 원점이 형상에서 75~177 cm 떨어져 있어(2026-09-22 실측) 손이 조금만
+                # 돌아도 cm 단위로 벌어진다. 키네마틱 파지 + 충돌 끄기로 물리적으로
+                # 빠질 수 없는 상태에서도 3.9 cm 가 찍혀 작업이 취소됐다.
+                if dev > float(os.environ.get("SIM_HAND_DRIFT_M", "0.03")) and name != "lift":
                     arm.cancel()
                     self.finish(SIM_FAILED, error_code=406, message=f"운반 중 손 안에서 책 {dev * 100:.1f}cm 어긋남")
 

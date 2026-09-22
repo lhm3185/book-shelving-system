@@ -40,6 +40,9 @@ app = SimulationApp({"headless": True})
 
 import cv2
 import numpy as np
+
+#: 운반 중 손 안에서 책이 이만큼 움직이면 `406` 으로 본다 (m)
+HAND_DRIFT_M = float(os.environ.get("SIM_HAND_DRIFT_M", "0.03"))
 import yaml
 from pxr import Gf, Usd, UsdGeom, UsdPhysics
 from isaacsim.core.api import World
@@ -429,7 +432,11 @@ for step in range(args.max_steps):
     ji = int(job[1:]) if job.startswith("j") and job[1:].isdigit() else None
     if ji is not None and name in ("carry_rotate", "wedge") and "rel0" in watch:
         dev = float(np.linalg.norm(book_in_hand(plans[ji][0]["book"]) - watch["rel0"]))
-        if dev > 0.03 and ji not in job_err:
+        # **문턱을 설정으로 뺀다.** 이 값은 손 좌표계에서 본 책 **원점**의 이동량인데,
+        # 이 레벨의 책들은 원점이 형상에서 75~177 cm 떨어져 있어(2026-09-22 실측)
+        # 손이 조금만 돌아도 원점 거리가 cm 단위로 벌어진다. 키네마틱 파지 + 충돌 끄기로
+        # 물리적으로 빠질 수 없는 상태에서도 3~4 cm 가 찍혀 작업이 취소됐다.
+        if dev > HAND_DRIFT_M and ji not in job_err:
             job_err[ji] = (406, f"운반 중 손 안에서 책 {dev*100:.1f}cm 어긋남"); arm.cancel(); break
     if ph != last_phase:
         phase_log.append((step, ph)); prev = (last_phase or "").split(":")[-1]
