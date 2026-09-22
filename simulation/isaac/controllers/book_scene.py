@@ -784,6 +784,50 @@ class BookScene:
                          self.l0p[1] + sy * p[0] + cy * p[1],
                          p[2]])
 
+    def plan_scan(self, table=None, home=None):
+        """서가 스캔 자세들을 **관절 해**로 푼다 → [(이름, q, 메타), ...].
+
+        **베이스를 움직이지 않는다.** 반납할 자리에서 팔만 접어 훑는다 (scan_planner 참조).
+        푸는 순서가 중요하다: 앞 자세를 씨앗으로 여러 번 풀어 **가장 가까운 해**를 고른다.
+        하나만 씨앗으로 쓰면 자세마다 다른 가지가 잡혀 관절이 254° 까지 돌았다 (9/22 실측).
+
+        좌표는 팔 기준이므로 **지금의 팔 베이스**를 먼저 다시 읽는다 — 주행 뒤에는
+        시작할 때 읽은 값이 낡아 있다.
+        """
+        import scan_planner as _sp
+
+        self.refresh_base()
+        _sp_home = np.asarray(self.q_home if home is None else home, float)
+        q_prev = _sp_home
+        out = []
+        for name, hp, hR, meta in _sp.scan_poses(table or _sp.SCAN_TABLE,
+                                                 arm_base_z=float(self.l0p[2])):
+            wp = self.to_world(hp)
+            wq = quat_from_R(self.Rl0 @ hR)
+            cands = []
+            for seed in _sp.seeds_for(q_prev, _sp_home):
+                act, ok = self.lula.compute_inverse_kinematics(
+                    frame_name=BOT.hand_link, warm_start=np.asarray(seed, float),
+                    target_position=wp, target_orientation=wq)
+                if not ok:
+                    continue
+                q = np.asarray(getattr(act, "joint_positions", act), float)
+                if not any(float(np.max(np.abs(q - o))) < 1e-3 for o in cands):
+                    cands.append(q)
+            q = _sp.pick_closest(cands, q_prev)
+            if q is None:
+                self.say(f"[스캔] {name} 해 없음 — 건너뛴다")
+                continue
+            step = _sp.step_size(q_prev, q)
+            if out and step > _sp.MAX_STEP_RAD:
+                # 크게 도는 것 자체는 막지 않는다. **알아챌 수 있게** 남긴다
+                self.say(f"[스캔] {name} 에서 관절이 크게 돈다 "
+                         f"{math.degrees(step):.0f}° — 자세 표를 다시 볼 것")
+            out.append((name, q, dict(meta, step_rad=step, candidates=len(cands))))
+            q_prev = q
+        self.say(f"[스캔] 자세 {len(out)}/{len(table or _sp.SCAN_TABLE)} 개 계획")
+        return out
+
     def to_world(self, p_arm):
         return self.l0p + self.Rl0 @ np.asarray(p_arm, float)
 

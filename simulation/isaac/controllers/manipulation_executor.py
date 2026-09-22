@@ -9,6 +9,7 @@ Isaac 실행 자체(앱 생성·USD 로드·루프)는 `run_simulation.py` 가 �
 import os
 import sys
 import time
+import uuid
 
 import numpy as np
 
@@ -16,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from std_msgs.msg import String
 
 from shelving_manipulation.book_placer import (
-    COMMAND_CANCEL, COMMAND_PLACE, decode, encode, SIM_CANCELLED, SIM_FAILED, SIM_IDLE, SIM_RUNNING,
+    COMMAND_CANCEL, COMMAND_PLACE, COMMAND_SCAN, decode, encode, SIM_CANCELLED, SIM_FAILED, SIM_IDLE, SIM_RUNNING,
     SIM_SUCCEEDED)
 
 from arm_primitives import Status
@@ -142,6 +143,51 @@ class ManipulationExecutor:
                  f"{dist * 100:.1f}cm) → x {plan['place_x']:.3f} 계획 OK 최대 인접변화 {plan['worst']:.3f} rad")
         self.arm.enqueue(scene.job_sequence("job", plan))
 
+    def start_scan(self, cmd):
+        """서가를 훑는다 — **베이스는 그대로**, 팔만 접어 자세를 바꾼다.
+
+        각 자세에서 잠깐 멈춘다. 그 사이에 비전이 찍어 빈칸을 기억한다.
+        멈추는 이유는 렌더·검출이 한 프레임 안에 끝나지 않기 때문이고,
+        움직이는 중에 찍으면 깊이가 흐려진다.
+        """
+        from arm_primitives import MoveJoint, Sequence, Wait
+        from book_scene import named
+
+        token = cmd.get("token") or uuid.uuid4().hex
+        job_id = cmd.get("job_id", "scan")
+        dwell = float(cmd.get("dwell_s", 1.0))
+        self.scene.job_active = True
+        self.scene.root_writes_after_job = 0
+        try:
+            poses = self.scene.plan_scan()
+        except Exception as exc:      # noqa: BLE001 - 계획 실패를 작업 실패로 돌려준다
+            self.scene.job_active = False
+            self.publish({"token": token, "job_id": job_id, "status": SIM_FAILED,
+                          "phase": "plan", "error_code": 410,
+                          "message": f"스캔 계획 실패 {type(exc).__name__}: {exc}"})
+            return
+        if not poses:
+            self.scene.job_active = False
+            self.publish({"token": token, "job_id": job_id, "status": SIM_FAILED,
+                          "phase": "plan", "error_code": 410, "message": "스캔 자세 해가 없다"})
+            return
+
+        steps = []
+        for name, q, meta in poses:
+            steps.append(named(MoveJoint(q, speed_scale=0.6), name))
+            steps.append(named(Wait(dwell), f"{name}_hold"))
+        self.job = Job(dict(cmd, token=token, job_id=job_id))
+        self.job.state = {"token": token, "job_id": job_id, "status": SIM_RUNNING,
+                          "phase": "scan", "scan_poses": len(poses)}
+        self.publish(self.job.state)
+        self.say(f"스캔 시작: 자세 {len(poses)}개, 자세마다 {dwell:.1f}초 정지 "
+                 f"(최대 관절 변화 {max(m['step_rad'] for _, _, m in poses):.2f} rad)")
+        # **꽂을 수 있는 판과 아닌 판을 미리 알린다** — 비전이 준 빈칸을 나중에 거를 때 쓴다
+        self.publish(dict(self.job.state, phase="scan_plan",
+                          boards=[{"board_z": m["board_z"], "name": n,
+                                   "reachable": m["reachable"]} for n, _, m in poses]))
+        self.arm.enqueue(Sequence("scan", steps))
+
     def handle(self, text):
         cmd = decode(text)
         if cmd is None:
@@ -155,6 +201,13 @@ class ManipulationExecutor:
                               "message": f"작업 {self.job.job_id} 실행 중"})
                 return
             self.start_job(cmd)
+        elif kind == COMMAND_SCAN:
+            if self.job is not None and self.job.state["status"] == SIM_RUNNING:
+                self.publish({"token": cmd.get("token"), "job_id": cmd.get("job_id", ""),
+                              "status": SIM_FAILED, "phase": "plan", "error_code": 411,
+                              "message": f"작업 {self.job.job_id} 실행 중"})
+                return
+            self.start_scan(cmd)
         elif kind == COMMAND_CANCEL and self.job is not None and self.job.token == cmd.get("token") \
                 and self.job.state["status"] == SIM_RUNNING:
             # 안전 동작: 그 자리 정지. 책을 잡고 있을 수 있으므로 그리퍼·고정 조인트는 그대로 둔다 (HOLD_GRIP)

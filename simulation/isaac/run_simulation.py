@@ -59,6 +59,9 @@ ap.add_argument("--no-manipulation", action="store_true", help="로봇팔 실행
 ap.add_argument("--no-navigation", action="store_true",
                 help="주행 실행기를 붙이지 않는다")
 ap.add_argument("--drive-speed", type=float, default=0.4, help="주행 속도 (m/s)")
+ap.add_argument("--probe-tray", action="store_true",
+                help="장면만 세우고 **설정 칸 좌표 vs 실제 책 위치**를 찍은 뒤 끝낸다 "
+                     "(파지하지 않는다). 세션을 여러 번 돌려 계통/무작위를 가른다")
 args = ap.parse_args()
 
 # 저장소 코드를 그대로 쓴다 (~/arm 으로 복사하지 않는다)
