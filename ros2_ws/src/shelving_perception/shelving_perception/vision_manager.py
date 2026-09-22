@@ -205,23 +205,24 @@ class VisionManager(Node):
         # 책 표면과 빈 칸의 배경 깊이를 구분할 최소 차이(m)입니다.
         self.shelf_depth_margin = float(self.declare_parameter(
             'shelf_depth_margin', 0.05).value)
-        # 삽입 후보를 화면에 투영해 깊이를 읽을 때 사용할 로봇 기준 frame입니다.
+        # 고정 슬롯 좌표가 정의된 기준 frame입니다. 아래 좌표는 world frame에
+        # 직접 입력하고, 이 값은 반드시 해당 좌표의 frame 이름과 맞춰야 합니다.
         self.slot_position_frame = self.declare_parameter(
-            'slot_position_frame', 'arm_base_link').value
-        # x,y,z가 반복되는 평탄화된 삽입 후보 좌표 목록입니다.
+            'slot_position_frame', 'world').value
+        # x,y,z가 반복되는 평탄화된 고정 슬롯 좌표 2개입니다.
+        # TODO: 여기에 책장 빈 공간 1번과 2번의 world 좌표를 직접 입력하세요.
+        # 책장 깊이는 0.30 m이며, 좌표는 책을 넣을 목표 위치로 지정합니다.
         self.slot_positions = list(self.declare_parameter(
             'slot_positions', [
-                -0.3497, 0.5495, 0.3399,
-                -0.4297, 0.5495, 0.3399,
-                -0.5097, 0.5495, 0.3399,
-                -0.2697, 0.5495, 0.3399,
+                2.61545, -2.50246, 1.58288,  # slot 0 world x,y,z 입력
+                1.48105, -2.46581, 1.04401,  # slot 1 world x,y,z 입력
             ]).value)
         # 후보 중심 주변에서 깊이를 샘플링할 픽셀 반경입니다.
         self.slot_sample_radius_px = int(self.declare_parameter(
             'slot_sample_radius_px', 10).value)
         # 예상 삽입점보다 먼 값이 빈 칸임을 나타내는 거리 기준입니다.
         self.slot_empty_depth_margin = float(self.declare_parameter(
-            'slot_empty_depth_margin', 0.04).value)
+            'slot_empty_depth_margin', 0.15).value)
         # 예상 삽입점보다 가까운 값이 점유를 나타내는 거리 기준입니다.
         self.slot_occupied_depth_margin = float(self.declare_parameter(
             'slot_occupied_depth_margin', 0.03).value)
@@ -667,7 +668,7 @@ class VisionManager(Node):
             self.empty_slot_pub.publish(empty_msg)
             transformed_empty_slots.append(empty_point)
             self.get_logger().info(
-                f"Empty shelf row={empty_slot['row_index']}: "
+                f"Empty shelf slot={empty_slot['slot_id']}: "
                 f"xyz=({empty_point.point.x:.3f}, "
                 f"{empty_point.point.y:.3f}, "
                 f"{empty_point.point.z:.3f})")
@@ -865,9 +866,6 @@ class VisionManager(Node):
                 f'{self.target_frame}: {error}')
             return None
 
-<<<<<<< HEAD
-    def _publish_debug_image(
-=======
     def _publish_debug_image(self, *args, **kwargs):
         """디버그 영상을 발행합니다. **그리다 실패해도 검출을 멈추지 않습니다**.
 
@@ -883,7 +881,6 @@ class VisionManager(Node):
                 throttle_duration_sec=10.0)
 
     def _draw_and_publish_debug_image(
->>>>>>> feature/amr_patrol_pickplace
         self,
         rgb_image,
         header,
@@ -994,15 +991,11 @@ class VisionManager(Node):
                 cv2.LINE_AA,
             )
         # OpenCV BGR 영상을 ROS Image 메시지로 변환합니다.
-<<<<<<< HEAD
-        debug_msg = self.bridge.cv2_to_imgmsg(debug_image, encoding='bgr8')
-=======
         # **cv_bridge 를 쓰지 않습니다.** OpenCV 5 에서 CV_CN_SHIFT 가 3→5 로 바뀌어,
         # cv_bridge 의 타입 표(키 32..36)와 자체 계산값(16)이 어긋나 cv2_to_imgmsg 가
         # KeyError 로 죽습니다 (2026-09-21 GPU PC 10.10.0.1, cv2 5.0.0 에서 확인).
         # bgr8 은 바이트를 그대로 옮기면 되므로 직접 만듭니다 — OpenCV 판 번호와 무관합니다.
         debug_msg = _bgr8_to_imgmsg(debug_image)
->>>>>>> feature/amr_patrol_pickplace
         # 원본 RGB와 같은 timestamp/frame을 유지합니다.
         debug_msg.header = header
         # 다른 PC의 rqt_image_view가 구독할 수 있도록 발행합니다.
