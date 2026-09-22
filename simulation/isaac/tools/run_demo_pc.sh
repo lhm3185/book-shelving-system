@@ -58,7 +58,10 @@ trap cleanup INT TERM EXIT
 #   franka → panda_link0 / m0609 → base_link
 # 예전에는 panda_link0 이 박혀 있어서 M0609 에서는 이 별칭이 트리에 안 붙었고,
 # `arm_base_link` 로 TF 조회가 실패했다 (2026-09-20. 비전 쪽이 그래서 base_link 를 직접 쓰게 바꿨다).
-ARM_BASE_FRAME="${ARM_BASE_FRAME:-$(ARM_ROBOT="${ARM_ROBOT:-m0609}" python3 -c \
+# **기본값은 franka 다** (2026-09-21 팀 결정으로 Ridgeback-Franka 로 복귀).
+# m0609 로 두면 별칭 부모가 base_link 가 되어 arm_base_link 가 TF 트리에 안 붙고,
+# 비전의 모든 좌표 조회가 조용히 실패한다. 6축을 다시 쓸 때는 ARM_ROBOT=m0609 로.
+ARM_BASE_FRAME="${ARM_BASE_FRAME:-$(ARM_ROBOT="${ARM_ROBOT:-franka}" python3 -c \
     "import sys; sys.path.insert(0, '$REPO_ROOT/simulation/isaac/config'); \
      from robot_profiles import profile; print(profile().base_link.split('/')[-1])")}"
 # 조회가 실패하면 빈 문자열이 되고, 빈 부모로 TF 를 내도 로그는 "실행됨" 이라 성공처럼 보인다.
@@ -66,7 +69,7 @@ ARM_BASE_FRAME="${ARM_BASE_FRAME:-$(ARM_ROBOT="${ARM_ROBOT:-m0609}" python3 -c \
 [ -n "$ARM_BASE_FRAME" ] || {
     echo "팔 기준 프레임을 못 구했다 (robot_profiles 조회 실패). ARM_BASE_FRAME=... 로 직접 지정할 것"
     exit 1; }
-echo "팔 기준 프레임: $ARM_BASE_FRAME → arm_base_link (ARM_ROBOT=${ARM_ROBOT:-m0609})"
+echo "팔 기준 프레임: $ARM_BASE_FRAME → arm_base_link (ARM_ROBOT=${ARM_ROBOT:-franka})"
 ros2 run tf2_ros static_transform_publisher --frame-id "$ARM_BASE_FRAME" --child-frame-id arm_base_link \
     --ros-args -p use_sim_time:=true > "$LOG/tf_arm.log" 2>&1 & pids+=($!)
 # 카메라 prim TF(Isaac, 광학 규약) → 이미지 frame sim_camera (항등)

@@ -27,6 +27,18 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _M0609_ASSET_ROOT = _REPO_ROOT / "simulation/assets/cobot3_ws/isaacpjt/M0609"
 
+# 이 파일은 <저장소>/simulation/isaac/config/ 에 있다 → 세 단계 올라가면 저장소 루트
+_REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+
+def _first_existing(*paths):
+    """있는 첫 경로를 준다. 하나도 없으면 첫 번째를 그대로 돌려준다 (오류 메시지가 저장소 경로를 가리키게)."""
+    for p in paths:
+        if os.path.exists(p):
+            return p
+    return paths[0]
+
+
 
 class RobotProfile:
     def __init__(self, name, root, base_link, arm_joints, grip_joints, grip_open, grip_close,
@@ -136,10 +148,21 @@ M0609 = RobotProfile(
                   "m0609/onrobot_rg2ft/right_inner_finger"],
     vel_limit=[2.618, 2.618, 3.1416, 3.927, 3.927, 3.927],   # M0609 URDF
     # verify_carter_m0609.py 에서 IK 가 실제로 풀린 조합 (2026-09-18 확인)
+<<<<<<< HEAD
     # IK 입력도 결합 로봇 USD 와 같은 저장소 자산 트리에서 읽는다. 개인 홈 경로에
     # 의존하면 새 PC/다른 팀원 환경에서 시뮬 시작 직후 Lula 로드가 실패한다.
     lula=("files", str(_M0609_ASSET_ROOT / "descriptor/m0609_description.yaml"),
           str(_M0609_ASSET_ROOT / "doosan-robot2/urdf/m0609.urdf")),
+=======
+    # Lula 운동학 파일. **저장소 사본을 먼저 본다** — 2026-09-20 까지 연구실 PC 에만 있어서
+    # 새 PC 를 세울 때마다 막혔다 (USB 백업 11GB 에도 없었다). 옛 개인 경로는 뒤로 남긴다.
+    lula=("files", _first_existing(
+              os.path.join(_REPO, "simulation/assets/m0609/descriptor/m0609_description.yaml"),
+              os.path.expanduser("~/Isaac_Sim_b-1/src_pra/M0609/descriptor/m0609_description.yaml")),
+          _first_existing(
+              os.path.join(_REPO, "simulation/assets/m0609/urdf/m0609.urdf"),
+              os.path.expanduser("~/Isaac_Sim_b-1/src_pra/M0609/doosan-robot2/urdf/m0609.urdf"))),
+>>>>>>> origin/feature/amr_patrol_pickplace
     camera_prim="m0609/onrobot_rg2ft/angle_bracket/realsense_d455/RSD455/Camera_OmniVision_OV9782_Color",
     lidar_prim="chassis_link/sensors/XT_32/PandarXT_32_10hz",
     camera_offset=(0.0115, 0.0450, 0.0525),      # link_6 기준, 회전 X축 180° (2026-09-19 실측)

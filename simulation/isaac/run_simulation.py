@@ -65,6 +65,9 @@ ap.add_argument("--start-home", choices=["move", "snap"], default="move",
 
 ap.add_argument("--max-seconds", type=float, default=0.0, help="0 이면 계속 실행")
 ap.add_argument("--no-manipulation", action="store_true", help="로봇팔 실행기를 붙이지 않는다 (월드만 확인)")
+ap.add_argument("--no-navigation", action="store_true",
+                help="주행 실행기를 붙이지 않는다")
+ap.add_argument("--drive-speed", type=float, default=0.4, help="주행 속도 (m/s)")
 args = ap.parse_args()
 
 # 저장소 코드를 그대로 쓴다 (~/arm 으로 복사하지 않는다)
@@ -101,6 +104,7 @@ if not os.path.exists(tray) or world_loader.is_placeholder(tray):
 from book_scene import BookScene, R  # noqa: E402
 import camera_bridge  # noqa: E402
 from manipulation_executor import ManipulationExecutor  # noqa: E402
+from navigation_executor import NavigationExecutor  # noqa: E402
 
 MIXED_BOOKS = [
     "book_encyclopedia_set_01_2k__book_encyclopedia_set_01_book15",
@@ -253,9 +257,12 @@ if args.camera or args.camera_prim or args.amr_test_overrides:
         gate.set_camera_hz(args.camera_hz)
     say(f"센서 정책 {args.sensor_policy}: 카메라 노드 {len(gate.camera_nodes)}, 라이다 노드 {len(gate.lidar_nodes)}")
 
-# 실행기 등록 (지금은 로봇팔. AMR 은 navigation_executor.py 자리에 붙인다)
+# 실행기 등록 — 로봇팔과 주행. 둘 다 같은 노드를 쓰고 자기 토픽만 만든다
 node = ros_bridge.make_node("isaac_place_book_executor")
 executor = None
+nav = None
+if not args.no_navigation:
+    nav = NavigationExecutor(scene, node, say, speed=args.drive_speed)
 if not args.no_manipulation:
     executor = ManipulationExecutor(scene, node, say, command_topic=args.command_topic,
                                     state_topic=args.state_topic, gate=gate,
@@ -326,6 +333,10 @@ if args.record_dir:
 
 t0 = time.time()
 while app.is_running():
+    # **주행이 먼저다.** 자세만 갱신하고 world.step() 은 부르지 않는다 —
+    # 스텝을 부르는 쪽은 하나여야 한다 (로봇팔 실행기, 없으면 아래 else)
+    if nav is not None:
+        nav.spin()
     if executor is not None:
         executor.spin()
     else:

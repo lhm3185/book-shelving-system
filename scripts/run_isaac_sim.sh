@@ -39,6 +39,7 @@ export LD_LIBRARY_PATH="$(strip_ros "${LD_LIBRARY_PATH:-}")"
 unset AMENT_PREFIX_PATH CMAKE_PREFIX_PATH COLCON_PREFIX_PATH ROS_VERSION ROS_PYTHON_VERSION ROS_AUTOMATIC_DISCOVERY_RANGE
 export ROS_DISTRO=jazzy
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+<<<<<<< HEAD
 # 설정 파일이 실제로 있을 때만 지정한다. 존재하지 않는 기본 경로를 넘기면 FastDDS가
 # XMLPARSER_ERROR를 내므로, 새 PC의 단일 머신 테스트에서는 설정 없이 자동 검색을 쓴다.
 if [ -z "${FASTRTPS_DEFAULT_PROFILES_FILE+x}" ]; then
@@ -48,6 +49,13 @@ elif [ -n "$FASTRTPS_DEFAULT_PROFILES_FILE" ] && [ ! -f "$FASTRTPS_DEFAULT_PROFI
     echo "FASTRTPS_DEFAULT_PROFILES_FILE 파일이 없다: $FASTRTPS_DEFAULT_PROFILES_FILE" >&2
     exit 1
 fi
+=======
+# ":-" 가 아니라 "-" 다. ":-" 는 빈 값도 기본값으로 바꿔서,
+# FASTRTPS_DEFAULT_PROFILES_FILE= 로 끄려 해도 도로 켜진다.
+# **한 PC 안에서 다 돌릴 때는 꺼야 한다** — 화이트리스트가 내장 전송(공유메모리·
+# 로컬호스트)을 끄기 때문에 같은 PC 의 노드끼리 서로를 못 찾는다 (2026-09-21 실측).
+export FASTRTPS_DEFAULT_PROFILES_FILE="${FASTRTPS_DEFAULT_PROFILES_FILE-$HOME/.ros/fastdds_whitelist.xml}"
+>>>>>>> origin/feature/amr_patrol_pickplace
 export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$ISAAC_SIM_PATH/exts/isaacsim.ros2.bridge/jazzy/lib"
 
 # 원격(ssh)에서 창을 이 PC 모니터에 띄울 때

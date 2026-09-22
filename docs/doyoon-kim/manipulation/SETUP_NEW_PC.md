@@ -104,9 +104,63 @@ M0609는 이 파일이 필요하다. USD 변환본은 형상·물리용이라 Lu
 | 되는 것 | 설치, 빌드, `run_tests.sh`, **레벨 재생성**(`set_robot_yaw.py`, `place_robot_at_shelf.py` — Lula 를 안 쓴다) |
 | 안 되는 것 | `check_reach.py`, 시뮬 실행 전체 (IK 가 필요한 모든 것) |
 
+<<<<<<< HEAD
 (책 USD·트레이·최종 레벨·결합 로봇·M0609 Lula 입력은 모두 저장소에 있으므로
 별도 강의 폴더나 바탕화면 자산을 옮길 필요가 없다. USD와 텍스처는 Git LFS 대상이므로
 새 PC에서는 반드시 `git lfs pull`을 실행한다.)
+=======
+> **할 일 (연구실에서)**: 이 두 파일은 작다. **저장소에 넣어** 다시는 이것 때문에
+> 막히지 않게 하는 편이 낫다. doosan-robot2 는 공개 저장소이므로 라이선스만 확인하고 반영할 것.
+
+(책 USD·트레이는 저장소에 있으므로 옮길 필요가 없다)
+
+GPU PC 에서 가져오려면:
+
+```bash
+scp -r rokey@10.10.0.2:~/Desktop/Collected_ing_library_env_v5-firstFinal ~/Desktop/
+scp -r rokey@10.10.0.2:~/Isaac_Sim_b-1 ~/
+```
+
+레벨은 **개당 130MB** 다.
+
+### 원본 하나만 있으면 된다 — 나머지는 만들 수 있다
+
+| 파일 | 어디서 | 쓰임 |
+| --- | --- | --- |
+| `ing_library_env_v5.usd` | **AMR 담당 원본** (USB·GPU PC) | 이것만 있으면 아래를 만든다 |
+| `level_yaw0.usd` | **아래 명령으로 생성** | 파지 시연 (검증됨) |
+| `level_shelf01.usd` | **아래 명령으로 생성** | 서가 삽입 (미해결) |
+
+`level_*.usd` 는 우리가 원본에서 만든 파생본이다. 옮겨 오지 않았어도
+Isaac 만 깔려 있으면 **저장소 도구로 재생성**된다.
+
+```bash
+./scripts/regenerate_levels.sh --dry-run   # 무엇을 할지 먼저 확인
+./scripts/regenerate_levels.sh             # 실제 생성
+```
+
+사전 확인(Isaac·원본 레벨·참조 레이어)을 먼저 하고, 각 단계 산출물이 실제로 생겼는지
+검사한 뒤 넘어간다. 서가와 선반 높이를 바꾸려면 `--shelf` / `--row-z` 를 쓴다.
+
+아래는 그 스크립트가 실제로 부르는 명령이다 (직접 칠 일이 있을 때 참고).
+
+```bash
+cd ~/<저장소>
+LV=~/Desktop/Collected_ing_library_env_v5-firstFinal
+
+# ① 로봇 yaw 를 0 으로 — 경로 계산이 월드 축을 쓰기 때문 (임시 조치, 도구 주석 참조)
+ARM_ROBOT=m0609 ISAAC_ENTRY=simulation/isaac/tools/set_robot_yaw.py \
+  ./scripts/run_isaac_tool.sh --usd $LV/ing_library_env_v5.usd --out $LV/level_yaw0.usd --yaw 0
+
+# ② 서가 앞으로 로봇 배치 (서가 삽입용). ①의 결과를 입력으로 쓴다
+ARM_ROBOT=m0609 ISAAC_ENTRY=simulation/isaac/tools/place_robot_at_shelf.py \
+  ./scripts/run_isaac_tool.sh --usd $LV/level_yaw0.usd --out $LV/level_shelf01.usd \
+  --shelf /World/bookshelves/shelf_brown__book_shelf_01 --row-z 1.042
+```
+
+②는 자기검증(왕복 일치·오답 주입·0 가정 깨기)을 스스로 돌린다.
+**`오차 0.0 mm`, `여유 +4.8 cm` 가 나와야 맞게 선 것이다.**
+>>>>>>> origin/feature/amr_patrol_pickplace
 
 ---
 
@@ -125,11 +179,23 @@ grep address ~/.ros/fastdds_whitelist.xml
 주소가 목록에 없으면 둘 중 하나:
 
 ```bash
-# (A) 한 PC 안에서만 쓸 때 — 화이트리스트를 쓰지 않는다
-unset FASTRTPS_DEFAULT_PROFILES_FILE
+# (A) 한 PC 안에서만 쓸 때 — 저장소의 빈 프로파일을 가리킨다
+export FASTRTPS_DEFAULT_PROFILES_FILE=<저장소>/config/fastdds_local.xml
 
 # (B) 여러 PC 를 쓸 때 — 이 PC 주소를 <interfaceWhiteList> 에 추가
 ```
+
+**`unset` 으로는 안 된다.** 스크립트들이 `${FASTRTPS_DEFAULT_PROFILES_FILE:-~/.ros/fastdds_whitelist.xml}`
+로 기본값을 주기 때문에, 지워 두면 도로 켜진다. 빈 문자열도 안 된다 — FastDDS 가
+`realpath failed` 를 뱉고 `:-` 가 또 기본값으로 바꾼다. 그래서 **있지만 아무 것도 안 하는**
+파일(`config/fastdds_local.xml`)을 가리킨다. 스크립트에서 기본값을 줄 때는 `:-` 가 아니라 `-` 를 쓴다.
+
+### 화이트리스트는 **같은 PC 안**도 막는다
+
+`useBuiltinTransports=false` 로 공유메모리·로컬호스트 전송이 꺼지기 때문이다.
+2026-09-21 GPU PC 에서 Isaac 은 멀쩡히 돌고 **다른 PC 에서는 토픽이 보이는데**
+정작 그 PC 안에서 `ros2 topic list` 하면 `/parameter_events`, `/rosout` 뿐이었다.
+한 PC 에서 다 돌리는 시연은 반드시 (A) 로 할 것.
 
 `./scripts/setup_check.sh` 가 이것도 같이 본다.
 
@@ -151,7 +217,9 @@ ARM_ROBOT=m0609 ISAAC_ENTRY=simulation/isaac/tools/check_reach.py \
 
 `트레이 6/6   서가 4/4` 가 나오면 환경이 제대로 선 것이다.
 
-그다음은 `DEMO_20260921.md` 의 터미널 순서를 따른다.
+그다음은 `DEMO_PATROL_PICK.md` (순회+파지 한 명령) 또는 `DEMO_20260921.md` 의 터미널 순서를 따른다.
+**순회·파지 시연은 클론만 하면 돈다** — 레벨은 `~/Desktop` 에 없으면 저장소 사본으로 떨어지고,
+YOLO 모델도 저장소에 들어 있다.
 Isaac 을 이 PC 에서 직접 돌린다면 `SIM_HOST=local ./scripts/demo/sim_up.sh`.
 
 ---

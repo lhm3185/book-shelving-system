@@ -46,12 +46,16 @@ setup(
     entry_points={
         'console_scripts': [
             (
+<<<<<<< HEAD
                 'sensor_stamp_to_clock = '
                 'shelving_navigation.sensor_stamp_to_clock:main'
             ),
             (
                 'navigation_node = '
                 'shelving_navigation.navigation_node:main'
+=======
+                'nav_manager = shelving_navigation.nav_manager:main'
+>>>>>>> origin/feature/amr_patrol_pickplace
             ),
         ],
     },

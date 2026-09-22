@@ -6,6 +6,11 @@ float32 book_height
 float32 book_thickness
 float32 safety_margin
 uint32 max_recaptures
+
+builtin_interfaces/Time not_before
+# **이 시각 이후의 영상만 쓸 것.** 로봇팔이 관측 자세에서 멈춘 시각이다
+# (흔들리는 중에 찍으면 깊이가 튄다). 조건은 DetectGraspPoint.action 에 적어 두었다.
+# 0 이면 "아무 영상이나" — 예전 호출과 호환된다
 ---
 bool success
 shelving_interfaces/TargetSlot target_slot

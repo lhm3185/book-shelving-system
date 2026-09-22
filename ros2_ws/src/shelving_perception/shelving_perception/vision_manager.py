@@ -8,11 +8,11 @@ Isaac Sim 카메라 데이터를 TargetDetector로 전달하는 ROS 2 노드.
 '''
 
 # ROS 2 Python 클라이언트 라이브러리입니다.
+from pathlib import Path
+
 import rclpy
 # 종료 시 OpenCV 창을 정리하기 위해 가져옵니다.
 import cv2
-# 설치된 ROS 패키지 share 경로를 조합할 때 사용합니다.
-import os
 # roll/pitch/yaw를 사원수로 바꿀 때 사용할 삼각함수 모듈입니다.
 import math
 # RGB·Depth·CameraInfo를 시간 기준으로 묶어주는 ROS 메시지 필터입니다.
@@ -30,23 +30,24 @@ from ultralytics import YOLO
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 # action 실행 콜백과 센서 콜백을 함께 처리할 수 있는 콜백 그룹입니다.
 from rclpy.callback_groups import ReentrantCallbackGroup
-from rclpy.clock import ClockType
 # task_manager_node와 주고받는 검출 action 인터페이스입니다.
 from shelving_interfaces.action import DetectTargetSlot
 # 향후 선반 슬롯 메시지에 사용할 타입입니다.
 from shelving_interfaces.msg import TargetSlot
 # ROS 2 노드의 기본 클래스입니다.
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import (
+    PackageNotFoundError,
+    get_package_share_directory,
+)
 # RGB/Depth 영상과 카메라 내부 파라미터 메시지입니다.
 from sensor_msgs.msg import Image, CameraInfo
 # 책 위치와 책 pose를 발행할 메시지입니다.
 from geometry_msgs.msg import PointStamped, PoseStamped
 # 수동 검출 요청 토픽의 Boolean 메시지입니다.
 from std_msgs.msg import Bool
-# ROS Image 메시지를 OpenCV 영상으로 바꾸는 브리지입니다.
-from cv_bridge import CvBridge, CvBridgeError
+# **cv_bridge 를 쓰지 않습니다.** 이 파일 위쪽의 _imgmsg_to_* / _bgr8_to_imgmsg 로 대신합니다.
+# cv_bridge 의 컴파일된 부분이 NumPy 1.x 로 빌드돼 있어 NumPy 2.x PC 에서 죽습니다.
 # 카메라 좌표를 로봇 좌표로 변환하는 함수입니다.
 from tf2_geometry_msgs import (
     do_transform_point,
@@ -61,6 +62,72 @@ from .book_detector import BookDetector
 from .target_detector import TargetDetector
 
 
+# sensor_msgs/Image 의 encoding → (numpy 자료형, 채널 수).
+# cv_bridge 가 하던 일이지만, 여기 것은 순수 파이썬이라 OpenCV·NumPy 판과 무관합니다.
+_ENCODINGS = {
+    'rgb8': (np.uint8, 3), 'bgr8': (np.uint8, 3),
+    'rgba8': (np.uint8, 4), 'bgra8': (np.uint8, 4),
+    'mono8': (np.uint8, 1), '8UC1': (np.uint8, 1), '8UC3': (np.uint8, 3),
+    'mono16': (np.uint16, 1), '16UC1': (np.uint16, 1),
+    '32FC1': (np.float32, 1), '64FC1': (np.float64, 1),
+}
+
+
+def _imgmsg_to_array(msg):
+    """sensor_msgs/Image → numpy 배열. **cv_bridge 를 거치지 않습니다**.
+
+    `.1` 의 cv_bridge 는 컴파일된 `cvtColor2` 가 NumPy 1.x 로 빌드돼 있어,
+    NumPy 2.x 환경에서 imgmsg_to_cv2 를 부르면 **세그폴트로 죽습니다**
+    (2026-09-21 10.10.0.1, numpy 2.5.3). 바이트를 직접 해석하면 그 의존이 사라집니다.
+    """
+    entry = _ENCODINGS.get(msg.encoding)
+    if entry is None:
+        raise ValueError(f'모르는 encoding: {msg.encoding}')
+    dtype, channels = entry
+    dtype = np.dtype(dtype).newbyteorder('>' if msg.is_bigendian else '<')
+    array = np.frombuffer(bytearray(msg.data), dtype=dtype)
+    # step 은 한 줄의 바이트 수입니다. 줄 끝 padding 이 있을 수 있으므로 step 으로 자릅니다
+    array = array.reshape(msg.height, msg.step // dtype.itemsize)
+    array = array[:, :msg.width * channels]
+    return array.reshape(msg.height, msg.width) if channels == 1 \
+        else array.reshape(msg.height, msg.width, channels)
+
+
+def _imgmsg_to_bgr(msg):
+    """sensor_msgs/Image → BGR 3채널 uint8. 색 변환은 cv2 로 합니다."""
+    array = _imgmsg_to_array(msg)
+    if msg.encoding == 'rgb8':
+        return cv2.cvtColor(array, cv2.COLOR_RGB2BGR)
+    if msg.encoding == 'rgba8':
+        return cv2.cvtColor(array, cv2.COLOR_RGBA2BGR)
+    if msg.encoding == 'bgra8':
+        return cv2.cvtColor(array, cv2.COLOR_BGRA2BGR)
+    if msg.encoding in ('mono8', '8UC1'):
+        return cv2.cvtColor(array, cv2.COLOR_GRAY2BGR)
+    if msg.encoding in ('bgr8', '8UC3'):
+        return array
+    raise ValueError(f'BGR 로 바꿀 수 없는 encoding: {msg.encoding}')
+
+
+def _bgr8_to_imgmsg(image):
+    """BGR numpy 배열 → sensor_msgs/Image. **cv_bridge 를 거치지 않습니다.**
+
+    cv_bridge.cv2_to_imgmsg 는 OpenCV 5 에서 KeyError 로 죽습니다. OpenCV 5 가
+    CV_CN_SHIFT 를 3 에서 5 로 바꿔, cv_bridge 가 만든 타입 표(CV_8UC3 = 64)와
+    자체 계산값(16)이 어긋나기 때문입니다. bgr8 은 메모리 배치가 그대로이므로
+    직접 채우면 OpenCV 판 번호와 무관하게 동작합니다.
+    """
+    image = np.ascontiguousarray(image, dtype=np.uint8)
+    height, width = image.shape[:2]
+    msg = Image()
+    msg.height = int(height)
+    msg.width = int(width)
+    msg.encoding = 'bgr8'
+    msg.is_bigendian = 0
+    msg.step = int(width * 3)
+    msg.data = image.tobytes()
+    return msg
+
 
 class VisionManager(Node):
     """카메라 영상을 받아 책을 검출하고 ROS 결과로 변환하는 노드입니다."""
@@ -69,8 +136,6 @@ class VisionManager(Node):
         # 노드 이름을 vision_manager로 등록합니다.
         super().__init__('vision_manager')
 
-        # ROS Image와 OpenCV 이미지 사이의 변환 도구를 생성합니다.
-        self.bridge = CvBridge()
         # RGB 영상이 들어오는 토픽 이름을 파라미터에서 읽습니다.
         self.rgb_topic = self.declare_parameter(
             'rgb_topic', '/rgb').value
@@ -91,7 +156,7 @@ class VisionManager(Node):
             'wait_for_trigger', True).value)
         # RGB·Depth·CameraInfo가 촬영된 카메라 frame 이름입니다.
         self.camera_frame = self.declare_parameter(
-            'camera_frame', 'RSD455').value
+            'camera_frame', 'sim_camera').value
         # 검출 좌표를 변환할 최종 로봇 frame 이름입니다.
         self.target_frame = self.declare_parameter(
             'target_frame', 'arm_base_link').value
@@ -102,7 +167,7 @@ class VisionManager(Node):
         self.depth_scale = float(self.declare_parameter(
             'depth_scale', 0.0).value)
         # 세 센서 메시지를 같은 프레임으로 인정할 최대 시간 차이입니다.
-        self.sync_slop = float(self.declare_parameter('sync_slop', 0.5).value)
+        self.sync_slop = float(self.declare_parameter('sync_slop', 0.1).value)
         # 책의 3차원 점을 발행할 토픽입니다.
         self.book_topic = self.declare_parameter(
             'book_topic', '/perception/books').value
@@ -115,17 +180,22 @@ class VisionManager(Node):
         # 책장 빈 단의 3D 점을 발행할 토픽입니다.
         self.empty_slot_topic = self.declare_parameter(
             'empty_slot_topic', '/perception/empty_shelf_position').value
-        # True이면 vision_manager가 실행 중인 PC에 OpenCV 검출 창을 표시합니다.
-        # OpenCV 5의 Qt 백엔드 호환성 문제로 기본값은 창을 표시하지 않습니다.
-        self.show_debug_window = bool(self.declare_parameter(
-            'show_debug_window', False).value)
+        # 패키지 resource 폴더에 포함된 YOLO weight의 기본 경로입니다.
+        try:
+            resource_dir = (
+                Path(get_package_share_directory('shelving_perception'))
+                / 'resource'
+            )
+        except PackageNotFoundError:
+            resource_dir = Path(__file__).resolve().parent.parent / 'resource'
+        default_model_path = str(resource_dir / 'book_tray_best.pt')
+        default_shelf_model_path = str(resource_dir / 'best.pt')
+        # 책 검출 모델의 경로입니다.
+        self.model_path = self.declare_parameter(
+            'model_path', default_model_path).value
         # 책장 segmentation 모델의 경로입니다.
-        package_share = get_package_share_directory('shelving_perception')
-        resource_dir = os.path.join(package_share, 'resource')
         self.shelf_model_path = self.declare_parameter(
-            'shelf_model_path',
-            os.path.join(resource_dir, 'best.pt'),
-        ).value
+            'shelf_model_path', default_shelf_model_path).value
         # 책장 검출을 인정할 최소 confidence입니다.
         self.shelf_confidence_threshold = float(self.declare_parameter(
             'shelf_confidence_threshold', 0.50).value)
@@ -191,14 +261,25 @@ class VisionManager(Node):
         # YOLO 검출 결과를 책으로 인정할 최소 confidence입니다.
         self.confidence_threshold = float(self.declare_parameter(
             'confidence_threshold', 0.75).value)
+        # 신뢰도 1등 한 권만 발행·표시할지. false 면 검출된 전부 (디버그용)
+        self.publish_best_only = bool(self.declare_parameter(
+            'publish_best_only', True).value)
+        # **책 검출 ROI — 트레이 영역만 본다.** 팔 기준(arm_base_link) 3D 상자다.
+        # 픽셀 ROI 가 아니라 3D 로 두는 이유: 카메라가 움직여도 같은 영역을 가리킨다.
+        # **책장 빈 공간 경로에는 적용하지 않는다** (거기는 ROI 가 있으면 안 된다).
+        # **가로(x)는 트레이에 딱 맞춘다.** 넓게 두면 로봇팔 받침대나 바닥이
+        # 책으로 잡히는 일이 있다 (2026-09-21 현장 관찰).
+        #   칸 중심   -0.6623 ~ -0.2873   (6칸, 간격 0.075)
+        #   책 바깥면 -0.6800 ~ -0.2697   (두께 0.0353 의 절반을 더함)
+        #   여유 10mm -0.690  ~ -0.260    ← 이것을 쓴다
+        # y·z 는 깊이·높이라 여유를 둔다 (책 윗면 z ~0.1935).
+        self.book_roi_enabled = bool(self.declare_parameter(
+            'book_roi_enabled', True).value)
+        self.book_roi_min = [float(v) for v in self.declare_parameter(
+            'book_roi_min', [-0.69, -0.02, 0.00]).value]
+        self.book_roi_max = [float(v) for v in self.declare_parameter(
+            'book_roi_max', [-0.26, 0.18, 0.32]).value]
 
-        # 도서관 데이터로 학습된 YOLO 모델(.pt) 파일 경로입니다.
-        # 다른 모델을 사용할 때만 실행 시 -p model_path:=... 로 덮어쓰세요.
-        # 실행할 학습된 YOLO weight 파일 경로입니다.
-        self.model_path = self.declare_parameter(
-            'model_path',
-            os.path.join(resource_dir, 'book_tray_best.pt'),
-        ).value
         # self.target_topic = self.declare_parameter(
         #     'target_topic', '/perception/empty_shelf_position').value
         # self.scan_radius = float(self.declare_parameter('scan_radius', 0.15).value)
@@ -266,17 +347,6 @@ class VisionManager(Node):
         # 찾은 빈 단마다 카메라/로봇 기준 3D 점을 발행합니다.
         self.empty_slot_pub = self.create_publisher(
             PointStamped, self.empty_slot_topic, 10)
-        # OpenCV 창을 한 번 생성해 실행 직후 검출 화면을 준비합니다.
-        self._debug_window_name = 'vision_manager detections'
-        self._debug_window_available = self.show_debug_window
-        if self._debug_window_available:
-            try:
-                cv2.namedWindow(self._debug_window_name, cv2.WINDOW_NORMAL)
-            except cv2.error as error:
-                # 디스플레이가 없는 PC에서도 ROS 노드는 계속 실행되게 합니다.
-                self._debug_window_available = False
-                self.get_logger().warning(
-                    f'Could not open debug window: {error}')
         # self.target_pub = self.create_publisher(PointStamped, self.target_topic, 10)
         # self.target_slot_pub = self.create_publisher(
         #     TargetSlot, self.target_slot_topic, 10)
@@ -286,18 +356,18 @@ class VisionManager(Node):
         # trigger를 기다리는 설정이면 False, 아니면 즉시 처리 가능하게 합니다.
         self.pending_detection = not self.wait_for_trigger
 
-        # Isaac Sim Replicator가 RGB·Depth·CameraInfo에 서로 다른
-        # simulation timestamp를 넣을 수 있으므로 message_filters의
-        # 엄격한 timestamp 동기화는 사용하지 않습니다.
-        self.latest_depth_msg = None
-        self.latest_camera_info_msg = None
-        self.depth_sub = self.create_subscription(
-            Image, self.depth_topic, self._depth_stream_callback, 10)
-        self.camera_info_sub = self.create_subscription(
-            CameraInfo, self.camera_info_topic,
-            self._camera_info_stream_callback, 10)
-        self.rgb_sub = self.create_subscription(
-            Image, self.rgb_topic, self._rgb_stream_callback, 10)
+        # RGB 토픽을 message_filters subscriber로 연결합니다.
+        rgb_sub = message_filters.Subscriber(self, Image, self.rgb_topic)
+        # Depth 토픽을 message_filters subscriber로 연결합니다.
+        depth_sub = message_filters.Subscriber(self, Image, self.depth_topic)
+        # CameraInfo 토픽을 message_filters subscriber로 연결합니다.
+        camera_info_sub = message_filters.Subscriber(
+            self, CameraInfo, self.camera_info_topic)
+        # 세 메시지의 timestamp가 가까운 것끼리 묶는 동기화기를 만듭니다.
+        self.image_sync = message_filters.ApproximateTimeSynchronizer(
+            [rgb_sub, depth_sub, camera_info_sub], 10, self.sync_slop)
+        # 동기화된 세 메시지가 들어오면 rgb_callback을 실행합니다.
+        self.image_sync.registerCallback(self.rgb_callback)
 
         # 현재 연결된 센서·action 설정을 로그로 출력합니다.
         self.get_logger().info(
@@ -410,30 +480,6 @@ class VisionManager(Node):
         # True 요청일 때만 다음 센서 프레임을 처리하도록 활성화합니다.
         if msg.data:
             self.pending_detection = True
-            self.get_logger().info(
-                'Detection request received; waiting for synchronized frame')
-
-    def _depth_stream_callback(self, msg):
-        """가장 최근 Depth 메시지를 저장합니다."""
-        self.latest_depth_msg = msg
-
-    def _camera_info_stream_callback(self, msg):
-        """가장 최근 CameraInfo 메시지를 저장합니다."""
-        self.latest_camera_info_msg = msg
-
-    def _rgb_stream_callback(self, rgb_msg):
-        """요청이 있을 때 최신 RGB·Depth·CameraInfo로 한 프레임을 처리합니다."""
-        if not self.pending_detection:
-            return
-        if self.latest_depth_msg is None or self.latest_camera_info_msg is None:
-            self.get_logger().warning(
-                'Detection requested, but Depth or CameraInfo has not arrived')
-            return
-        self.rgb_callback(
-            rgb_msg,
-            self.latest_depth_msg,
-            self.latest_camera_info_msg,
-        )
 
     def rgb_callback(self, rgb_msg, depth_msg, camera_info_msg):
         # action 또는 수동 trigger가 없으면 현재 프레임을 처리하지 않습니다.
@@ -444,24 +490,16 @@ class VisionManager(Node):
         if not rgb_msg.header.frame_id or not depth_msg.header.frame_id:
             self.get_logger().warning('RGB or depth frame_id is empty')
             return
-        # 설정값은 기본 카메라 frame 이름일 뿐, Isaac Sim이 실제로
-        # 발행한 frame_id와 다를 수 있습니다(예: RSD455 vs sim_camera).
-        # 변환 함수는 아래에서 RGB 메시지의 실제 frame_id를 사용하므로,
-        # 이름이 다르다는 이유만으로 유효한 프레임을 버리지 않습니다.
-        if rgb_msg.header.frame_id != self.camera_frame:
+        # 세 메시지가 예상한 카메라 frame에서 왔는지 확인합니다.
+        if (rgb_msg.header.frame_id != self.camera_frame
+                or depth_msg.header.frame_id != self.camera_frame
+                or camera_info_msg.header.frame_id != self.camera_frame):
             self.get_logger().warning(
-                f'Configured camera frame is {self.camera_frame}, but RGB '
-                f'uses {rgb_msg.header.frame_id}; using the message frame.')
-        if depth_msg.header.frame_id != rgb_msg.header.frame_id:
-            self.get_logger().warning(
-                f'RGB/depth frames differ: rgb={rgb_msg.header.frame_id}, '
-                f'depth={depth_msg.header.frame_id}')
-        if camera_info_msg.header.frame_id not in (
-                '', rgb_msg.header.frame_id):
-            self.get_logger().warning(
-                f'CameraInfo frame differs: '
-                f'camera_info={camera_info_msg.header.frame_id}, '
-                f'rgb={rgb_msg.header.frame_id}')
+                f'Expected camera optical frame {self.camera_frame}, got '
+                f'rgb={rgb_msg.header.frame_id}, '
+                f'depth={depth_msg.header.frame_id}, '
+                f'camera_info={camera_info_msg.header.frame_id}')
+            return
         # RGB와 Depth frame이 다르면 registered depth 설정을 확인합니다.
         if (rgb_msg.header.frame_id != depth_msg.header.frame_id
                 and not self.depth_registered):
@@ -471,12 +509,10 @@ class VisionManager(Node):
 
         try:
             # ROS RGB 메시지를 OpenCV BGR 이미지로 변환합니다.
-            rgb_image = self.bridge.imgmsg_to_cv2(
-                rgb_msg, desired_encoding='bgr8')
+            rgb_image = _imgmsg_to_bgr(rgb_msg)
             # Depth 메시지는 원래 숫자 encoding을 유지한 채 변환합니다.
-            depth_image = self.bridge.imgmsg_to_cv2(
-                depth_msg, desired_encoding='passthrough')
-        except CvBridgeError as error:
+            depth_image = _imgmsg_to_array(depth_msg)
+        except ValueError as error:
             self.get_logger().error(f'Image conversion failed: {error}')
             return
 
@@ -504,14 +540,6 @@ class VisionManager(Node):
         try:
             # RGB 이미지에서 YOLO 책 검출 결과를 계산합니다.
             detections = self._detect_books(rgb_image)
-            self.get_logger().info(
-                f'Synchronized frame received: rgb={rgb_image.shape}, '
-                f'depth={depth_image.shape}, '
-                f'book_detections={len(detections)}')
-            if not detections:
-                self.get_logger().warning(
-                    'No book detected in the requested frame; check camera '
-                    'view, model confidence, and lighting.')
             # 검출 상자와 Depth로 각 책의 카메라 기준 3D 위치를 계산합니다.
             detected_targets = self.book_detector.process(
                 detections,
@@ -522,6 +550,11 @@ class VisionManager(Node):
                 cy,
                 depth_scale,
             )
+            # **트레이 ROI 밖의 책은 버립니다.** 서가에 꽂힌 책·배경이 섞이면
+            # 1등 선택이 엉뚱한 책을 고릅니다. 책 경로에만 적용합니다 —
+            # 책장 빈 공간 판정에는 ROI 를 걸지 않습니다.
+            detected_targets, roi_dropped = self._filter_book_roi(
+                detected_targets, rgb_msg.header.frame_id, rgb_msg.header.stamp)
             # 책장 전체의 bbox와 클래스를 책장 YOLO 모델로 검출합니다.
             shelf_detection = self._detect_shelf(rgb_image)
             # 로봇 기준의 삽입 후보들을 현재 카메라 기준 좌표로 변환합니다.
@@ -546,6 +579,11 @@ class VisionManager(Node):
                 detections,
                 shelf_detection,
                 empty_slots,
+                roi_px=self._book_roi_pixels(
+                    rgb_msg.header.frame_id, rgb_msg.header.stamp,
+                    fx, fy, cx, cy, rgb_image.shape),
+                keep_boxes=[t['box'] for t in detected_targets],
+                dropped=roi_dropped,
             )
         except (IndexError, ValueError) as error:
             # 모델 출력 또는 깊이 계산 오류를 action 실패 결과로 전달합니다.
@@ -569,8 +607,16 @@ class VisionManager(Node):
                 ),
             )
 
-        # 검출된 모든 책을 하나씩 로봇 좌표로 변환하고 발행합니다.
-        for target in detected_targets:
+        # **신뢰도가 가장 높은 책 한 권만** 로봇팔에 보냅니다.
+        # 토픽은 한 프레임에 여러 점을 따로 쏘면 받는 쪽이 "어느 것이 1등인지",
+        # "어디까지가 같은 프레임인지"를 알 수 없습니다. 그래서 하나만 냅니다.
+        # 전부 보고 싶을 때는 publish_best_only:=false (디버그용).
+        if detected_targets and self.publish_best_only:
+            best = max(detected_targets, key=lambda t: t['confidence'])
+            publish_targets = [best]
+        else:
+            publish_targets = detected_targets
+        for target in publish_targets:
             # 책의 카메라 좌표를 target_frame 기준 점으로 변환합니다.
             book_point = self._transform_xyz(
                 target['xyz'], rgb_msg.header.frame_id, rgb_msg.header.stamp)
@@ -597,10 +643,12 @@ class VisionManager(Node):
                 self.book_pose_pub.publish(book_pose)
             # 사람이 확인할 수 있도록 검출 위치와 각도를 로그로 출력합니다.
             self.get_logger().info(
-                f"Book detected: xyz=({book_point.point.x:.3f}, "
+                f"Book picked(best): xyz=({book_point.point.x:.3f}, "
                 f"{book_point.point.y:.3f}, {book_point.point.z:.3f}), "
-                f"center={target['center']}, "
-                f"yaw={target['image_angle']:.3f} rad")
+                f"center={target['center']}, conf={target['confidence']:.2f}, "
+                f"depth={target.get('depth_source', '?')}, "
+                f"yaw={target['image_angle']:.3f} rad "
+                f"(후보 {len(detected_targets)}권)")
 
         # 찾은 빈 단들을 하나씩 target_frame으로 변환하고 토픽으로 발행합니다.
         transformed_empty_slots = []
@@ -668,12 +716,87 @@ class VisionManager(Node):
         # 가장 신뢰도가 높은 책장 하나를 선택합니다.
         return max(candidates, key=lambda candidate: candidate['confidence'])
 
+    def _arm_to_camera_tf(self, camera_frame, stamp):
+        """팔 기준 → 카메라 기준 TF. 못 구하면 None."""
+        try:
+            return self.tf_buffer.lookup_transform(
+                camera_frame,
+                self.slot_position_frame,
+                rclpy.time.Time.from_msg(stamp),
+                timeout=rclpy.duration.Duration(seconds=0.2),
+            )
+        except TransformException:
+            return None
+
+    def _filter_book_roi(self, targets, camera_frame, stamp):
+        """**트레이 ROI 안의 책만** 남깁니다. (남은 것, 버린 수) 를 돌려줍니다.
+
+        왜 3D 인가: 픽셀 상자로 자르면 카메라가 조금만 움직여도 엉뚱한 영역을 가립니다.
+        팔 기준 상자는 카메라가 어디서 보든 **같은 실제 공간**을 가리킵니다.
+
+        **책장 빈 공간 판정에는 쓰지 않습니다.** 거기는 ROI 가 있으면 안 됩니다 —
+        서가 어디든 빈 칸이 생길 수 있기 때문입니다.
+        """
+        if not self.book_roi_enabled or not targets:
+            return targets, 0
+        kept, dropped = [], 0
+        for target in targets:
+            point = self._transform_xyz(target['xyz'], camera_frame, stamp)
+            if point is None:
+                # 변환 실패는 **버리지 않습니다** — ROI 판정을 못 한 것이지
+                # 밖에 있다고 밝혀진 것이 아닙니다
+                kept.append(target)
+                continue
+            p = point.point
+            lo, hi = self.book_roi_min, self.book_roi_max
+            if (lo[0] <= p.x <= hi[0] and lo[1] <= p.y <= hi[1]
+                    and lo[2] <= p.z <= hi[2]):
+                kept.append(target)
+            else:
+                dropped += 1
+        if dropped:
+            self.get_logger().info(
+                f'ROI 밖 책 {dropped}권 제외 (남은 {len(kept)}권). '
+                f'ROI {self.book_roi_min} ~ {self.book_roi_max} @'
+                f'{self.slot_position_frame}')
+        return kept, dropped
+
+    def _book_roi_pixels(self, camera_frame, stamp, fx, fy, cx, cy, shape):
+        """ROI 3D 상자를 화면 사각형으로 투영합니다. 못 구하면 None."""
+        if not self.book_roi_enabled:
+            return None
+        transform = self._arm_to_camera_tf(camera_frame, stamp)
+        if transform is None:
+            return None
+        lo, hi = self.book_roi_min, self.book_roi_max
+        us, vs = [], []
+        for x in (lo[0], hi[0]):
+            for y in (lo[1], hi[1]):
+                for z in (lo[2], hi[2]):
+                    pt = PointStamped()
+                    pt.header.frame_id = self.slot_position_frame
+                    pt.point.x, pt.point.y, pt.point.z = x, y, z
+                    c = do_transform_point(pt, transform).point
+                    if c.z <= 1e-6:          # 카메라 뒤쪽은 투영할 수 없다
+                        continue
+                    us.append(c.x * fx / c.z + cx)
+                    vs.append(c.y * fy / c.z + cy)
+        if len(us) < 2:
+            return None
+        h, w = shape[:2]
+        return (max(0, int(min(us))), max(0, int(min(vs))),
+                min(w - 1, int(max(us))), min(h - 1, int(max(vs))))
+
     def _candidate_slots_in_camera(self, camera_frame, stamp):
         """로봇 기준 삽입 후보 좌표를 현재 카메라 기준으로 변환합니다."""
         # 카메라 시각에 맞는 TF를 한 번만 조회합니다.
         try:
-            transform = self._lookup_transform_with_latest_fallback(
-                camera_frame, self.slot_position_frame, stamp)
+            transform = self.tf_buffer.lookup_transform(
+                camera_frame,
+                self.slot_position_frame,
+                rclpy.time.Time.from_msg(stamp),
+                timeout=rclpy.duration.Duration(seconds=0.2),
+            )
         except TransformException as error:
             # 카메라와 슬롯 frame의 TF가 없으면 모든 후보를 건너뜁니다.
             self.get_logger().warning(
@@ -727,8 +850,12 @@ class VisionManager(Node):
         point.point.x, point.point.y, point.point.z = xyz
         try:
             # target_frame에서 source_frame으로 가는 TF를 해당 시각에 조회합니다.
-            transform = self._lookup_transform_with_latest_fallback(
-                self.target_frame, source_frame, stamp)
+            transform = self.tf_buffer.lookup_transform(
+                self.target_frame,
+                source_frame,
+                rclpy.time.Time.from_msg(stamp),
+                timeout=rclpy.duration.Duration(seconds=0.2),
+            )
             # 조회한 TF를 점에 적용해 target_frame 기준 점을 반환합니다.
             return do_transform_point(point, transform)
         except TransformException as error:
@@ -738,47 +865,62 @@ class VisionManager(Node):
                 f'{self.target_frame}: {error}')
             return None
 
-    def _lookup_transform_with_latest_fallback(self, target_frame,
-                                               source_frame, stamp):
-        """센서 timestamp와 무관하게 현재 TF를 조회합니다.
+    def _publish_debug_image(self, *args, **kwargs):
+        """디버그 영상을 발행합니다. **그리다 실패해도 검출을 멈추지 않습니다**.
 
-        Isaac Sim의 센서와 TF publisher가 서로 다른 simulation timestamp를
-        발행하는 경우가 있어, 센서 timestamp로 조회하면 extrapolation이
-        발생합니다. 이 노드의 슬롯/카메라 extrinsic 변환은 현재 TF를
-        사용하는 편이 안정적입니다.
+        화면 표시는 곁가지인데, 여기서 난 예외가 노드를 통째로 내려버린 적이 있습니다
+        (2026-09-21 GPU PC: KeyError 'row_index' → vision_manager 종료 → 파지 중단).
+        검출·좌표 발행은 화면과 무관하게 계속되어야 합니다.
         """
         try:
-            return self.tf_buffer.lookup_transform(
-                target_frame,
-                source_frame,
-                # ROS time 0은 TF 버퍼에서 가장 최신 변환을 의미합니다.
-                # Isaac Sim simulation time과 섞이지 않도록 clock type을
-                # 명시합니다.
-                rclpy.time.Time(
-                    nanoseconds=0,
-                    clock_type=ClockType.ROS_TIME,
-                ),
-                timeout=rclpy.duration.Duration(seconds=0.5),
-            )
-        except TransformException as error:
+            self._draw_and_publish_debug_image(*args, **kwargs)
+        except Exception as error:       # noqa: BLE001 - 화면 때문에 노드가 죽으면 안 됩니다
             self.get_logger().warning(
-                f'Could not get latest TF for {source_frame} -> '
-                f'{target_frame}: {error}')
-            raise
+                f'디버그 영상 표시 실패(검출은 계속합니다): {type(error).__name__}: {error}',
+                throttle_duration_sec=10.0)
 
-    def _publish_debug_image(
+    def _draw_and_publish_debug_image(
         self,
         rgb_image,
         header,
         detections,
         shelf_detection=None,
         empty_slots=None,
+        roi_px=None,
+        keep_boxes=None,
+        dropped=0,
     ):
         """책장·책·빈 단 표시를 그린 영상을 ROS Image로 발행합니다."""
         # 원본 영상을 복사해 디버그 표시가 원본 데이터에 영향을 주지 않게 합니다.
         debug_image = rgb_image.copy()
-        # 검출된 모든 상자에 대해 시각화 정보를 그립니다.
-        for detection in detections:
+        # **트레이 ROI** 를 노란 상자로 그립니다 (팔 기준 3D 상자를 화면에 투영한 것).
+        if roi_px is not None:
+            rx1, ry1, rx2, ry2 = roi_px
+            cv2.rectangle(debug_image, (rx1, ry1), (rx2, ry2), (0, 255, 255), 2)
+            cv2.putText(
+                debug_image,
+                f"tray ROI (dropped {dropped})",
+                (rx1 + 4, max(18, ry1 - 6)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+        # ROI 밖이라 버린 책은 **회색 얇은 상자**로 남깁니다 — 왜 안 골랐는지 보이게
+        if keep_boxes is not None:
+            kept = {tuple(b) for b in keep_boxes}
+            for det in detections:
+                if tuple(det['box']) not in kept:
+                    bx1, by1, bx2, by2 = det['box']
+                    cv2.rectangle(
+                        debug_image, (bx1, by1), (bx2, by2), (150, 150, 150), 1)
+            detections = [d for d in detections if tuple(d['box']) in kept]
+        # **신뢰도 1등 한 권만** 그립니다 (로봇팔에 보내는 그 한 권).
+        draw_list = detections
+        if detections and getattr(self, 'publish_best_only', True):
+            draw_list = [max(detections, key=lambda d: d['confidence'])]
+        for detection in draw_list:
             # 검출 상자의 픽셀 좌표를 읽습니다.
             x1, y1, x2, y2 = detection['box']
             # 책 상자를 초록색 사각형으로 표시합니다.
@@ -789,6 +931,9 @@ class VisionManager(Node):
                 (0, 255, 0),
                 2,
             )
+            # **로봇팔에 보내는 좌표가 바로 이 점**이다 — 눈으로 확인할 수 있게 찍는다
+            cu, cv_ = detection.get('center', ((x1 + x2) // 2, (y1 + y2) // 2))
+            cv2.circle(debug_image, (int(cu), int(cv_)), 5, (0, 0, 255), -1)
             # 화면에 표시할 confidence 문자열을 만듭니다.
             label = f"book {detection['confidence']:.2f}"
             # 상자 위쪽에 검출 class와 confidence를 표시합니다.
@@ -824,12 +969,19 @@ class VisionManager(Node):
                 cv2.LINE_AA,
             )
         # 빈 단의 중심 픽셀을 빨간색 원으로 표시합니다.
+        # **없는 열쇠에 죽지 않습니다.** 빈 단 정보의 구성은 경로마다 다른데,
+        # 그림을 그리다 KeyError 로 노드 전체가 내려간 적이 있습니다
+        # (2026-09-21 GPU PC: KeyError 'row_index' 로 vision_manager 종료 → 파지 중단).
         for empty_slot in empty_slots or []:
-            u, v = empty_slot['pixel']
+            pixel = empty_slot.get('pixel')
+            if pixel is None:
+                continue
+            u, v = pixel
+            row_index = empty_slot.get('row_index', '?')
             cv2.circle(debug_image, (u, v), 8, (0, 0, 255), -1)
             cv2.putText(
                 debug_image,
-                f"empty row {empty_slot['row_index']}",
+                f"empty row {row_index}",
                 (u + 10, v),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
@@ -838,36 +990,15 @@ class VisionManager(Node):
                 cv2.LINE_AA,
             )
         # OpenCV BGR 영상을 ROS Image 메시지로 변환합니다.
-        #
-        # 현재 환경의 OpenCV 5에서는 cv_bridge가 사용하는 OpenCV 타입
-        # 상수와 Jazzy의 cv_bridge 확장 모듈이 서로 다른 값을 반환할 수
-        # 있어, 명시적인 ``bgr8`` 변환이 KeyError(16)를 발생시킵니다.
-        # ``passthrough``는 배열의 실제 타입(8UC3)을 그대로 사용하므로
-        # 같은 BGR 바이트 형식을 유지하면서 이 호환성 문제를 피합니다.
-        debug_msg = self.bridge.cv2_to_imgmsg(
-            np.ascontiguousarray(debug_image),
-            encoding='passthrough',
-        )
-        # 실제 바이트 형식은 BGR 8-bit 3채널이므로 ROS 표기는 bgr8로
-        # 유지합니다. 위 변환 단계에서만 cv_bridge의 OpenCV 5 호환성
-        # 문제를 우회합니다.
-        debug_msg.encoding = 'bgr8'
+        # **cv_bridge 를 쓰지 않습니다.** OpenCV 5 에서 CV_CN_SHIFT 가 3→5 로 바뀌어,
+        # cv_bridge 의 타입 표(키 32..36)와 자체 계산값(16)이 어긋나 cv2_to_imgmsg 가
+        # KeyError 로 죽습니다 (2026-09-21 GPU PC 10.10.0.1, cv2 5.0.0 에서 확인).
+        # bgr8 은 바이트를 그대로 옮기면 되므로 직접 만듭니다 — OpenCV 판 번호와 무관합니다.
+        debug_msg = _bgr8_to_imgmsg(debug_image)
         # 원본 RGB와 같은 timestamp/frame을 유지합니다.
         debug_msg.header = header
         # 다른 PC의 rqt_image_view가 구독할 수 있도록 발행합니다.
         self.debug_image_pub.publish(debug_msg)
-        # GUI가 사용 가능하면 같은 디버그 영상을 OpenCV 창에도 표시합니다.
-        if self._debug_window_available:
-            try:
-                cv2.imshow(self._debug_window_name, debug_image)
-                # OpenCV 창 이벤트를 처리하고 화면을 갱신합니다.
-                cv2.waitKey(1)
-            except cv2.error as error:
-                # GUI 오류가 반복되지 않도록 이후 창 표시를 비활성화합니다.
-                self._debug_window_available = False
-                self.get_logger().warning(
-                    f'Disabling debug window: {error}')
-
     def _make_book_pose(self, xyz, source_frame, stamp, image_angle):
         """책 위치와 영상 각도로 target_frame 기준 PoseStamped를 만듭니다."""
         # 영상에서 구한 책 방향에 gripper yaw 보정값을 더합니다.
@@ -890,8 +1021,12 @@ class VisionManager(Node):
         pose.pose.orientation.w = quaternion[3]
         try:
             # pose timestamp에 맞는 카메라→로봇 TF를 조회합니다.
-            transform = self._lookup_transform_with_latest_fallback(
-                self.target_frame, source_frame, stamp)
+            transform = self.tf_buffer.lookup_transform(
+                self.target_frame,
+                source_frame,
+                rclpy.time.Time.from_msg(stamp),
+                timeout=rclpy.duration.Duration(seconds=0.2),
+            )
             # Jazzy API에 맞는 PoseStamped용 TF 변환 함수를 호출합니다.
             return do_transform_pose_stamped(pose, transform)
         except TransformException as error:
@@ -1176,9 +1311,6 @@ def main(args=None):
         node.get_logger().warn("강제 종료")
 
     finally:
-        # OpenCV 창이 있다면 모두 닫습니다.
-        cv2.destroyAllWindows()
-
         # executor를 종료하고 노드를 제거합니다.
         executor.shutdown()
         node.destroy_node()

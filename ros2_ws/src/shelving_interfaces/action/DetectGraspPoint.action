@@ -1,0 +1,30 @@
+# **로봇팔 → 비전**: 트레이에서 집을 책을 찾아 파지점을 달라.
+#
+# 구조: 비전은 TM(FSM) 과 직접 통신하지 않는다. 로봇팔이 비전의 클라이언트다.
+# DetectTargetSlot 과 **같은 모양**으로 맞췄다 — 비전 쪽 코드 구조를 재사용할 수 있게.
+#
+# 계약: docs/doyoon-kim/manipulation/PICKPLACE_CONTRACT_V2.md §2-2·§4
+
+string job_id
+string book_id                      # 어떤 책을 찾을지. 빈 문자열이면 "집을 만한 것 아무거나"
+float32 book_thickness              # 아는 값이 있으면 (0 이면 모름)
+float32 book_width
+
+builtin_interfaces/Time not_before
+# **이 시각 이후의 영상만 쓸 것.** 로봇팔이 관측 자세에서 멈춘 시각이다.
+# 흔들리는 중에 찍으면 깊이가 튄다. 로봇팔은 아래 셋을 만족한 뒤에야 이 요청을 보낸다:
+#   · 관절 오차 max|q - q_view| < 0.01 rad
+#   · 정지 max|q̇| < 0.01 rad/s 가 0.3 s 이상 유지
+#   · 센서 게이트가 열리고 그 뒤로 렌더된 프레임 2장 이상
+
+uint32 max_recaptures
+---
+bool success
+shelving_interfaces/GraspObservation grasp
+uint32 candidate_count
+int32 error_code
+string message
+---
+string phase
+uint32 candidate_count
+float32 best_confidence

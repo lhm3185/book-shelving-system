@@ -14,6 +14,9 @@ say "### 레벨 $SIM_LEVEL_NAME / 도메인 $ROS_DOMAIN_ID / 대상 ${SIM_HOST}"
 
 # 서가 관련 변수는 프로파일에 따라 있을 수도 없을 수도 있다. **한 줄 문자열**로 모은다 —
 # 줄바꿈과 섞으면 값이 빌 때 '역슬래시 + 빈 줄' 이 되어 거기서 명령이 끊긴다
+# 북엔드 x 는 칸 좌표와 같아야 한다 (프로파일에서 온다)
+PLACE_DX_ARG=""
+[ -n "${PLACE_DX:-}" ] && PLACE_DX_ARG="--place-dx $PLACE_DX"
 SHELF_ENV=""
 [ -n "${SIM_SHELF_PRIM:-}" ] && SHELF_ENV="$SHELF_ENV SIM_SHELF_PRIM=$SIM_SHELF_PRIM"
 [ -n "${SIM_SHELF_ROW_Z:-}" ] && SHELF_ENV="$SHELF_ENV SIM_SHELF_ROW_Z=$SIM_SHELF_ROW_Z"
@@ -39,7 +42,7 @@ FASTRTPS_DEFAULT_PROFILES_FILE=$FASTRTPS_DEFAULT_PROFILES_FILE \\
 SIM_USD=$SIM_LEVEL_DIR/$SIM_LEVEL_NAME $SHELF_ENV \\
 ./scripts/run_isaac_sim.sh --start-home snap \\
   --camera-prim $CAMERA_PRIM \\
-  --sensor-policy always \\
+  --sensor-policy always $PLACE_DX_ARG \\
   --book-variants "\$BOOKS"
 EOF
 )

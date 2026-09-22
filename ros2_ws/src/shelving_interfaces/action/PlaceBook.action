@@ -1,5 +1,21 @@
+<<<<<<< HEAD
 # Goal
 # 비어 있음: Goal 전송 자체가 pick & place 시작 명령
+=======
+string job_id
+string book_id
+shelving_interfaces/TargetSlot target_slot
+float32 book_width
+float32 book_height
+float32 book_thickness
+float32 insertion_speed
+
+# 비전이 본 파지점. 계약: docs/doyoon-kim/manipulation/PICKPLACE_CONTRACT_V2.md §3·§4
+# ROS 2 메시지에는 optional 이 없어 bool 로 가른다.
+# **has_grasp=false 면 지금처럼 설정 파일의 트레이 칸을 쓴다** — 비전이 늦어도 흐름이 안 멈춘다
+shelving_interfaces/GraspObservation grasp
+bool has_grasp
+>>>>>>> origin/feature/amr_patrol_pickplace
 ---
 bool success
 int32 error_code
