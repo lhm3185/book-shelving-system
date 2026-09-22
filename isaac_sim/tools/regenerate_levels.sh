@@ -49,7 +49,7 @@ ISAAC="${ISAAC_SIM_PATH:-$HOME/isaacsim}"
 fail=0
 chk() { if [ -e "$2" ]; then note "OK    $1"; else note "없음  $1  →  $2"; fail=1; fi; }
 chk "Isaac Sim (python.sh)" "$ISAAC/python.sh"
-chk "실행기 run_isaac_tool.sh" "$REPO_ROOT/scripts/run_isaac_tool.sh"
+chk "실행기 run_isaac_tool.sh" "$REPO_ROOT/isaac_sim/tools/run.sh"
 chk "원본 레벨 $SRC" "$LV/$SRC"
 # Nova_Carter_ROS.usd 는 원본이 참조하는 레이어다. 없으면 로봇이 통째로 안 들어온다
 if [ -e "$LV/Nova_Carter_ROS.usd" ]; then
@@ -106,12 +106,12 @@ step() {   # step <번호> <설명> <출력파일> <명령...>
 }
 
 step "1/2" "로봇 yaw 를 0 으로 (경로 계산이 월드 축을 쓴다)" "$LV/level_yaw0.usd" \
-    env ARM_ROBOT=m0609 ISAAC_ENTRY=isaac_sim/isaac/tools/set_robot_yaw.py \
-        ./scripts/run_isaac_tool.sh --usd "$LV/$SRC" --out "$LV/level_yaw0.usd" --yaw 0
+    env ARM_ROBOT=m0609 ISAAC_ENTRY=isaac_sim/tools/set_robot_yaw.py \
+        ./isaac_sim/tools/run.sh --usd "$LV/$SRC" --out "$LV/level_yaw0.usd" --yaw 0
 
 step "2/2" "로봇을 서가 앞으로 (자기검증을 스스로 돌린다)" "$LV/level_shelf01.usd" \
-    env ARM_ROBOT=m0609 ISAAC_ENTRY=isaac_sim/isaac/tools/place_robot_at_shelf.py \
-        ./scripts/run_isaac_tool.sh --usd "$LV/level_yaw0.usd" --out "$LV/level_shelf01.usd" \
+    env ARM_ROBOT=m0609 ISAAC_ENTRY=isaac_sim/tools/place_robot_at_shelf.py \
+        ./isaac_sim/tools/run.sh --usd "$LV/level_yaw0.usd" --out "$LV/level_shelf01.usd" \
             --shelf "$SHELF" --row-z "$ROW_Z"
 
 say "합격 판정"

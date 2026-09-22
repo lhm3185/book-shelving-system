@@ -8,7 +8,7 @@
 # 왜 있나: 테스트는 있는데 돌리는 진입점이 비어 있었다 (2026-09-20 기준 1바이트 빈 파일).
 # 그 사이 `arm_base_link` 별칭이 M0609 에서 끊긴 것을 **시연 전날 밤에야** 알았다.
 set -u
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WHAT="${1:-all}"
 case "$WHAT" in
     all|sim|ros) ;;
@@ -23,7 +23,7 @@ run() {   # run <이름> <작업디렉터리> <경로>
 
 # --- 시뮬 쪽: 순수 파이썬. ROS 도 Isaac 도 필요 없다 -------------------------
 if [ "$WHAT" = "all" ] || [ "$WHAT" = "sim" ]; then
-    run "시뮬 (경로 계획·프레임 계약)" "$REPO_ROOT" "isaac_sim/isaac/tests"
+    run "시뮬 (경로 계획·프레임 계약)" "$REPO_ROOT" "isaac_sim/tests"
 fi
 
 # --- 로봇팔 노드: ROS 가 필요하다 ---------------------------------------------

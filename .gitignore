@@ -3,12 +3,16 @@ ros2_ws/install/
 ros2_ws/log/
 
 __pycache__/
-*.pyc
+*.py[cod]
 .env
-simulation/isaac/config/sim_local.env
+isaac_sim/config/sim_local.env
 .venv/
 .vscode/
 scripts/demo/demo_local.env
 
 # 웹 클로드 왕복 등 팀 내부 소통 문서 — 공개 저장소에 두지 않는다 (로컬에는 남긴다)
 docs/doyoon-kim/web_claude/
+
+isaac_sim/cache/
+isaac_sim/logs/
+isaac_sim/generated/
