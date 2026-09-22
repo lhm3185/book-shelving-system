@@ -1,0 +1,58 @@
+#!/bin/bash
+# 비전 포함 저녁 경로 1회 (night/BASELINE_0922.md 6단계 그대로).
+#   bash night/run_vision.sh <실행ID> "A=1 B=2"     (둘째 인자 = 출발점 조합 위에 얹을 스위치)
+# 로그: night/runs/<ID>/{sim,vis,man,tf1,tf2,cyc}.log, env.txt
+# 기본은 --gui (DISPLAY=:1). SIM_HEADLESS=1 이면 --headless.
+ID=${1:?실행ID}; shift
+R=~/b1_arm
+D=$R/night/runs/$ID; mkdir -p "$D"
+cd $R
+bash night/cleanup_demo.sh > "$D/cleanup.txt" 2>&1
+
+export DISPLAY=${DISPLAY:-:1}
+export ISAAC_SIM_PATH=${ISAAC_SIM_PATH:-$HOME/isaacsim}
+export SIM_USD=${SIM_USD:-$HOME/Desktop/ing_library_env_v5.usd}
+export SIM_TRAY_SETTLE_S=2.0 SIM_TRAY_DELIVERY_S=6.0
+for kv in ${1:-}; do case $kv in NO_COMBO=*) export "$kv";; esac; done
+if [ "${NO_COMBO:-0}" = 0 ]; then    # NO_COMBO=1 → 기본 스위치 (0-2 / F-1 회귀)
+  export SIM_JOINT_SEGS=approach,carry_rotate,return SIM_GRIP_ROT90=1
+  export SIM_GRASP_KINEMATIC=1 SIM_HAND_DRIFT_M=0.25 SIM_SPEED_SCALE=0.5 SIM_MAX_STEP=0.12
+fi
+for kv in ${1:-}; do export "$kv"; done
+env | grep -E '^SIM_' | sort > "$D/env.txt"
+
+MODE=--gui; [ "${SIM_HEADLESS:-0}" != 0 ] && MODE=--headless
+./scripts/run_isaac_sim.sh $MODE --books 5 \
+  --camera-prim /World/ridgeback_franka/panda_hand/rsd455/RSD455/Camera_OmniVision_OV9782_Color \
+  --amr-test-overrides --drive-speed 0.6 ${SIM_EXTRA_ARGS:-} > "$D/sim.log" 2>&1 &
+echo $! > "$D/sim.pid"
+
+# 시뮬 준비(명령 대기) — 시간이 아니라 상태로 기다린다
+for i in $(seq 1 180); do
+  grep -q '준비 완료' "$D/sim.log" && break
+  sleep 2
+done
+grep -q '준비 완료' "$D/sim.log" || { echo "시뮬 준비 실패"; tail -30 "$D/sim.log"; bash night/cleanup_demo.sh; exit 2; }
+
+(
+  unset PYTHONPATH LD_LIBRARY_PATH
+  export ROS_DOMAIN_ID=130 RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+  export FASTRTPS_DEFAULT_PROFILES_FILE=$R/config/fastdds_local.xml
+  . /opt/ros/jazzy/setup.bash; . ros2_ws/install/setup.bash
+  ros2 run tf2_ros static_transform_publisher --frame-id panda_link0 --child-frame-id arm_base_link --ros-args -p use_sim_time:=true > "$D/tf1.log" 2>&1 &
+  ros2 run tf2_ros static_transform_publisher --frame-id Camera_OmniVision_OV9782_Color --child-frame-id sim_camera --ros-args -p use_sim_time:=true > "$D/tf2.log" 2>&1 &
+  P=ros2_ws/src/shelving_perception/resource
+  ros2 run shelving_perception vision_manager --ros-args --params-file ros2_ws/src/shelving_perception/config/perception.yaml \
+    -p model_path:=$P/book_tray_best.pt -p shelf_model_path:=$P/best.pt -p confidence_threshold:=0.75 > "$D/vis.log" 2>&1 &
+  ros2 run shelving_manipulation manipulation_node --ros-args --params-file ros2_ws/src/shelving_manipulation/config/manipulation.yaml -p executor:=sim > "$D/man.log" 2>&1 &
+  sleep 10
+  timeout 300 ros2 topic pub -r 1 /perception/detect_request std_msgs/Bool "{data: true}" > /dev/null 2>&1 &
+  sleep 5
+  timeout ${CYC_TIMEOUT:-1500} python3 simulation/isaac/tools/full_cycle.py --speed 0.6 ${CYC_ARGS:-} > "$D/cyc.log" 2>&1
+  echo "cycle rc=$?" >> "$D/cyc.log"
+)
+sleep 5
+kill -INT $(cat "$D/sim.pid") 2>/dev/null; sleep 8
+bash night/cleanup_demo.sh >> "$D/cleanup.txt" 2>&1
+grep -hE 'code=|error_code|RESULT|결과|성공|실패|rc=' "$D/cyc.log" | tail -8 | cut -c1-400
+grep -hE '### (스위치|\[403추적\]|\[스윙\]|\[경로검사\])' "$D/sim.log" | cut -c1-300 | tail -20
