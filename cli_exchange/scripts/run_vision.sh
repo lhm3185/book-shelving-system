@@ -32,6 +32,15 @@ for kv in ${1:-}; do case $kv in NO_COMBO=*) export "$kv";; esac; done
 if [ "${NO_COMBO:-0}" = 0 ]; then    # NO_COMBO=1 → 기본 스위치 (0-2 / F-1 회귀)
   export SIM_JOINT_SEGS=approach,carry_rotate,return SIM_GRIP_ROT90=1
   export SIM_GRASP_KINEMATIC=1 SIM_HAND_DRIFT_M=0.25 SIM_SPEED_SCALE=0.5 SIM_MAX_STEP=0.12
+  # **콜리전 근사 교정** (2026-09-24 도윤님 승인, M1~M5 다섯 판 확인).
+  # 레벨 파일은 안 고치고 런타임에 바로잡는다. 되돌리려면 이 세 줄을 지우거나
+  # 둘째 인자로 빈 값을 덮어쓰면 된다 (예: "SIM_BOOK_COLL=").
+  #   BOOK_COLL   둥근 표지의 볼록 껍질이 끌개라 꽂힌 책이 매번 다르게 2~3° 눕는다.
+  #               상자로 두면 0.35~0.46° 로 모인다 (일곱 판 흔들림 0.3 mm)
+  #   SHELF_COLL  서가 콜라이더가 convexDecomposition 이라 얇은 판에 복셀 한 겹
+  #               (18 mm)이 붙는다. 서가는 정적이라 삼각망이 합법이다
+  #   ROW_MEASURE 판 높이를 레벨에서 잰다 — `0.355 × 1.4` 의 출처가 코드에 없다
+  export SIM_BOOK_COLL=boundingCube SIM_SHELF_COLL=none SIM_SHELF_ROW_MEASURE=1
 fi
 for kv in ${1:-}; do export "$kv"; done
 env | grep -E '^SIM_' | sort > "$D/env.txt"

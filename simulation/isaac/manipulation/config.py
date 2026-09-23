@@ -70,6 +70,10 @@ class MotionConfig:
     # --- 검증 조합 (손으로 나열하지 않는다) --------------------------------
     grip_rot90: bool = True
     grasp_kinematic: bool = True
+    #: 콜리전 근사 교정 (2026-09-24 승인, M1~M5 다섯 판). 레벨 파일은 안 고친다
+    book_coll: str = "boundingCube"
+    shelf_coll: str = "none"
+    shelf_row_measure: bool = True
     carry_mode: str = "swing"
     return_mode: str = "swing"
     release_open_first: bool = True
@@ -116,6 +120,9 @@ class MotionConfig:
             "SIM_SPEED_SCALE": f"{self.speed_scale:g}",
             "SIM_MAX_STEP": f"{self.max_step_rad:g}",
             "SIM_JOINT_SEGS": ",".join(self.joint_segs),
+            "SIM_BOOK_COLL": self.book_coll,
+            "SIM_SHELF_COLL": self.shelf_coll,
+            "SIM_SHELF_ROW_MEASURE": "1" if self.shelf_row_measure else "0",
         }
         # **GOAL_Y 는 넣지 않는다** — pick_from_vision 이 SIM_PICK_Y 에서 만든다.
         # 둘을 같이 넣으면 한쪽만 고치는 사고가 다시 난다.
@@ -127,6 +134,12 @@ PRESET_DEMO = MotionConfig()
 
 #: 베이스를 옛 자리로 되돌린 것 — 회귀 비교용. 도착 오차에 약하다(+30 mm 에서 여유 0.000)
 PRESET_LEGACY = replace(PRESET_DEMO, pick_y=-3.049)
+
+#: 콜리전 교정 **전** 조합 — 9/24 새벽 기준선(열다섯 판). 회귀 비교용.
+#: 이것으로 돌리면 꽂힌 책이 2~3° 눕고 선반 판 위 18 mm 에 뜬다. 겹침 임계까지의
+#: 예비가 최악 −0.1 mm 라 "통과했다" 가 "여유가 있다" 를 뜻하지 않는다.
+PRESET_PRE_COLL_FIX = replace(PRESET_DEMO, book_coll="", shelf_coll="",
+                              shelf_row_measure=False)
 
 
 # --------------------------------------------------------------------- 치환 스위치
