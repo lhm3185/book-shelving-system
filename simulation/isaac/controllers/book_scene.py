@@ -2161,7 +2161,12 @@ class BookScene:
         겹쳐 있던 만큼 밀려난다. 겹친 상대를 찾으면 고칠 곳이 정해진다.
         """
         bb = self.aabb(book)
-        out = {"밑면−칸바닥": float(bb[2]) - float(plan.get("floor_z", float("nan")))}
+        # **날값을 같이 남긴다.** 차이만 적으면 어느 쪽이 움직였는지 못 가린다 —
+        # 2026-09-24 에 "밑면이 선반 판보다 위인가 아래인가" 를 묻는 데 한 판이 더 들었다.
+        out = {"밑면z": float(bb[2]),
+               "칸바닥z": float(plan.get("floor_z", float("nan"))),
+               "설정판z": float(getattr(self, "shelf_floor_z", float("nan"))),
+               "밑면−칸바닥": float(bb[2]) - float(plan.get("floor_z", float("nan")))}
         key = (min(self.bookends, key=lambda k: abs(k - plan.get("place_x", 0.0)))
                if getattr(self, "bookends", None) else None)
         if key is not None:
@@ -2185,8 +2190,8 @@ class BookScene:
         self.say(f"  [{tag}] {book.rsplit('/', 1)[1]} 중심 {np.round(c, 3).tolist()} "
                  f"크기 {np.round([b[3] - b[0], b[4] - b[1], b[5] - b[2]], 3).tolist()} "
                  f"틀어짐 {self.axis_skew_deg(book):.2f}°"
-                 + ("" if plan is None else "  여유 " + " · ".join(
-                     f"{k} {v*1000:+.1f} mm"
+                 + ("" if plan is None else "  " + " · ".join(
+                     (f"{k} {v:.4f}" if k.endswith("z") else f"{k} {v*1000:+.1f} mm")
                      for k, v in self.release_clearances(book, plan).items())))
 
     def axis_skew_deg(self, book) -> float:
