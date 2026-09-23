@@ -60,6 +60,10 @@ ap.add_argument("--all-books", action="store_true",
                 help="책 5권 각각으로 같은 스윕을 돌린다 (어느 책이 검증 실행과 같은 가지인지 가린다)")
 ap.add_argument("--book-index", type=int, default=None,
                 help="집을 책을 팔기준 x 순서로 고른다 (기본: 계약 0번 칸에 가장 가까운 것)")
+ap.add_argument("--pick-book", default="",
+                help="집을 책을 **이름 조각**으로 지정한다. 실제 판과 스윕이 어긋날 때 "
+                     "가장 먼저 맞춰야 하는 것이 '어느 책인가' 다 — 책이 다르면 파지 해의 "
+                     "IK 가지가 달라지고, 이 팔은 1 mm 에도 가지가 갈린다")
 ap.add_argument("--pick-spot", type=float, nargs=3, default=[2.535, -3.049, 0.0],
                 metavar=("X", "Y", "YAW_DEG"),
                 help="이송 뒤 로봇을 여기로 통째로 옮긴다 (검증 실행의 주행 도착 지점). "
@@ -170,6 +174,14 @@ tell(f"이송 상태 _deliver={bool(getattr(scene, '_deliver', None))} "
      f"(None 이어야 이송 끝)")
 tell(f"팔 베이스 월드 {np.round(scene.l0p, 4).tolist()}  "
      f"시작관절 {np.round(np.asarray(scene.q_home, float), 3).tolist()}")
+# **스윕과 실제 판을 견주려면 이 줄부터 같아야 한다.** 2026-09-24 에 같은 조합이라
+# 믿고 견주다가, 실제로 같았는지 확인할 방법이 없어 한 시간을 썼다.
+_SWING_ENV = ("SIM_CARRY_MODE", "SIM_RETURN_MODE", "SIM_SWING_CLEAR_M", "SIM_HOME_Q",
+              "SIM_GRIP_ROT90", "SIM_GRASP_KINEMATIC", "SIM_MAX_STEP", "SIM_SPEED_SCALE",
+              "SIM_JOINT_SEGS", "SIM_PICK_Y", "SIM_GOAL_Y")
+tell("동선 스위치 (실제 판과 한 줄씩 맞춰 볼 것):")
+for _k in _SWING_ENV:
+    tell(f"    {_k:<22} {os.environ.get(_k, '(없음)')}")
 
 # 트레이·책이 어디 있는지 먼저 찍는다. **팔 기준**이 같으면 베이스가 어디 있든
 # 경로가 같다(random_pose_check 가 검증한 성질) — 그래서 로봇을 옮기지 않는다.
@@ -178,7 +190,9 @@ rows = []
 for b in scene.books:
     c_arm = scene.to_arm(scene.center(b))
     rows.append((float(c_arm[0]), b, c_arm))
-VERIFIED_TOP = np.array([-0.3622, 0.0054, 0.1953])   # v11~v15 비전 입력 (팔기준 윗면 중심)
+# v11~v15 비전 입력 (팔기준 윗면 중심). **옛 레벨의 값이다** — 레벨이 바뀌면 이 값에
+# 가까운 책이 실제 판이 집는 책과 달라진다. 아래에서 거리를 찍고, 멀면 경고한다.
+VERIFIED_TOP = np.array([-0.3622, 0.0054, 0.1953])
 tops = []
 for x, b, c in sorted(rows, key=lambda r: -r[2][1]):
     bb = scene.aabb(b)
@@ -197,11 +211,26 @@ pick_w = scene.to_world(pick_arm)
 cands = sorted(((float(np.linalg.norm(scene.center(b) - pick_w)), b) for b in scene.books))
 if a.all_books:
     picks = [b for _d, b, _t in tops]          # 검증값에 가까운 순
+elif a.pick_book:
+    picks = [b for b in scene.books if a.pick_book in b]
+    if not picks:
+        tell(f"--pick-book '{a.pick_book}' 에 맞는 책이 없다. 있는 책: "
+             f"{[b.rsplit('/', 1)[-1] for b in scene.books]}")
+        sys.exit(2)
+    if len(picks) > 1:
+        tell(f"--pick-book '{a.pick_book}' 가 {len(picks)}권에 걸린다 — 더 좁혀라: "
+             f"{[b.rsplit('/', 1)[-1] for b in picks]}")
+        sys.exit(2)
 elif a.book_index is not None:
     picks = [sorted(rows)[a.book_index][1]]
 else:
     picks = [tops[0][1]]                        # 검증 실행과 가장 비슷한 책
 tell(f"집을 책 {len(picks)}권: {[b.rsplit('/', 1)[-1][-18:] for b in picks]}")
+# **어느 책을 집는가가 결과를 가른다.** 실제 판과 스윕이 어긋나면 여기부터 맞춘다.
+if not a.pick_book and not a.all_books and tops and tops[0][0] > 0.03:
+    tell(f"[경고] 고른 책이 검증값(VERIFIED_TOP, 옛 레벨)에서 {tops[0][0]*100:.1f} cm 떨어져 있다 — "
+         f"레벨이 바뀌어 **실제 판이 집는 책과 다를 수 있다.** "
+         f"실제 판과 견주려면 --pick-book 으로 같은 책을 지정할 것")
 
 lo, hi = scene._arm_limits()
 if lo is None:
@@ -242,8 +271,12 @@ tell(f"  판(월드 z) {a.board}")
 tell(f"  팔기준 goal_y {gys[0]:.4f} … {gys[-1]:.4f} @{a.gy[2]:.3f}")
 
 out = open(a.out, "w")
+# q1_lift·q1_end 를 넣는 이유: 스윙(`SIM_CARRY_MODE=swing`)의 성패는 **들어올린
+# 순간의 관절1 값 하나**로 갈린다 — 거기서 Δφ 를 더해 한계를 넘으면 401 이다.
+# 이 값이 없으면 "스윕은 401 인데 실제 판은 됐다" 를 볼 방법이 없다 (2026-09-24).
 out.write("book,board_z_world,gz_arm,gy_arm,base_y_equiv_world,code,err,"
           "min_all,min_all_seg,min_all_joint,min_insert,min_insert_seg,min_insert_joint,"
+          "q1_lift,q1_end,"
           + ",".join(f"m_{s}" for s in SEGS) + ",branch_down\n")
 out.flush()
 
@@ -264,7 +297,7 @@ for book in picks:
               plan, code, err = None, -1, f"{type(exc).__name__}: {exc}"
           if plan is None:
               out.write(f"{bname},{board:.3f},{gz:.4f},{gy:.4f},{base_y:.4f},{code},"
-                        f"\"{str(err)[:120]}\"," + ",".join([""] * (6 + len(SEGS) + 1)) + "\n")
+                        f"\"{str(err)[:120]}\"," + ",".join([""] * (8 + len(SEGS) + 1)) + "\n")
               out.flush()
               if done % 10 == 0 or code != 401:
                   tell(f"[{done}] {bname} 판 {board:.3f} gy {gy:.4f} → 실패 {code} {str(err)[:70]}")
@@ -274,9 +307,13 @@ for book in picks:
           ins = {k: v for k, v in m.items() if k in INSERT}
           insm = min(ins.items(), key=lambda kv: kv[1][0]) if ins else ("", (float("nan"), 0))
           bd = any(branch_of(q) == "down" for qs in plan["segs"].values() for q in qs)
+          _lift = plan["segs"].get("lift") or []
+          _rot = plan["segs"].get("carry_rotate") or []
+          _q1l = f"{float(_lift[-1][0]):+.4f}" if len(_lift) else ""
+          _q1e = f"{float(_rot[-1][0]):+.4f}" if len(_rot) else ""
           row = [bname, f"{board:.3f}", f"{gz:.4f}", f"{gy:.4f}", f"{base_y:.4f}", "0", "\"\"",
                  f"{allm[1][0]:.4f}", allm[0], str(allm[1][1]),
-                 f"{insm[1][0]:.4f}", insm[0], str(insm[1][1])]
+                 f"{insm[1][0]:.4f}", insm[0], str(insm[1][1]), _q1l, _q1e]
           row += [f"{m[s][0]:.4f}" if s in m else "" for s in SEGS]
           row.append("1" if bd else "0")
           out.write(",".join(row) + "\n")
