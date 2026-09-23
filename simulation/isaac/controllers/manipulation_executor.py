@@ -345,6 +345,7 @@ class ManipulationExecutor:
                         # 회전 × 이 지렛대다 — 값을 보기 전에 얼마나 뻥튀기되는지 알아야
                         # 한다 (2026-09-24: 0.3° × 1.7 m ≈ 9 mm 가 '미끄러짐' 으로 찍혔다).
                         _lev = scene.book_origin_lever(book)
+                        job.watch["lever"] = _lev
                         self.say(f"[어긋남] 지렛대(책 원점↔형상중심) {_lev*100:.1f} cm — "
                                  f"손 안에서 1° 돌면 원점·형상중심 기준이 "
                                  f"{_lev*math.radians(1)*1000:.1f} mm 움직인 것으로 찍힌다. "
@@ -409,15 +410,6 @@ class ManipulationExecutor:
                 if "grip_w_min" in job.watch:
                     # 폭이 줄면 책이 빠지는 중이다 — 실물에서 알아챌 수 있는 유일한 신호
                     job.watch["grip_w_min"] = min(job.watch["grip_w_min"], scene.grip_width())
-                # **어긋남이 어떻게 커지는지 남긴다.** 갑자기 튀면 구속이 밀린 것이고,
-                # 서서히 자라면 미끄러지는 것이다 — 둘은 고치는 방법이 다르다.
-                # 값만 보고는 못 가른다 (2026-09-21: 책 원점을 고쳐도 4.7cm 로 똑같았다).
-                if _trace:
-                    job.watch.setdefault("slip", [])
-                    job.watch["slip"].append(dev)
-                    if len(job.watch["slip"]) % 3 == 1:
-                        self.say(f"[어긋남] step {job.steps} {name} {dev*100:.2f}cm "
-                                 f"손기준차 {[round(float(v)*100, 1) for v in (_rel - job.watch['rel0'])]}")
                 # **문턱을 설정으로 뺀다** (`SIM_HAND_DRIFT_M`, 기본 0.03).
                 # 이 값은 손 좌표계에서 본 책 **원점**의 이동량인데, 이 레벨의 책들은
                 # 원점이 형상에서 75~177 cm 떨어져 있어(2026-09-22 실측) 손이 조금만
@@ -453,6 +445,24 @@ class ManipulationExecutor:
                         if not job.watch.get("drift_err"):
                             job.watch["drift_err"] = True
                             self.say(f"[어긋남] 형상중심 계산 실패: {type(_exc).__name__}: {_exc}")
+                # **어긋남이 어떻게 커지는지 남긴다.** 갑자기 튀면 구속이 밀린 것이고,
+                # 서서히 자라면 미끄러지는 것이다 — 둘은 고치는 방법이 다르다.
+                #
+                # **추적은 판정과 같은 자로 잰다.** 2026-09-24 에 추적이 원점 기준(0.07 cm)
+                # 이고 판정이 쥔점 기준(0.50 cm)이라 7배 차이가 났고, 그걸 "튐" 으로
+                # 읽을 뻔했다. 다른 자로 잰 두 값을 같은 줄에 놓으면 안 된다.
+                if _trace:
+                    _tv = {"grip": _dg, "center": _dc}.get(
+                        os.environ.get("SIM_DRIFT_METRIC", "center"), dev)
+                    _tv = dev if _tv is None else _tv
+                    job.watch.setdefault("slip", []).append(_tv)
+                    if len(job.watch["slip"]) % 3 == 1:
+                        self.say(f"[어긋남] step {job.steps} {name} "
+                                 f"{os.environ.get('SIM_DRIFT_METRIC', 'center')} {_tv*100:.2f}cm "
+                                 f"(원점 {dev*100:.2f} · 형상중심 "
+                                 f"{'--' if _dc is None else f'{_dc*100:.2f}'} · 쥔점 "
+                                 f"{'--' if _dg is None else f'{_dg*100:.2f}'} cm · "
+                                 f"회전 {'--' if _ang is None else f'{_ang:.2f}'}°)")
                 # **기본을 형상중심으로 바꿨다** (2026-09-23). 원점 기준은 재는 대상이
                 # 틀렸다 — 이 레벨 책들은 원점이 형상에서 75~177 cm 떨어져 있어 손이
                 # 1° 만 돌아도 cm 가 찍힌다. 그걸 막으려고 문턱을 3 cm → 25 cm 로 올려
@@ -465,8 +475,14 @@ class ManipulationExecutor:
                     # 자리가 책 위에서 옮겨가는 것. 지렛대가 없어 회전에 증폭되지 않는다.
                     _bad = (_dg > float(os.environ.get("SIM_DRIFT_GRIP_M", "0.005"))
                             or _ang > float(os.environ.get("SIM_DRIFT_ROT_DEG", "5")))
+                    _hist = job.watch.get("slip") or []
+                    _shape = ("자람" if len(_hist) >= 6 and
+                              max(_hist[-3:]) > max(_hist[:3]) * 1.5 + 1e-9 else "평평/튐")
                     _msg = (f"운반 중 손 안에서 쥔점 {_dg * 100:.2f}cm · 회전 {_ang:.1f}° 어긋남 "
-                            f"(형상중심 {_dc * 100:.1f}cm, 원점 {dev * 100:.1f}cm)")
+                            f"(형상중심 {_dc * 100:.1f}cm, 원점 {dev * 100:.1f}cm, "
+                            f"쥔점 최대 {job.watch.get('dg_max', 0.0) * 100:.2f}cm, "
+                            f"추적 {len(_hist)}점 {_shape}, 지렛대 회전분 "
+                            f"{job.watch.get('lever', 0.0) * math.radians(_ang) * 1000:.1f}mm)")
                 elif _metric == "center" and _dc is not None:
                     _bad = (_dc > float(os.environ.get("SIM_DRIFT_CENTER_M", "0.01"))
                             or _ang > float(os.environ.get("SIM_DRIFT_ROT_DEG", "5")))

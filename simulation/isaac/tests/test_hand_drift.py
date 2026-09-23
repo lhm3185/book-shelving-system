@@ -98,3 +98,41 @@ def test_hand_rotation_alone_is_not_drift():
     d = drift_between(ref, now)
     assert d.grip == pytest.approx(0.0, abs=1e-9)
     assert d.rot_deg == pytest.approx(0.0, abs=1e-9)
+
+
+# ---------------------------------------------------------------- 9/24 마찰 파지 판
+#
+#   지렛대 156.2 cm · 회전 0.2° · 원점 0.1 cm · 형상중심 0.5 cm · 쥔점 0.50 cm
+#
+# 이 네 숫자가 **하나의 강체 운동**으로 설명되는지 확인한다. 설명되면 "자가 이상하다"
+# 가 아니라 "책이 실제로 그만큼 움직였다" 는 뜻이고, 판단이 달라진다.
+
+MEASURED_LEVER = 1.562
+
+
+def test_the_friction_run_is_one_rigid_motion():
+    """실측 네 숫자가 평행이동 1 mm + 원점 둘레 0.2° 회전 하나로 맞아떨어진다."""
+    c_loc = np.array([MEASURED_LEVER, 0.0, 0.0])
+    up, hz = np.array([0.0, 0.0, 1.0]), 0.08
+
+    def pts(bp, R):
+        return hand_frame_points(HAND_P, HAND_Q, bp, quat_from_R(R), c_loc, up, hz)
+
+    ref = pts(np.zeros(3), np.eye(3))
+    now = pts(np.array([0.001, 0.0, 0.0]), _rot_z(0.2))   # 1 mm 이동 + 원점 둘레 0.2°
+    d = drift_between(ref, now)
+    assert d.rot_deg == pytest.approx(0.2, abs=1e-6)
+    assert d.origin * 100 == pytest.approx(0.1, abs=0.01)     # 실측 0.1 cm
+    assert d.center * 100 == pytest.approx(0.5, abs=0.06)     # 실측 0.5 cm
+    assert d.grip * 100 == pytest.approx(0.5, abs=0.06)       # 실측 0.50 cm
+
+
+def test_so_the_book_really_moved_five_millimetres():
+    """**자의 문제가 아니다.** 원점이 안 움직였다고 책이 안 움직인 게 아니다.
+
+    원점은 형상에서 1.56 m 떨어진 허공의 점이다. 그 점이 제자리여도 책 자체는
+    회전 × 지렛대만큼 쓸고 지나간다. 쥔점 기준 5 mm 는 **실제 변위**다.
+    """
+    assert amplification_mm(MEASURED_LEVER, 0.2) == pytest.approx(5.45, abs=0.05)
+    # 문턱 5 mm 는 이 지렛대에서 0.18° 에 해당한다 — 문턱이 곧 각도 문턱이다
+    assert amplification_mm(MEASURED_LEVER, 0.184) == pytest.approx(5.0, abs=0.1)
