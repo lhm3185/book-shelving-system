@@ -25,6 +25,8 @@ import yaml
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from arm_geometry import R_from_quat, quat_angle, quat_from_R, slerp  # noqa: E402
 from arm_planning import tucked_joint_moves  # noqa: E402
+from tray_delivery import (  # noqa: E402
+    deliver_from_to, drift_mm, TRAY_FROM_FALLBACK, TRAY_TO_XY)
 from arm_primitives import ArmController, MoveJoint, Primitive, SetGripper, Sequence, Status, Wait  # noqa: E402
 
 # 로봇마다 다른 이름은 프로파일 한 곳에서 온다 (config/robot_profiles.py).
@@ -71,10 +73,10 @@ def _xyz(name, default):
         return np.array(default, float)
     return np.array([float(t) for t in v.replace(" ", "").split(",")], float)
 
-#: 이송 시작·도착 좌표 (월드). **레벨에서 잰 값**이라 계산하지 않는다 —
-#: 계산으로 맞추려다 여러 번 어긋났다 (2026-09-22). 레벨이 정답이다.
-TRAY_FROM = _xyz("SIM_TRAY_FROM", [5.817607391996635, -5.659500598907469, 0.37])
-TRAY_TO = _xyz("SIM_TRAY_TO", [4.993110179901123, -5.659414291381836, 0.33650222420692444])
+#: 이송 시작·도착 좌표 (월드). **레벨이 정답이다** — 판단은 `tray_delivery` 에 있다.
+#: 여기서 상수로 박았다가 레벨이 바뀌자 그대로 썩었다 (2026-09-23 밤의 410·409).
+TRAY_FROM = _xyz("SIM_TRAY_FROM", TRAY_FROM_FALLBACK)
+TRAY_TO = _xyz("SIM_TRAY_TO", list(TRAY_TO_XY) + [TRAY_FROM_FALLBACK[2]])
 #: 트레이 위치를 주기적으로 찍는다 (떨어지는 시점을 잡기 위해)
 TRAY_WATCH = os.environ.get("SIM_TRAY_WATCH", "1") != "0"
 #: **기준선 모드.** 트레이·책에 코드가 아무것도 하지 않는다 (이송·추종·계측 전부 꺼짐).
@@ -424,15 +426,22 @@ class BookScene:
             if _k and _k.IsValid():
                 _now_p, _now_q = SingleXFormPrim(self.tray).get_world_pose()
                 # **레벨에서 잰 좌표를 그대로 쓴다.** 팔 기준으로 계산해 맞추려다
-                # 여러 번 어긋났다 — 레벨 배치가 정답이다
-                self._deliver = {"from": TRAY_FROM.copy(), "to": TRAY_TO.copy(),
+                # 여러 번 어긋났다 — 레벨 배치가 정답이다.
+                # 상수로 박아 두면 레벨이 바뀔 때 조용히 썩는다 (3.6 cm → 410).
+                _frm, _to, _src = deliver_from_to(_now_p)
+                self._deliver = {"from": _frm, "to": _to,
                                  "q": np.asarray(_now_q, float), "t": 0, "n": 1}
                 if not self.use_level_tray:
                     _k.SetActive(False)   # 복제 트레이를 쓸 때만 레벨 쪽을 숨긴다
-                say(f"트레이 이송 {np.round(TRAY_FROM, 3).tolist()} → "
-                    f"{np.round(TRAY_TO, 3).tolist()} "
-                    f"({float(np.linalg.norm(TRAY_TO - TRAY_FROM)):.3f} m, "
-                    f"{TRAY_DELIVERY_S:.1f}초)")
+                say(f"트레이 이송 {np.round(_frm, 6).tolist()} → "
+                    f"{np.round(_to, 6).tolist()} "
+                    f"({float(np.linalg.norm(_to - _frm)):.3f} m, "
+                    f"{TRAY_DELIVERY_S:.1f}초, 출발 자리 출처: {_src})")
+                _drift = drift_mm(_frm)
+                if _drift > 5.0:
+                    say(f"  주의: 출발 z {_frm[2]:.6f} 가 기록해 둔 레벨 값 "
+                        f"{TRAY_FROM_FALLBACK[2]:.6f} 에서 {_drift:.1f} mm 다르다 — "
+                        f"레벨이 바뀌었으면 정상, 아니면 확인할 것")
             else:
                 say(f"반납기 트레이가 없다 ({KIOSK_TRAY}) — 트레이를 처음부터 로봇 위에 둔다")
         # **트레이를 키네마틱 강체로** 만든다. 동적 강체 + 고정 조인트로 묶어 봤더니
