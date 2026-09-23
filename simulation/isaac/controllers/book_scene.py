@@ -1975,14 +1975,23 @@ class BookScene:
         _align = 0.0
         if os.environ.get("SIM_GRASP_ALIGN", "0") != "0" and book in self.upright_q:
             _bq = SingleXFormPrim(book).get_world_pose()[1]
-            _tilt = quat_angle(np.asarray(_bq, float), np.asarray(self.upright_q[book], float))
+            # **기준 자세는 `attach()` 와 같은 자로 잰다.** `upright_q` 는 트레이가
+            # 돌기 전의 월드 자세라, 레벨 트레이처럼 돌아 있으면 90° 가 그대로 남는다
+            # (2026-09-24 A/B 1차: 2.0° 짜리 기울기가 90.1° 로 읽혀 스위치가 안 걸렸다).
+            # `attach()` 는 트레이 자세로 다시 만들어 쓴다 — 여기서도 그래야 같은 값이 나온다.
+            _up_w = np.asarray(self.upright_q[book], float)
+            if book in getattr(self, "upright_rel", {}):
+                _Rt = R_from_quat(np.asarray(
+                    SingleXFormPrim(self.tray).get_world_pose()[1], float))
+                _up_w = quat_from_R(_Rt @ self.upright_rel[book])
+            _tilt = quat_angle(np.asarray(_bq, float), _up_w)
             if _tilt >= UPRIGHT_SNAP_RAD:
                 self.say(f"[파지정렬] 책이 {math.degrees(_tilt):.1f}° 기울어 문턱"
                          f"({math.degrees(UPRIGHT_SNAP_RAD):.0f}°)을 넘는다 — 손을 맞추지 않는다. "
                          f"attach() 의 세우기에 맡긴다")
             elif _tilt > math.radians(0.2):
                 _dR = (R_from_quat(np.asarray(_bq, float))
-                       @ R_from_quat(np.asarray(self.upright_q[book], float)).T)
+                       @ R_from_quat(_up_w).T)
                 DOWN = quat_from_R(_dR @ R_from_quat(DOWN))
                 _align = float(_tilt)
                 self.say(f"[파지정렬] 책이 {math.degrees(_tilt):.2f}° 기울어 있다 — "
