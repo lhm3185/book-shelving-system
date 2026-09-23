@@ -1,94 +1,130 @@
-# 비전팀 정답지 — 서가 빈칸 검출용
-#
-# **빈칸은 원래 없다.** 이 층 책들은 빈틈 없이 꽂혀 있다(이웃 간격이 전부 음수).
-# 빈칸은 SIM_SHELF_GAP 으로 책을 빼서 만들고, 폭은 우리가 지정한다.
-# 그러니 검출 대상은 '원래 있던 구멍' 이 아니라 **'우리가 낸 구멍'** 이고,
-# 시험 단계마다 폭이 달라진다.
-#
-# 좌표는 전부 **world 기준**, 단위 m. 자동 생성: make_ground_truth.py
-# 원자료: 20260923_gt_slots.txt (2026-09-23 실측)
+# 비전팀 정답지 — 서가 빈칸 검출용. measure_shelf.py 가 만든다
+# **레벨이 바뀌면 다시 돌릴 것.** 좌표는 전부 world 기준, 단위 m
+# 만든 레벨: ing_library_env_v5.usd
 
 shelf:
   prim: /World/bookshelves/shelf_brown__book_shelf_01
-  floor: secondFloor
-  board_z_world: 1.042
+  inner_x_world: [1.8692, 3.2738]
+  board_z_world: [0.4976, 1.0417, 1.5812, 2.0582, 2.52]
   note: >-
-    낱권 책이 있는 서가는 이것 하나뿐이다. 나머지 15개는 책이
-    book_cube 통짜 메시 하나라서 빈칸 검출 시험이 되지 않는다.
-    이 층의 책에는 RigidBodyAPI 도 CollisionAPI 도 없다 — 순전히 장식이라
-    검출 결과를 물리로 확인할 수 없다.
-  book_count: 43
-  x_span_world: [1.9108, 3.1778]
-  thickness_m: {min: 0.0077, max: 0.0448, mean: 0.0319}
-  neighbor_gap_m: {min: -0.0046, max: -0.0006}   # 전부 음수 = 겹쳐 있다
+    낱권 책이 있는 서가는 이것 하나뿐이다. 나머지 15개는 책이 book_cube
+    통짜 메시 하나라 빈칸 검출 시험이 되지 않는다. 낱권 책에는
+    RigidBodyAPI 도 CollisionAPI 도 없어서 검출 결과를 물리로 확인할 수 없다.
 
-# 난이도 사다리. t = 우리가 꽂는 책 두께
 inserted_book_thickness_m: 0.0353
-ladder:
-  - level: L1
-    switch: "SIM_SHELF_GAP=23,55"
-    removed_index: [23, 24]
-    opened_width_m: 0.0543
-    side_clearance_m: 0.0095    # 좌우 여유 — 검출 오차가 이보다 크면 실패가 난다
-    gap_x_world: [2.5733, 2.6276]
-    gap_center_x_world: 2.6005
-  - level: L2
-    switch: "SIM_SHELF_GAP=20,45"
-    removed_index: [20, 21]
-    opened_width_m: 0.0453
-    side_clearance_m: 0.005    # 좌우 여유 — 검출 오차가 이보다 크면 실패가 난다
-    gap_x_world: [2.5055, 2.5508]
-    gap_center_x_world: 2.5282
-  - level: L3
-    switch: "SIM_SHELF_GAP=20,40"
-    removed_index: [20]
-    opened_width_m: 0.039
-    side_clearance_m: 0.0019    # 좌우 여유 — 검출 오차가 이보다 크면 실패가 난다
-    gap_x_world: [2.5055, 2.5445]
-    gap_center_x_world: 2.525
 
-# 층의 모든 책 (x 순서). index 가 SIM_SHELF_GAP 의 시작 인덱스다
-books:
-  - {index:  0, x: [1.9108, 1.9207], thickness: 0.0100, height: 0.2707, name: decorative_book_set_01_2k__magazine_01_cover21}
-  - {index:  1, x: [1.9189, 1.9289], thickness: 0.0100, height: 0.2707, name: decorative_book_set_01_2k__magazine_01_cover22}
-  - {index:  2, x: [1.9262, 1.9687], thickness: 0.0425, height: 0.2289, name: decorative_book_set_01_2k__book_hardcover_01_cover23}
-  - {index:  3, x: [1.9664, 2.0086], thickness: 0.0423, height: 0.2279, name: decorative_book_set_01_2k__book_hardcover_01_cover24}
-  - {index:  4, x: [2.0060, 2.0359], thickness: 0.0299, height: 0.2270, name: decorative_book_set_01_2k__book_softcover_01_cover25}
-  - {index:  5, x: [2.0341, 2.0458], thickness: 0.0117, height: 0.2265, name: ative_book_set_01_2k__catalogue_softcover_01_cover26}
-  - {index:  6, x: [2.0435, 2.0759], thickness: 0.0324, height: 0.2253, name: decorative_book_set_01_2k__book_softcover_01_cover27}
-  - {index:  7, x: [2.0727, 2.0948], thickness: 0.0220, height: 0.2269, name: decorative_book_set_01_2k__book_softcover_01_cover28}
-  - {index:  8, x: [2.0927, 2.1284], thickness: 0.0357, height: 0.2273, name: decorative_book_set_01_2k__book_hardcover_01_cover29}
-  - {index:  9, x: [2.1256, 2.1592], thickness: 0.0336, height: 0.2264, name: decorative_book_set_01_2k__book_softcover_01_cover31}
-  - {index: 10, x: [2.1570, 2.1789], thickness: 0.0219, height: 0.2255, name: decorative_book_set_01_2k__book_softcover_01_cover32}
-  - {index: 11, x: [2.1765, 2.2112], thickness: 0.0347, height: 0.2277, name: decorative_book_set_01_2k__book_softcover_01_cover33}
-  - {index: 12, x: [2.2089, 2.2519], thickness: 0.0430, height: 0.2285, name: decorative_book_set_01_2k__book_hardcover_01_cover34}
-  - {index: 13, x: [2.2497, 2.2928], thickness: 0.0431, height: 0.2287, name: decorative_book_set_01_2k__book_hardcover_01_cover35}
-  - {index: 14, x: [2.2911, 2.3309], thickness: 0.0399, height: 0.2272, name: decorative_book_set_01_2k__book_hardcover_01_cover36}
-  - {index: 15, x: [2.3284, 2.3682], thickness: 0.0398, height: 0.2267, name: decorative_book_set_01_2k__book_hardcover_01_cover37}
-  - {index: 16, x: [2.3663, 2.4066], thickness: 0.0403, height: 0.2232, name: decorative_book_set_01_2k__book_softcover_01_cover38}
-  - {index: 17, x: [2.4043, 2.4455], thickness: 0.0412, height: 0.2283, name: decorative_book_set_01_2k__book_softcover_01_cover39}
-  - {index: 18, x: [2.4412, 2.4636], thickness: 0.0224, height: 0.2251, name: decorative_book_set_01_2k__book_softcover_01_cover40}
-  - {index: 19, x: [2.4613, 2.5055], thickness: 0.0443, height: 0.2264, name: decorative_book_set_01_2k__book_hardcover_01_cover41}
-  - {index: 20, x: [2.5036, 2.5462], thickness: 0.0426, height: 0.2270, name: decorative_book_set_01_2k__book_hardcover_01_cover42}
-  - {index: 21, x: [2.5445, 2.5531], thickness: 0.0086, height: 0.2706, name: decorative_book_set_01_2k__magazine_01_cover43}
-  - {index: 22, x: [2.5508, 2.5733], thickness: 0.0225, height: 0.2811, name: ative_book_set_01_2k__catalogue_hardcover_01_cover44}
-  - {index: 23, x: [2.5689, 2.5917], thickness: 0.0227, height: 0.2221, name: decorative_book_set_01_2k__book_softcover_01_cover45}
-  - {index: 24, x: [2.5901, 2.6299], thickness: 0.0398, height: 0.2206, name: decorative_book_set_01_2k__book_softcover_01_cover46}
-  - {index: 25, x: [2.6276, 2.6703], thickness: 0.0427, height: 0.2291, name: decorative_book_set_01_2k__book_hardcover_01_cover47}
-  - {index: 26, x: [2.6682, 2.7130], thickness: 0.0448, height: 0.2292, name: decorative_book_set_01_2k__book_hardcover_01_cover48}
-  - {index: 27, x: [2.7105, 2.7465], thickness: 0.0360, height: 0.2268, name: decorative_book_set_01_2k__book_hardcover_01_cover49}
-  - {index: 28, x: [2.7459, 2.7558], thickness: 0.0100, height: 0.2708, name: decorative_book_set_01_2k__magazine_01_cover50}
-  - {index: 29, x: [2.7532, 2.7977], thickness: 0.0444, height: 0.2273, name: decorative_book_set_01_2k__book_hardcover_01_cover51}
-  - {index: 30, x: [2.7943, 2.8169], thickness: 0.0227, height: 0.2214, name: decorative_book_set_01_2k__book_softcover_01_cover52}
-  - {index: 31, x: [2.8152, 2.8230], thickness: 0.0077, height: 0.2707, name: decorative_book_set_01_2k__magazine_01_cover53}
-  - {index: 32, x: [2.8197, 2.8611], thickness: 0.0414, height: 0.2291, name: decorative_book_set_01_2k__book_hardcover_01_cover54}
-  - {index: 33, x: [2.8582, 2.8869], thickness: 0.0287, height: 0.2843, name: ative_book_set_01_2k__catalogue_hardcover_01_cover55}
-  - {index: 34, x: [2.8823, 2.9244], thickness: 0.0421, height: 0.2234, name: decorative_book_set_01_2k__book_softcover_01_cover56}
-  - {index: 35, x: [2.9230, 2.9355], thickness: 0.0125, height: 0.2270, name: ative_book_set_01_2k__catalogue_softcover_01_cover57}
-  - {index: 36, x: [2.9335, 2.9686], thickness: 0.0352, height: 0.2265, name: decorative_book_set_01_2k__book_softcover_01_cover58}
-  - {index: 37, x: [2.9656, 3.0045], thickness: 0.0389, height: 0.2240, name: decorative_book_set_01_2k__book_softcover_01_cover59}
-  - {index: 38, x: [3.0024, 3.0406], thickness: 0.0382, height: 0.2291, name: ative_book_set_01_2k__catalogue_hardcover_01_cover60}
-  - {index: 39, x: [3.0370, 3.0712], thickness: 0.0342, height: 0.2275, name: decorative_book_set_01_2k__book_softcover_01_cover61}
-  - {index: 40, x: [3.0684, 3.0977], thickness: 0.0293, height: 0.2275, name: decorative_book_set_01_2k__book_hardcover_01_cover62}
-  - {index: 41, x: [3.0952, 3.1374], thickness: 0.0423, height: 0.2230, name: decorative_book_set_01_2k__book_softcover_01_cover63}
-  - {index: 42, x: [3.1347, 3.1778], thickness: 0.0431, height: 0.2275, name: decorative_book_set_01_2k__book_softcover_01_cover64}
+floors:
+  thirdFloor:
+    board_z_world: 1.5812
+    book_count: 21
+    gaps:            # 이미 **레벨에 있는** 빈칸. 우리가 만든 것이 아니다
+      - width_m: 0.0811
+        x_world: [2.8938, 2.9749]
+        center_x_world: 2.9344
+        side_clearance_m: 0.0229
+        where: between books #10 and #11
+      - width_m: 0.0599
+        x_world: [2.4665, 2.5264]
+        center_x_world: 2.4965
+        side_clearance_m: 0.0123
+        where: between books #0 and #1
+      - width_m: 0.0460
+        x_world: [1.8692, 1.9152]
+        center_x_world: 1.8922
+        side_clearance_m: 0.0054
+        where: left
+      - width_m: 0.0428
+        x_world: [3.2310, 3.2738]
+        center_x_world: 3.2524
+        side_clearance_m: 0.0038
+        where: right
+      - width_m: 0.0368
+        x_world: [3.1535, 3.1903]
+        center_x_world: 3.1719
+        side_clearance_m: 0.0007
+        where: between books #15 and #16
+      - width_m: 0.0361
+        x_world: [3.0441, 3.0802]
+        center_x_world: 3.0622
+        side_clearance_m: 0.0004
+        where: between books #13 and #14
+    books:
+      - {index:  0, x: [1.9152, 2.4665], thickness: 0.1642, name: book_encyclopedia}
+      - {index:  1, x: [2.5264, 2.9352], thickness: 0.1544, name: decorative_book_set_01_2k__book_hardcover_01_cover07}
+      - {index:  2, x: [2.5691, 3.1922], thickness: 0.1547, name: decorative_book_set_01_2k__book_hardcover_01_cover15}
+      - {index:  3, x: [2.6066, 3.0824], thickness: 0.1509, name: decorative_book_set_01_2k__book_softcover_01_cover12}
+      - {index:  4, x: [2.6453, 2.9777], thickness: 0.1737, name: decorative_book_set_01_2k__book_hardcover_01_cover08}
+      - {index:  5, x: [2.6901, 2.7308], thickness: 0.0407, name: decorative_book_set_01_2k__book_softcover_01_cover01}
+      - {index:  6, x: [2.7291, 2.7740], thickness: 0.0449, name: decorative_book_set_01_2k__book_hardcover_01_cover02}
+      - {index:  7, x: [2.7724, 2.7948], thickness: 0.0224, name: decorative_book_set_01_2k__catalogue_hardcover_01_cover03}
+      - {index:  8, x: [2.7923, 2.8332], thickness: 0.0410, name: decorative_book_set_01_2k__book_softcover_01_cover04}
+      - {index:  9, x: [2.8297, 2.8515], thickness: 0.0218, name: decorative_book_set_01_2k__book_softcover_01_cover05}
+      - {index: 10, x: [2.8492, 2.8938], thickness: 0.0447, name: decorative_book_set_01_2k__book_hardcover_01_cover06}
+      - {index: 11, x: [2.9749, 3.0158], thickness: 0.0409, name: decorative_book_set_01_2k__book_softcover_01_cover09}
+      - {index: 12, x: [3.0133, 3.0246], thickness: 0.0113, name: decorative_book_set_01_2k__catalogue_softcover_01_cover10}
+      - {index: 13, x: [3.0218, 3.0441], thickness: 0.0224, name: decorative_book_set_01_2k__book_softcover_01_cover11}
+      - {index: 14, x: [3.0802, 3.1248], thickness: 0.0446, name: decorative_book_set_01_2k__book_hardcover_01_cover13}
+      - {index: 15, x: [3.1210, 3.1535], thickness: 0.0325, name: decorative_book_set_01_2k__book_softcover_01_cover14}
+      - {index: 16, x: [3.1903, 3.2005], thickness: 0.0102, name: decorative_book_set_01_2k__magazine_01_cover16}
+      - {index: 17, x: [3.1988, 3.2074], thickness: 0.0086, name: decorative_book_set_01_2k__magazine_01_cover17}
+      - {index: 18, x: [3.2058, 3.2144], thickness: 0.0086, name: decorative_book_set_01_2k__magazine_01_cover18}
+      - {index: 19, x: [3.2127, 3.2226], thickness: 0.0100, name: decorative_book_set_01_2k__magazine_01_cover19}
+      - {index: 20, x: [3.2210, 3.2310], thickness: 0.0100, name: decorative_book_set_01_2k__magazine_01_cover20}
+  secondFloor:
+    board_z_world: 1.0417
+    book_count: 43
+    gaps:            # 이미 **레벨에 있는** 빈칸. 우리가 만든 것이 아니다
+      - width_m: 0.0960
+        x_world: [3.1778, 3.2738]
+        center_x_world: 3.2258
+        side_clearance_m: 0.0303
+        where: right
+      - width_m: 0.0416
+        x_world: [1.8692, 1.9108]
+        center_x_world: 1.8900
+        side_clearance_m: 0.0031
+        where: left
+    books:
+      - {index:  0, x: [1.9108, 1.9207], thickness: 0.0100, name: decorative_book_set_01_2k__magazine_01_cover21}
+      - {index:  1, x: [1.9189, 1.9289], thickness: 0.0100, name: decorative_book_set_01_2k__magazine_01_cover22}
+      - {index:  2, x: [1.9262, 1.9687], thickness: 0.0425, name: decorative_book_set_01_2k__book_hardcover_01_cover23}
+      - {index:  3, x: [1.9664, 2.0086], thickness: 0.0423, name: decorative_book_set_01_2k__book_hardcover_01_cover24}
+      - {index:  4, x: [2.0060, 2.0359], thickness: 0.0299, name: decorative_book_set_01_2k__book_softcover_01_cover25}
+      - {index:  5, x: [2.0341, 2.0458], thickness: 0.0117, name: decorative_book_set_01_2k__catalogue_softcover_01_cover26}
+      - {index:  6, x: [2.0435, 2.0759], thickness: 0.0324, name: decorative_book_set_01_2k__book_softcover_01_cover27}
+      - {index:  7, x: [2.0727, 2.0948], thickness: 0.0220, name: decorative_book_set_01_2k__book_softcover_01_cover28}
+      - {index:  8, x: [2.0927, 2.1284], thickness: 0.0357, name: decorative_book_set_01_2k__book_hardcover_01_cover29}
+      - {index:  9, x: [2.1256, 2.1592], thickness: 0.0336, name: decorative_book_set_01_2k__book_softcover_01_cover31}
+      - {index: 10, x: [2.1570, 2.1789], thickness: 0.0219, name: decorative_book_set_01_2k__book_softcover_01_cover32}
+      - {index: 11, x: [2.1765, 2.2112], thickness: 0.0347, name: decorative_book_set_01_2k__book_softcover_01_cover33}
+      - {index: 12, x: [2.2089, 2.2519], thickness: 0.0430, name: decorative_book_set_01_2k__book_hardcover_01_cover34}
+      - {index: 13, x: [2.2497, 2.2928], thickness: 0.0431, name: decorative_book_set_01_2k__book_hardcover_01_cover35}
+      - {index: 14, x: [2.2911, 2.3309], thickness: 0.0399, name: decorative_book_set_01_2k__book_hardcover_01_cover36}
+      - {index: 15, x: [2.3284, 2.3682], thickness: 0.0398, name: decorative_book_set_01_2k__book_hardcover_01_cover37}
+      - {index: 16, x: [2.3663, 2.4066], thickness: 0.0403, name: decorative_book_set_01_2k__book_softcover_01_cover38}
+      - {index: 17, x: [2.4043, 2.4455], thickness: 0.0412, name: decorative_book_set_01_2k__book_softcover_01_cover39}
+      - {index: 18, x: [2.4412, 2.4636], thickness: 0.0224, name: decorative_book_set_01_2k__book_softcover_01_cover40}
+      - {index: 19, x: [2.4613, 2.5055], thickness: 0.0443, name: decorative_book_set_01_2k__book_hardcover_01_cover41}
+      - {index: 20, x: [2.5036, 2.5462], thickness: 0.0426, name: decorative_book_set_01_2k__book_hardcover_01_cover42}
+      - {index: 21, x: [2.5445, 2.5531], thickness: 0.0086, name: decorative_book_set_01_2k__magazine_01_cover43}
+      - {index: 22, x: [2.5508, 2.5733], thickness: 0.0225, name: decorative_book_set_01_2k__catalogue_hardcover_01_cover44}
+      - {index: 23, x: [2.5689, 2.5917], thickness: 0.0227, name: decorative_book_set_01_2k__book_softcover_01_cover45}
+      - {index: 24, x: [2.5901, 2.6299], thickness: 0.0398, name: decorative_book_set_01_2k__book_softcover_01_cover46}
+      - {index: 25, x: [2.6276, 2.6703], thickness: 0.0427, name: decorative_book_set_01_2k__book_hardcover_01_cover47}
+      - {index: 26, x: [2.6682, 2.7130], thickness: 0.0448, name: decorative_book_set_01_2k__book_hardcover_01_cover48}
+      - {index: 27, x: [2.7105, 2.7465], thickness: 0.0360, name: decorative_book_set_01_2k__book_hardcover_01_cover49}
+      - {index: 28, x: [2.7459, 2.7558], thickness: 0.0100, name: decorative_book_set_01_2k__magazine_01_cover50}
+      - {index: 29, x: [2.7532, 2.7977], thickness: 0.0444, name: decorative_book_set_01_2k__book_hardcover_01_cover51}
+      - {index: 30, x: [2.7943, 2.8169], thickness: 0.0227, name: decorative_book_set_01_2k__book_softcover_01_cover52}
+      - {index: 31, x: [2.8152, 2.8230], thickness: 0.0077, name: decorative_book_set_01_2k__magazine_01_cover53}
+      - {index: 32, x: [2.8197, 2.8611], thickness: 0.0414, name: decorative_book_set_01_2k__book_hardcover_01_cover54}
+      - {index: 33, x: [2.8582, 2.8869], thickness: 0.0287, name: decorative_book_set_01_2k__catalogue_hardcover_01_cover55}
+      - {index: 34, x: [2.8823, 2.9244], thickness: 0.0421, name: decorative_book_set_01_2k__book_softcover_01_cover56}
+      - {index: 35, x: [2.9230, 2.9355], thickness: 0.0125, name: decorative_book_set_01_2k__catalogue_softcover_01_cover57}
+      - {index: 36, x: [2.9335, 2.9686], thickness: 0.0352, name: decorative_book_set_01_2k__book_softcover_01_cover58}
+      - {index: 37, x: [2.9656, 3.0045], thickness: 0.0389, name: decorative_book_set_01_2k__book_softcover_01_cover59}
+      - {index: 38, x: [3.0024, 3.0406], thickness: 0.0382, name: decorative_book_set_01_2k__catalogue_hardcover_01_cover60}
+      - {index: 39, x: [3.0370, 3.0712], thickness: 0.0342, name: decorative_book_set_01_2k__book_softcover_01_cover61}
+      - {index: 40, x: [3.0684, 3.0977], thickness: 0.0293, name: decorative_book_set_01_2k__book_hardcover_01_cover62}
+      - {index: 41, x: [3.0952, 3.1374], thickness: 0.0423, name: decorative_book_set_01_2k__book_softcover_01_cover63}
+      - {index: 42, x: [3.1347, 3.1778], thickness: 0.0431, name: decorative_book_set_01_2k__book_softcover_01_cover64}
