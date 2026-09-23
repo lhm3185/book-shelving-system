@@ -2007,7 +2007,10 @@ class BookScene:
         # 돌려주는 값은 **월드 기준**이다 — verify()/survey() 가 월드 좌표와 견준다
         return {"segs": segs, "worst": worst_all, "spine_final": spine_final_w, "place_x": place_x_w,
                 "floor_z": floor_z, "book": book, "dims": (T, Lb, W),
-                "grasp_align_deg": round(math.degrees(_align), 3)}, 0, ""
+                "grasp_align_deg": round(math.degrees(_align), 3),
+                # **지금 이 순간의** 칸 방향 폭. `dims` 는 장면을 만들 때 잰 값이라
+                # 그 뒤 책이 기울면 낡는다 — 손가락을 얼마나 벌릴지는 지금 값으로 정해야 한다
+                "span_now": float(bb[3] - bb[0])}, 0, ""
 
     def fit_bookends(self, place_x, thickness):
         """북엔드 한 쌍을 이 책 두께에 맞춘다 (책마다 두께가 달라서 — 꽂기 전에만 옮긴다)"""
@@ -2070,7 +2073,39 @@ class BookScene:
     def job_sequence(self, name, plan):
         s = plan["segs"]; book = plan["book"]
         T = plan.get("dims", (self.T, self.L, self.W))[0]
-        o = T / 2 + GRIP_CLEAR
+        # **벌림은 지금 폭으로, 조임은 규격 두께로.** 둘은 다른 양이다
+        # (`SIM_GRIP_OPEN_MEASURED`, 기본 꺼짐).
+        #
+        # `dims` 는 **장면을 만들 때** 잰 값이다. 그 뒤 책이 트레이에서 2~3° 기울면
+        # 칸 방향 폭이 35.2 → 43~45 mm 로 자라는데, 벌림은 여전히 35.2 로 계산된다:
+        #
+        #     벌림 22.60 mm  vs  기울기 2.4° 인 책의 반폭 22.34 mm  →  여유 0.26 mm
+        #                        기울기 2.7° →  반폭 22.93 mm      →  **여유 −0.33 mm**
+        #
+        # 즉 **열린 손가락이 이미 책에 닿아 있거나 파고들어 있다.** 2026-09-24 실측에서
+        # 기준선 판의 기울기가 1.9~2.7° 였으니 가장 큰 판은 이미 음수였다. 파지정렬을
+        # 켜면 손끝이 1~4.5 mm 더 쓸고 들어가 책을 더 기울인다 — 그래서 정렬이
+        # 역효과였다.
+        #
+        # 조임(grip)은 규격 두께를 그대로 쓴다. 기운 폭으로 조이면 손가락이 책에
+        # 닿기도 전에 멈춘다(헛쥠).
+        #
+        # 대가: 벌림 22.60 → 27.35 mm 면 이웃까지 여유가 8.40 → 3.65 mm 로 준다.
+        # 그래서 기본은 꺼 두고 A/B 로 견준다.
+        _span_now = float(plan.get("span_now", 0.0) or 0.0)
+        if os.environ.get("SIM_GRIP_OPEN_MEASURED", "0") != "0" and _span_now > T:
+            o = _span_now / 2 + GRIP_CLEAR
+            self.say(f"[벌림] 지금 칸 방향 폭 {_span_now*1000:.1f} mm "
+                     f"(장면 만들 때 {T*1000:.1f}) → 손가락을 {o*1000:.2f} mm 로 벌린다 "
+                     f"[SIM_GRIP_OPEN_MEASURED]. 규격으로 벌리면 {(T/2+GRIP_CLEAR)*1000:.2f} mm 라 "
+                     f"책과 여유가 {((T/2+GRIP_CLEAR) - _span_now/2)*1000:+.2f} mm 뿐이다")
+        else:
+            o = T / 2 + GRIP_CLEAR
+            if _span_now > T:
+                self.say(f"[벌림] 손가락 {o*1000:.2f} mm · 지금 책 반폭 "
+                         f"{_span_now/2*1000:.2f} mm → 여유 {(o - _span_now/2)*1000:+.2f} mm"
+                         + ("  **음수다 — 열린 손가락이 책에 박힌다**"
+                            if o < _span_now / 2 else ""))
         # **놓는 순서** (SIM_RELEASE_OPEN_FIRST=1): 손을 먼저 벌리고 그다음 책을 동적으로·충돌 켬.
         # 키네마틱 파지는 운반 동안 책 충돌을 꺼서 손가락이 지령 폭(T/2 − 4 mm)까지 책 **속으로**
         # 들어가 있다 (2026-09-22 야간 v01: 손가락 13.6 mm = 지령값 그대로, 책 반두께 17.6 mm).
