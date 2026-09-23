@@ -1845,6 +1845,37 @@ class BookScene:
         bb = self.aabb(book); bc = (bb[:3] + bb[3:]) / 2
         T, Lb, W = self.dims.get(book, (self.T, self.L, self.W))
         DOWN, HORIZ = self.DOWN, self.HORIZ
+        # **손을 책에 맞춰 돌려서 잡는다** (`SIM_GRASP_ALIGN`, 기본 꺼짐).
+        #
+        # 왜: 트레이의 책은 2.4° 쯤 기운 채 서 있고, 파지 자세가 상수 DOWN 이라
+        # 기운 채로 들려 기운 채로 꽂힌다. 그러면 칸 방향 AABB 가 두께 35.2 대신
+        # 43.0 mm 가 되어(지렛대가 책 높이 227 mm 다) 이웃과의 여유를 한쪽당 3.9 mm
+        # 먹는다. 2026-09-24 실측에서 통과한 판의 남은 여유가 5.4 mm 였다.
+        #
+        # **책을 돌려 고치는 길은 이미 실패했다.** 물고 있는 책을 돌리면 그 회전이
+        # 손 안의 어긋남이 되어 406 이 났다 (2026-09-22, 3.9 cm). 그래서 `attach()` 는
+        # 25° 미만이면 그냥 잡는다. 여기서는 **잡기 전에 손을 돌린다** — 잡은 뒤가
+        # 아니므로 406 을 내지 않는다. 잡고 나면 책은 손 기준으로 반듯하고,
+        # carry_rotate 가 손을 HORIZ(서가 방향)로 가져가므로 반듯하게 꽂힌다.
+        #
+        # 기본을 끈 이유: 파지 자세가 2.4° 바뀌면 IK 가지가 갈릴 수 있다. 이 팔은
+        # 1 mm 에도 갈린다. 5회 통과한 기준선을 흔들지 않고 A/B 로 견준다.
+        _align = 0.0
+        if os.environ.get("SIM_GRASP_ALIGN", "0") != "0" and book in self.upright_q:
+            _bq = SingleXFormPrim(book).get_world_pose()[1]
+            _tilt = quat_angle(np.asarray(_bq, float), np.asarray(self.upright_q[book], float))
+            if _tilt >= UPRIGHT_SNAP_RAD:
+                self.say(f"[파지정렬] 책이 {math.degrees(_tilt):.1f}° 기울어 문턱"
+                         f"({math.degrees(UPRIGHT_SNAP_RAD):.0f}°)을 넘는다 — 손을 맞추지 않는다. "
+                         f"attach() 의 세우기에 맡긴다")
+            elif _tilt > math.radians(0.2):
+                _dR = (R_from_quat(np.asarray(_bq, float))
+                       @ R_from_quat(np.asarray(self.upright_q[book], float)).T)
+                DOWN = quat_from_R(_dR @ R_from_quat(DOWN))
+                _align = float(_tilt)
+                self.say(f"[파지정렬] 책이 {math.degrees(_tilt):.2f}° 기울어 있다 — "
+                         f"**손을 그만큼 돌려서 잡는다** [SIM_GRASP_ALIGN]. "
+                         f"잡은 뒤가 아니라 잡기 전이라 406 을 내지 않는다")
         self.fit_bookends(float(place_center_world[0]), T)
         # **여기서부터 경유점은 팔이 보는 방향 기준으로 조립한다** (x 칸 방향, y 서가 방향).
         # 예전에는 월드 x/y 를 직접 썼고, 그래서 로봇이 돌아서면 경로가 통째로 깨졌다.
@@ -1975,7 +2006,8 @@ class BookScene:
                      f"{np.round(self.q_home, 3).tolist()}")
         # 돌려주는 값은 **월드 기준**이다 — verify()/survey() 가 월드 좌표와 견준다
         return {"segs": segs, "worst": worst_all, "spine_final": spine_final_w, "place_x": place_x_w,
-                "floor_z": floor_z, "book": book, "dims": (T, Lb, W)}, 0, ""
+                "floor_z": floor_z, "book": book, "dims": (T, Lb, W),
+                "grasp_align_deg": round(math.degrees(_align), 3)}, 0, ""
 
     def fit_bookends(self, place_x, thickness):
         """북엔드 한 쌍을 이 책 두께에 맞춘다 (책마다 두께가 달라서 — 꽂기 전에만 옮긴다)"""
