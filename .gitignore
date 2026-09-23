@@ -16,3 +16,12 @@ docs/doyoon-kim/web_claude/
 isaac_sim/cache/
 isaac_sim/logs/
 isaac_sim/generated/
+.venv/
+venv/
+__pycache__/
+build/
+install/
+log/
+*.usd
+*.usda
+*.usdc
