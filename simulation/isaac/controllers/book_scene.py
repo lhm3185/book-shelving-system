@@ -2218,11 +2218,21 @@ class BookScene:
         # 그 상태로 충돌을 켜면 겹침이 한꺼번에 풀리며 책이 튀어 0.44 s 만에 바닥(z 0.075)에 있었다.
         # 기본(꺼짐)은 지금 순서 그대로: detach → 벌림.
         if GRASP_KINEMATIC and os.environ.get("SIM_RELEASE_OPEN_FIRST", "0") != "0":
+            # **벌린 직후에도 찍는다.** 놓는 일은 두 단계다 — 손가락을 벌리고, 책을
+            # 동적으로 되돌린다. 기울기가 어느 쪽에서 붙는지 두 줄이 있어야 갈린다:
+            #   놓기직전 → 벌린뒤   차이가 나면 **손가락이 튕긴 것**
+            #   벌린뒤   → 놓음     차이가 나면 **동적 전환·정착**
+            # 2026-09-24 에 이 구분이 없어서 "떠오름이 기울기의 원인" 이라는 틀린
+            # 인과를 세웠다 (떠오름을 두 방법으로 없앴는데 기울기는 한쪽만 줄었다).
             release = [Call("release", lambda: self.trace(book, "놓기직전", plan)),
-                       named(SetGripper(o, settle_s=0.4), "release"), Call("detach", self.detach),
+                       named(SetGripper(o, settle_s=0.4), "release"),
+                       Call("release", lambda: self.trace(book, "벌린뒤", plan)),
+                       Call("detach", self.detach),
                        named(Wait(0.4), "release")]
         else:
-            release = [Call("detach", self.detach), named(SetGripper(o, settle_s=0.4), "release"),
+            release = [Call("detach", self.detach),
+                       Call("release", lambda: self.trace(book, "떼어낸뒤", plan)),
+                       named(SetGripper(o, settle_s=0.4), "release"),
                        named(Wait(0.4), "release")]
         return Sequence(name, [
             named(SetGripper(o), "approach"), JointPath("approach", s["approach"][1:], 0.5 * SPEED_SCALE),
