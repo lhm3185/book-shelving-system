@@ -2993,12 +2993,21 @@ class BookScene:
             # **겹침이 안 나도 찍는다.** 비뚤어짐은 겹쳐야만 생기는 게 아니라
             # 시연 구간(-45 ~ +52 mm) 안에서도 작게 일어나고 있을 수 있고,
             # 그건 upright/spine/x 어느 검사도 안 보고 있다. 매 판 남겨서 추세를 본다.
-            _T = plan.get("dims", (self.T, self.L, self.W))[0]
-            _span = float(bb[3] - bb[0])
+            _T, _Lb, _W = plan.get("dims", (self.T, self.L, self.W))
+            _sx = float(bb[3] - bb[0])
+            _sy = float(bb[4] - bb[1])
             _off = float((bb[0] + bb[3]) / 2 - plan["place_x"])
+            # **부풀음을 각도로 바꿀 때 지렛대를 찍지 않는다.** 가로 두 폭이 다 있으면
+            # 어느 쪽이 지렛대인지 고를 필요가 없다. 수평 yaw 를 t 라 하면
+            #   Sx = T·cos t + W·sin t ,  Sy = T·sin t + W·cos t
+            # 두 식을 더하고 빼면 (cos t + sin t) 와 (cos t − sin t) 가 바로 나온다.
+            _a = (_sx + _sy) / (_T + _W) if (_T + _W) else 0.0
+            _b = (_sx - _sy) / (_T - _W) if abs(_T - _W) > 1e-9 else 0.0
+            _skew = math.degrees(math.atan2(_a - _b, _a + _b))
             self.say(f"[꽂은 자세] 중심이 목표에서 {_off*1000:+.1f} mm · "
-                     f"x 폭 {_span*1000:.1f} mm (규격 두께 {_T*1000:.1f} mm, "
-                     f"부풀음 {(_span - _T)*1000:+.1f} mm)")
+                     f"가로 {_sx*1000:.1f} x {_sy*1000:.1f} mm "
+                     f"(규격 두께 {_T*1000:.1f} · 폭 {_W*1000:.1f} mm) "
+                     f"→ 수평 기울기 {_skew:+.2f}°")
             if jam > 0:
                 # **겹침을 왜 냈는지 한 줄로 가른다**: 책이 옆으로 밀린 것인가(중심 이동),
                 # 비뚤어진 것인가(폭 부풀음). 2026-09-24 +60 mm 판에서 x 검사(±15 mm)는
@@ -3007,9 +3016,8 @@ class BookScene:
                          f"(축별 {np.round(axes*1000, 1).tolist()} mm, 임계 {JAM_TOL*1000:.0f} mm) "
                          f"— 서가 책은 콜리전이 없어 물리로는 안 막힌다")
                 self.say(f"  까닭 가르기: 중심이 목표에서 {_off*1000:+.1f} mm · "
-                         f"x 폭 {_span*1000:.1f} mm (규격 두께 {_T*1000:.1f} mm, "
-                         f"부풀음 {(_span - _T)*1000:+.1f} mm) → "
-                         f"{'비뚤어짐' if (_span - _T) > abs(_off) else '옆으로 밀림'}")
+                         f"기울기 {_skew:+.2f}° 로 x 폭이 {(_sx - _T)*1000:+.1f} mm 부풀었다 → "
+                         f"{'비뚤어짐' if (_sx - _T) > abs(_off) else '옆으로 밀림'}")
             else:
                 n = len(self.shelf_book_boxes(plan.get("floor_z")))
                 self.say(f"[겹침] 옆 책과 겹치지 않음 (그 판의 서가 책 {n}권과 대조)")
