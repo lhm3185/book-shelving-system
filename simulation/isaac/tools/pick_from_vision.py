@@ -29,6 +29,10 @@ from std_msgs.msg import Bool
 
 # 검증된 Franka 꽂을 좌표 (팔 기준). test_contract_coords.py 가 지키는 값이다
 FRANKA_SLOTS = [-0.3497, -0.4297, -0.5097, -0.2697]
+#: **규격이다. 실측이 아니다.** 2026-09-24 실측에서 손가락이 13.7 mm 에서
+#: 멈췄다 — 실제 반두께가 13.7 mm 라는 뜻이고 두께는 27.4 mm 다. 규격보다
+#: 7.8 mm 얇다. 그래서 파지 지령(13.6 mm)이 책에 닿지도 않아 조임량이 0.1 mm 다.
+#: 다섯 권 실측이 들어오면 여기와 config/book_profiles.yaml 을 함께 고친다.
 BOOK = {'thickness': 0.0353, 'height': 0.2374, 'width': 0.1631}
 
 #: **짝 규칙의 기준점.** 베이스를 월드 y 로 Δ 옮기면 팔 기준 목표를 −Δ 옮겨야
@@ -106,13 +110,18 @@ def main():
     goal.book_thickness = BOOK['thickness']
     goal.book_height = BOOK['height']
     goal.book_width = BOOK['width']
-    # **비전 관측을 그대로 싣는다.** 로봇팔이 검사한 뒤 쓴다 (계약 5절)
+    # 비전 관측을 싣는다 — **다만 치수는 관측이 아니다.** `top_center` 만 비전이
+    # 실제로 본 값이고, thickness·width 는 아래 BOOK 상수다. 이 구분을 안 적어 둬서
+    # 2026-09-24 에 "관측이 치수를 실어 온다" 고 믿고 하루를 썼다. 그 값으로 재는
+    # 검사(410 높이, 헛쥠 판정, 파지 지령)는 전부 **규격을 규격과 견주고 있었다.**
     goal.has_grasp = True
     goal.grasp.header = msg.header
     goal.grasp.top_center = p
-    goal.grasp.thickness = BOOK['thickness']
-    goal.grasp.width = BOOK['width']
+    goal.grasp.thickness = BOOK['thickness']     # ← 상수. 비전이 잰 값이 아니다
+    goal.grasp.width = BOOK['width']             # ← 상수
     goal.grasp.confidence = 1.0
+    print(f"  ※ 치수는 관측이 아니라 규격이다 (두께 {BOOK['thickness']*1000:.1f} · "
+          f"폭 {BOOK['width']*1000:.1f} mm). 실물과 다르면 파지 지령과 검사가 함께 틀린다")
 
     print('보냄 — 진행 상황:')
     send = client.send_goal_async(
