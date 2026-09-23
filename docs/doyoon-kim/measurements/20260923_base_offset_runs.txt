@@ -1,0 +1,51 @@
+실행       PICK_Y    GOAL_Y   | 경로검사 한계 최소여유 (구간별)
+--- m_regress  PICK_Y=-3.049 GOAL_Y=0.5795  code=0
+2026-09-23T03:04:49Z [19,228ms] [Error] [omni.kit.app._impl] [py stderr]: ### 스위치: 레벨트레이=True 이송=True 추종=True 손대지않음=False 키네마틱파지=True 그리퍼90도=True 차체고정=True 관절구간=approach,carry_rotate,return 운반=swing 복귀=swing 경로검사=0 겹침검사=True
+approach(관절)   여유 0.128 rad (관절 1, t=1.00)
+down   여유 0.128 rad (관절 1, t=0.00)
+lift   여유 0.129 rad (관절 1, t=0.94)
+carry_rotate(관절)   여유 0.129 rad (관절 1, t=0.00)
+wedge   여유 0.171 rad (관절 1, t=0.00)
+back   여유 0.221 rad (관절 1, t=1.00)
+touch   여유 0.221 rad (관절 1, t=0.00)
+push   여유 0.231 rad (관절 1, t=0.00)
+retreat   여유 0.182 rad (관절 1, t=1.00)
+return(관절)   여유 0.129 rad (관절 1, t=0.79)
+--- m_base_new  PICK_Y=-3.0695 GOAL_Y=0.600  code=0
+2026-09-23T03:07:59Z [12,713ms] [Error] [omni.kit.app._impl] [py stderr]: ### 스위치: 레벨트레이=True 이송=True 추종=True 손대지않음=False 키네마틱파지=True 그리퍼90도=True 차체고정=True 관절구간=approach,carry_rotate,return 운반=swing 복귀=swing 경로검사=0 겹침검사=True
+approach(관절)   여유 0.128 rad (관절 1, t=1.00)
+down   여유 0.128 rad (관절 1, t=0.00)
+lift   여유 0.129 rad (관절 1, t=1.00)
+carry_rotate(관절)   여유 0.129 rad (관절 1, t=0.00)
+wedge   여유 0.174 rad (관절 1, t=0.00)
+back   여유 0.221 rad (관절 1, t=1.00)
+touch   여유 0.221 rad (관절 1, t=0.00)
+push   여유 0.232 rad (관절 1, t=0.00)
+retreat   여유 0.184 rad (관절 1, t=1.00)
+return(관절)   여유 0.129 rad (관절 1, t=0.79)
+--- m_new_p30  PICK_Y=-3.0395 GOAL_Y=0.570  code=0
+2026-09-23T03:11:11Z [12,457ms] [Error] [omni.kit.app._impl] [py stderr]: ### 스위치: 레벨트레이=True 이송=True 추종=True 손대지않음=False 키네마틱파지=True 그리퍼90도=True 차체고정=True 관절구간=approach,carry_rotate,return 운반=swing 복귀=swing 경로검사=0 겹침검사=True
+approach(관절)   여유 0.128 rad (관절 1, t=1.00)
+down   여유 0.128 rad (관절 1, t=0.00)
+lift   여유 0.129 rad (관절 1, t=0.97)
+carry_rotate(관절)   여유 0.129 rad (관절 1, t=0.00)
+wedge   여유 0.157 rad (관절 1, t=0.00)
+back   여유 0.208 rad (관절 1, t=1.00)
+touch   여유 0.208 rad (관절 1, t=0.00)
+push   여유 0.219 rad (관절 1, t=0.00)
+retreat   여유 0.168 rad (관절 1, t=1.00)
+return(관절)   여유 0.129 rad (관절 1, t=0.78)
+--- m_old_p30  PICK_Y=-3.019 GOAL_Y=0.5495  code=0
+2026-09-23T03:14:22Z [12,722ms] [Error] [omni.kit.app._impl] [py stderr]: ### 스위치: 레벨트레이=True 이송=True 추종=True 손대지않음=False 키네마틱파지=True 그리퍼90도=True 차체고정=True 관절구간=approach,carry_rotate,return 운반=swing 복귀=swing 경로검사=0 겹침검사=True
+approach(관절)   여유 0.128 rad (관절 1, t=1.00)
+down   여유 0.128 rad (관절 1, t=0.00)
+lift   여유 0.129 rad (관절 1, t=0.91)
+carry_rotate(관절)   여유 0.094 rad (관절 6, t=1.00)
+wedge   여유 0.000 rad (관절 6, t=0.19)
+back   여유 0.091 rad (관절 6, t=0.85)
+touch   여유 0.090 rad (관절 6, t=0.75)
+push   여유 0.091 rad (관절 6, t=0.00)
+retreat   여유 0.083 rad (관절 6, t=0.59)
+return(관절)   여유 0.129 rad (관절 1, t=0.78)
+
+[exited with code 0]

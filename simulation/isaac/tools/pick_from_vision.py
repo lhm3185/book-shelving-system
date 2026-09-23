@@ -31,11 +31,27 @@ from std_msgs.msg import Bool
 FRANKA_SLOTS = [-0.3497, -0.4297, -0.5097, -0.2697]
 BOOK = {'thickness': 0.0353, 'height': 0.2374, 'width': 0.1631}
 
+#: **짝 규칙의 기준점.** 베이스를 월드 y 로 Δ 옮기면 팔 기준 목표를 −Δ 옮겨야
+#: 월드 삽입 지점이 고정된다. 이 두 값이 서로 다른 파일(full_cycle 의 PICK_SPOT,
+#: 여기의 --goal-y)에 흩어져 있어서 **한쪽만 옮기는 사고가 실제로 났다**
+#: (2026-09-22: PICK_Y 를 −3.019 → −3.324 로만 옮겨 책을 서가 앞 20 cm 허공에
+#: 놓았다). 그래서 이제 GOAL_Y 를 PICK_Y 에서 **만든다** — 따로 적지 않는다.
+PAIR_PICK_Y, PAIR_GOAL_Y = -3.019, 0.5495
+
+
+def _goal_y_default():
+    """SIM_GOAL_Y 가 있으면 그대로, 없으면 SIM_PICK_Y 에서 짝 규칙으로 만든다"""
+    if os.environ.get('SIM_GOAL_Y'):
+        return float(os.environ['SIM_GOAL_Y'])
+    pick_y = float(os.environ.get('SIM_PICK_Y', PAIR_PICK_Y))
+    return PAIR_GOAL_Y + (PAIR_PICK_Y - pick_y)
+
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--goal-x', type=float, default=float(os.environ.get('SIM_GOAL_X', FRANKA_SLOTS[0])), help='꽂을 칸 x (팔 기준)')
-    ap.add_argument('--goal-y', type=float, default=float(os.environ.get('SIM_GOAL_Y', 0.5495)))  # 야간: SIM_GOAL_Y (기본 불변)
+    ap.add_argument('--goal-y', type=float, default=_goal_y_default(),
+                    help='꽂을 칸 y (팔 기준). 비우면 SIM_PICK_Y 에서 짝 규칙으로 만든다')
     ap.add_argument('--goal-z', type=float, default=float(os.environ.get('SIM_GOAL_Z', 0.3399)))
     ap.add_argument('--book-id', default='book_0')
     ap.add_argument('--wait', type=float, default=20.0, help='비전 좌표를 기다릴 시간(초)')
