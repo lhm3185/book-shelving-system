@@ -200,7 +200,7 @@ local_costmap:
         mark_threshold: 0
         observation_sources: lidar_points
         lidar_points:
-          topic: /point_cloud
+          topic: /lidar/points_raw
           data_type: PointCloud2
           clearing: true
           marking: true

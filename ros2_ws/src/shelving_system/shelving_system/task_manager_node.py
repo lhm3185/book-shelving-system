@@ -266,6 +266,45 @@ class TaskManagerNode(Node):
 
         self._send_navigation_to_return()
 
+    def _build_waypoints(
+        self,
+        *,
+        frame_id: str,
+        waypoint_data: list[dict],
+    ) -> list[PoseStamped]:
+        """Convert YAML waypoint mappings to PoseStamped messages."""
+        waypoints: list[PoseStamped] = []
+        stamp = self.get_clock().now().to_msg()
+
+        for data in waypoint_data:
+            position = data["position"]
+            orientation = data["orientation"]
+
+            waypoint = PoseStamped()
+            waypoint.header.stamp = stamp
+            waypoint.header.frame_id = frame_id
+
+            waypoint.pose.position.x = float(position["x"])
+            waypoint.pose.position.y = float(position["y"])
+            waypoint.pose.position.z = float(position["z"])
+
+            waypoint.pose.orientation.x = float(
+                orientation["x"]
+            )
+            waypoint.pose.orientation.y = float(
+                orientation["y"]
+            )
+            waypoint.pose.orientation.z = float(
+                orientation["z"]
+            )
+            waypoint.pose.orientation.w = float(
+                orientation["w"]
+            )
+
+            waypoints.append(waypoint)
+
+        return waypoints
+
     def _send_navigation_to_return(self) -> None:
         """Send a navigation goal for the return station."""
         if self._current_plan is None:
@@ -275,14 +314,22 @@ class TaskManagerNode(Node):
             )
             return
 
+        return_pose = self._current_plan.return_station_pose
+        frame_id = str(return_pose["frame_id"])
+
+        waypoints = self._build_waypoints(
+            frame_id=frame_id,
+            waypoint_data=list(
+                return_pose.get("waypoints", [])
+            ),
+        )
+
         self._send_navigation_goal(
             target_type="return_station",
             target_id="return_station",
-            frame_id=str(
-                self._current_plan.return_station_pose["frame_id"]
-            ),
-            target_pose=self._current_plan.return_station_pose,
-            waypoints=[],
+            frame_id=frame_id,
+            target_pose=return_pose,
+            waypoints=waypoints,
             enable_fine_alignment=True,
         )
 
@@ -308,12 +355,25 @@ class TaskManagerNode(Node):
             self._current_task_index
         ]
 
+        shelf_data = (
+            self._data_manager.get_shelf_for_classification(
+                task.classification_code
+            )
+        )
+
+        waypoints = self._build_waypoints(
+            frame_id=task.shelf_frame_id,
+            waypoint_data=list(
+                shelf_data.get("waypoints", [])
+            ),
+        )
+
         self._send_navigation_goal(
             target_type="shelf",
             target_id=task.shelf_id,
             frame_id=task.shelf_frame_id,
             target_pose=task.shelf_observation_pose,
-            waypoints=[],
+            waypoints=waypoints,
             enable_fine_alignment=True,
         )
 

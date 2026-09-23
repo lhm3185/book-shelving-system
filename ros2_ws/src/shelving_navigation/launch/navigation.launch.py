@@ -79,7 +79,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             "pointcloud_topic",
-            default_value="/point_cloud",
+            default_value="/lidar/points_raw",
             description="Ridgeback LiDAR PointCloud2 topic from Isaac Sim.",
         ),
         DeclareLaunchArgument(

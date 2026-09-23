@@ -1,8 +1,8 @@
 pointcloud_to_laserscan:
   ros__parameters:
     use_sim_time: true
-    # Keep the PointCloud2 frame. The Ridgeback standalone publishes the
-    # matching base_link -> LiDAR TF using the sensor's real frame_id.
+    # Keep the /lidar/points_raw PointCloud2 frame. The Ridgeback standalone
+    # publishes the matching base_link -> LiDAR TF using lidar_link.
     target_frame: ""
     transform_tolerance: 0.05
 

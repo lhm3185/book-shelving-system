@@ -28,6 +28,34 @@ locations:
       y: 0.0
       z: 0.7071068
       w: 0.7071068
+    waypoints:
+      - position:
+          x: 0.0
+          y: -5.0
+          z: 0.0
+        orientation:
+          x: 0.0
+          y: 0.0
+          z: 1.0
+          w: 0.0
+      - position:
+          x: -5.5
+          y: -5.0
+          z: 0.0
+        orientation:
+          x: 0.0
+          y: 0.0
+          z: 1.0
+          w: 0.0
+      - position:
+          x: -6.0
+          y: -2.0
+          z: 0.0
+        orientation:
+          x: 0.0
+          y: 0.0
+          z: 0.7071068
+          w: 0.7071068
 
 shelves:
   shelf_01:
@@ -48,8 +76,39 @@ shelves:
       orientation:
         x: 0.0
         y: 0.0
-        z: 0.7071068
-        w: 0.7071068
+        z: 0.0
+        w: 1.0
+
+    waypoints:
+      - position:
+          x: -6.0
+          y: -4.5
+          z: 0.0
+        orientation:
+          x: 0.0
+          y: 0.0
+          z: -0.7071068
+          w: 0.7071068
+
+      - position:
+          x: 1.0
+          y: -4.5
+          z: 0.0
+        orientation:
+          x: 0.0
+          y: 0.0
+          z: 0.0
+          w: 1.0
+
+      - position:
+          x: 2.229003667831421
+          y: -4.0
+          z: 0.0
+        orientation:
+          x: 0.0
+          y: 0.0
+          z: 0.0
+          w: 1.0
 
   shelf_02:
     name: "분류 500~999 서가"
@@ -63,11 +122,11 @@ shelves:
 
     observation_pose:
       position:
-        x: 3.0
-        y: 2.0
+        x: 0.0
+        y: -3.0101053714752197
         z: 0.0
       orientation:
         x: 0.0
         y: 0.0
-        z: 0.7071068
-        w: 0.7071068
+        z: 0.0
+        w: 1.0

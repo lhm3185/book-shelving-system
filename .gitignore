@@ -25,3 +25,9 @@ log/
 *.usd
 *.usda
 *.usdc
+
+# Runtime-critical Ridgeback-Franka layers are part of the project.
+!isaac_sim/assets/robots/
+!isaac_sim/assets/robots/franka_nav.usda
+!isaac_sim/assets/worlds/
+!isaac_sim/assets/worlds/library_environment.usda

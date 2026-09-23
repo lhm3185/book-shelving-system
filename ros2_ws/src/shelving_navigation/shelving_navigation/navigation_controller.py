@@ -5,7 +5,6 @@ This class is not a ROS node. It uses the NavigationNode passed to it
 to create Nav2 action clients, a velocity publisher, and a TF listener.
 """
 
-import asyncio
 import math
 import threading
 import time
@@ -244,7 +243,7 @@ class NavigationController:
                                 self._publish_stop()
                                 break
 
-                await asyncio.sleep(self.CONTROL_PERIOD_SEC)
+                time.sleep(self.CONTROL_PERIOD_SEC)
 
             if not early_stop_requested:
                 if not result_future.done():
@@ -373,10 +372,12 @@ class NavigationController:
             )
 
         except Exception as error:
-            self._node.get_logger().exception(
-                f"Navigation execution failed: {error}"
+            self._node.get_logger().error(
+                "Navigation execution failed: "
+                f"{type(error).__name__}: {error}"
             )
 
+            await self._cancel_nav2_goal()
             self._publish_stop()
 
             goal_handle.abort()
@@ -431,6 +432,12 @@ class NavigationController:
     ) -> None:
         """Convert Nav2 feedback into shelving feedback."""
 
+        target_pose = self._active_target_pose
+
+        # A final feedback sample can arrive after cancellation or cleanup.
+        if target_pose is None:
+            return
+
         nav2_feedback = feedback_message.feedback
 
         with self._feedback_lock:
@@ -455,7 +462,7 @@ class NavigationController:
         current_index = self._current_waypoint_index()
 
         position_error, yaw_error = self._compute_errors(
-            self._active_target_pose,
+            target_pose,
             nav2_feedback.current_pose,
         )
 
@@ -510,7 +517,7 @@ class NavigationController:
                         yaw_error=0.0,
                     )
 
-                    await asyncio.sleep(self.CONTROL_PERIOD_SEC)
+                    time.sleep(self.CONTROL_PERIOD_SEC)
                     continue
 
                 tf_failure_started = None
@@ -553,7 +560,7 @@ class NavigationController:
 
                 self._cmd_vel_publisher.publish(velocity)
 
-                await asyncio.sleep(self.CONTROL_PERIOD_SEC)
+                time.sleep(self.CONTROL_PERIOD_SEC)
 
             return "FAILED", last_pose
 
@@ -867,7 +874,10 @@ class NavigationController:
     def destroy(self) -> None:
         """Destroy resources created by the controller."""
 
-        self._publish_stop()
+        # The ROS signal handler may already have invalidated the context
+        # before the launch shutdown reaches this cleanup path.
+        if rclpy.ok(context=self._node.context):
+            self._publish_stop()
 
         self._navigate_to_pose_client.destroy()
         self._navigate_through_poses_client.destroy()

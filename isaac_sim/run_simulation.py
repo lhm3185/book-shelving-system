@@ -1,360 +1,278 @@
-"""B-1 Isaac Sim 통합 실행기 — 팀 전체의 공식 진입점 (Isaac Sim 5.1.0).
+#!/usr/bin/env python3
+"""Run one configured Isaac Sim navigation scene.
 
-    SimulationApp 생성 → 통합 USD 로드 → ROS2 Bridge → 카메라·센서 → 실행기 등록 → 시뮬 루프
-
-실행은 `scripts/run_isaac_sim.sh` 로 한다 (환경 정리·Isaac python.sh 호출 포함).
-경로는 저장소 기준으로 계산하므로 clone 한 위치와 상관없이 돈다. 개인 절대경로를 기본값으로 쓰지 않는다.
-
-통신 규약은 예전 `place_book_server.py` 와 같다 (바꾸지 않았다):
-    수신 /manipulation/sim/command      발행 /manipulation/sim/state
+A temporary root layer composes the environment and robot before Isaac Sim
+opens the stage. This avoids reopening an active OmniGraph stage when the
+robot layer is added. Nothing is saved into the environment or robot USD.
 """
+
+from __future__ import annotations
+
 import argparse
+import math
 import os
-import sys
-import time
 from pathlib import Path
+import signal
+import tempfile
 
-HERE = Path(__file__).resolve().parent
-REPO_ROOT = HERE.parents[1]
-
-ap = argparse.ArgumentParser()
-ap.add_argument("--usd", default="", help="열 USD. 비우면 저장소의 ing_library_env_v5-test.usd (SIM_USD로 재정의 가능)")
-ap.add_argument("--tray", default="", help="트레이 USD. 비우면 isaac_sim/assets/tray.usd")
-# **팔 기준(arm_base_link) 좌표**다. 예전에는 월드 좌표(2.36, -2.94)였는데, 로봇이 다른
-# 자리로 가면 그대로 깨진다. 기본값은 book_profiles.yaml 의 트레이 칸 평균과 같다.
-ap.add_argument("--tray-center", type=float, nargs=2, default=[-0.4748, 0.0788],
-                help="트레이 중앙 (arm_base_link 기준 x y)")
-ap.add_argument("--books", type=int, default=6)
-ap.add_argument("--book-variants", default="", help="'mixed' 면 색·크기가 다른 기본 6종, 쉼표 목록도 가능")
-ap.add_argument("--place-dx", type=float, nargs="+", default=[-0.51, -0.43, -0.35, -0.27],
-                help="1차 고정 칸 (팔 원점 x 기준). 북엔드를 세운다")
-# 카메라 토픽 이름. **기본값은 지금과 같다** — 바꾸지 않으면 동작이 달라지지 않는다.
-# 왜 필요한가: AMR 담당 카메라도 같은 ROS_DOMAIN_ID 에서 `/rgb` 로 나가면 rqt 에 어느 쪽이
-# 보이는지 보장되지 않는다 (2026-09-19 실제로 AMR 담당 시험 화면에 우리 손목 카메라가 잡혔다).
-# 팀이 네임스페이스를 나누기로 하면 `--camera-ns /arm` 한 줄로 전환한다.
-ap.add_argument("--camera-ns", default="", metavar="접두사",
-                help="카메라 토픽 앞에 붙일 네임스페이스 (예: /arm → /arm/rgb). 비우면 지금 그대로")
-ap.add_argument("--command-topic", default="/manipulation/sim/command")
-ap.add_argument("--state-topic", default="/manipulation/sim/state")
-ap.add_argument("--gui", action="store_true")
-ap.add_argument("--headless", action="store_true", help="--gui 와 반대. 둘 다 없으면 headless")
-ap.add_argument("--record-dir", default="", metavar="경로",
-                help="시연 녹화: 장면을 내려다보는 카메라를 만들어 프레임을 PNG 로 저장한다. "
-                     "**헤드리스로 동작**하므로 GPU PC 바탕화면(팀원이 쓰는 화면)을 건드리지 않는다. "
-                     "화면 녹화로 찍으면 남의 작업 화면이 찍힌다 (2026-09-19 실제로 그랬다)")
-ap.add_argument("--record-every", type=int, default=6, help="몇 스텝마다 한 장 (60 Hz 기준 6 = 10 fps)")
-# 좌표를 추측하면 엉뚱한 곳(서가 벽)을 찍는다 — 기본은 **로봇 AABB 에 자동으로 맞춘다**
-ap.add_argument("--record-eye", type=float, nargs=3, default=None, help="녹화 카메라 위치 (기본: 자동)")
-ap.add_argument("--record-look", type=float, nargs=3, default=None, help="보는 점 (기본: 로봇 중심)")
-ap.add_argument("--camera", action="store_true", help="레벨에 카메라가 없을 때 손목 카메라를 만든다")
-ap.add_argument("--camera-prim", default="", help="레벨 로봇에 이미 있는 카메라 prim 경로")
-ap.add_argument("--camera-hz", type=float, default=10.0)
-ap.add_argument("--sensor-policy", choices=["gated", "always"], default="gated")
+import yaml
 
 
-ap.add_argument("--amr-test-overrides", action="store_true",
-                help="AMR 에셋의 라이다 fullScan·TF 네임스페이스를 실행에서만 보완 (파일 미수정)")
-ap.add_argument(
-    "--clear-nav-obstacles",
-    action="store_true",
-    help="1차 통합시험에서 /World/books와 경찰 캐릭터를 런타임에 비활성화",
-)
-ap.add_argument("--start-home", choices=["move", "snap"], default="move",
-                help="move: 접은 채 홈으로 이동(검증된 경로). snap 은 첫 작업이 M406 으로 실패한다")
+# All runtime inputs live below isaac_sim/.  Keeping this root local prevents
+# the simulator from depending on Desktop copies or other machine-specific
+# working directories.
+PROJECT_ROOT = Path(__file__).resolve().parent
 
 
-ap.add_argument("--max-seconds", type=float, default=0.0, help="0 이면 계속 실행")
-ap.add_argument("--no-manipulation", action="store_true", help="로봇팔 실행기를 붙이지 않는다 (월드만 확인)")
-ap.add_argument("--no-navigation", action="store_true",
-                help="주행 실행기를 붙이지 않는다")
-ap.add_argument("--drive-speed", type=float, default=0.4, help="주행 속도 (m/s)")
-args = ap.parse_args()
-
-# 저장소 코드를 그대로 쓴다 (~/arm 으로 복사하지 않는다)
-sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(HERE / "controllers"))
-sys.path.insert(0, str(HERE / "sensors"))
-sys.path.insert(0, str(REPO_ROOT / "ros2_ws" / "src" / "shelving_manipulation"))
-
-from isaacsim import SimulationApp  # noqa: E402
-app = SimulationApp({
-    "headless": not args.gui,
-    "enable_motion_bvh": True,
-    })
-
-import ros_bridge  # noqa: E402
-import world_loader  # noqa: E402
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--scene", default="library_map")
+    parser.add_argument(
+        "--config",
+        default=str(PROJECT_ROOT / "config" / "scenes.yaml"),
+    )
+    parser.add_argument("--headless", action="store_true")
+    return parser.parse_args()
 
 
-def say(m):
-    sys.stderr.write(f"### {m}\n")
-    sys.stderr.flush()
+def resolve_project_path(value: str) -> Path:
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path.resolve()
 
 
-ros_bridge.enable_bridge(app, say=say)
+def load_scene(config_path: Path, scene_name: str) -> dict:
+    if not config_path.is_file():
+        raise FileNotFoundError(f"Scene config not found: {config_path}")
 
-usd = world_loader.resolve_usd(args.usd or None)
-tray = args.tray or os.environ.get("SIM_TRAY") or str(world_loader.DEFAULT_TRAY)
-if not os.path.exists(tray) or world_loader.is_placeholder(tray):
-    legacy = Path(os.path.expanduser("~/book_dataset/assets/tray/tray_v1.usdc"))
-    if legacy.exists():
-        say(f"트레이 USD 가 비어 있어 예전 경로를 쓴다: {legacy}")
-        tray = str(legacy)
+    with config_path.open("r", encoding="utf-8") as stream:
+        document = yaml.safe_load(stream) or {}
 
-from book_scene import BookScene, R  # noqa: E402
-import camera_bridge  # noqa: E402
-from manipulation_executor import ManipulationExecutor  # noqa: E402
-from navigation_executor import NavigationExecutor  # noqa: E402
-
-MIXED_BOOKS = [
-    "book_encyclopedia_set_01_2k__book_encyclopedia_set_01_book15",
-    "decorative_book_set_01_2k__book_hardcover_01_cover02",
-    "decorative_book_set_01_2k__book_softcover_01_cover14",
-    "decorative_book_set_01_2k__book_hardcover_01_cover08",
-    "oldbook__OldBook001",
-    "book_encyclopedia_set_01_2k__book_encyclopedia_set_01_book01",
-]
-
-
-def _before_scene(stage):
-    """트레이와 책을 만들기 전에 AMR 시작 위치를 적용한다."""
-    from pxr import Gf, UsdGeom
-
-    robot_path = "/World/Nova_Carter_ROS"
-    robot_prim = stage.GetPrimAtPath(robot_path)
-
-    if not robot_prim.IsValid():
-        raise RuntimeError(f"AMR Prim을 찾을 수 없음: {robot_path}")
-
-    robot_xform = UsdGeom.Xformable(robot_prim)
-    xform_ops = {
-        op.GetOpName(): op
-        for op in robot_xform.GetOrderedXformOps()
-    }
-
-    translate_op = xform_ops.get("xformOp:translate")
-    orient_op = xform_ops.get("xformOp:orient")
-
-    if translate_op is None or orient_op is None:
-        raise RuntimeError(
-            f"AMR translate/orient 연산을 찾을 수 없음: {robot_path}"
+    scenes = document.get("scenes", {})
+    if scene_name not in scenes:
+        available = ", ".join(sorted(scenes)) or "<none>"
+        raise KeyError(
+            f"Unknown scene '{scene_name}'. Available scenes: {available}"
         )
 
-    translate_op.Set(Gf.Vec3d(
-        0.06556940078735352,
-        -4.773948669433594,
-        0.0,
-    ))
+    scene = scenes[scene_name]
+    required = {
+        "world_usd": scene.get("world_usd"),
+        "nav_map_yaml": scene.get("nav_map_yaml"),
+        "robot.usd": scene.get("robot", {}).get("usd"),
+        "robot.prim_path": scene.get("robot", {}).get("prim_path"),
+    }
+    missing = [name for name, value in required.items() if not value]
+    if missing:
+        raise ValueError(f"Missing scene fields: {', '.join(missing)}")
 
-    orient_op.Set(Gf.Quatd(
-        1.0,
-        Gf.Vec3d(0.0, 0.0, 0.0),
-    ))
+    for label in ("world_usd", "nav_map_yaml"):
+        path = resolve_project_path(scene[label])
+        if not path.is_file():
+            raise FileNotFoundError(f"{label} not found: {path}")
 
-    say(
-        "AMR 시작 위치 선적용: "
-        "x=0.065569, y=-4.773949, yaw=0.0°"
+    robot_path = resolve_project_path(scene["robot"]["usd"])
+    if not robot_path.is_file():
+        raise FileNotFoundError(f"robot.usd not found: {robot_path}")
+
+    return scene
+
+
+ARGS = parse_args()
+CONFIG_PATH = Path(ARGS.config).expanduser().resolve()
+SCENE = load_scene(CONFIG_PATH, ARGS.scene)
+
+WORLD_USD = resolve_project_path(SCENE["world_usd"])
+ROBOT_USD = resolve_project_path(SCENE["robot"]["usd"])
+ROBOT_PRIM_PATH = SCENE["robot"]["prim_path"]
+ROS_DOMAIN_ID = int(SCENE.get("ros", {}).get("domain_id", 0))
+
+
+def create_composed_stage() -> Path:
+    pose = SCENE["robot"].get("simulation_pose", {})
+    position = pose.get("position", [0.0, 0.0, 0.0])
+    if len(position) != 3:
+        raise ValueError("robot.simulation_pose.position must contain x, y, z")
+
+    x, y, z = (float(value) for value in position)
+    yaw = float(pose.get("yaw", 0.0))
+    yaw_degrees = math.degrees(yaw)
+
+    # Put the robot layer first so its Action Graph and robot overrides are the
+    # stronger opinions. Both asset paths are absolute only inside this
+    # disposable runtime layer; the project configuration stays portable.
+    document = f'''#usda 1.0
+(
+    defaultPrim = "World"
+    startTimeCode = 0
+    endTimeCode = 1000000
+    timeCodesPerSecond = 60
+    framesPerSecond = 60
+    metersPerUnit = 1
+    upAxis = "Z"
+    subLayers = [
+        @{ROBOT_USD.as_posix()}@,
+        @{WORLD_USD.as_posix()}@
+    ]
+)
+
+over "World"
+{{
+    over "ridgeback_franka"
+    {{
+        double3 xformOp:translate = ({x:.17g}, {y:.17g}, {z:.17g})
+        # Keep the articulation root aligned with the world axes. The mobile
+        # base uses world-X/world-Y prismatic joints, and its controller already
+        # converts body-frame Twist commands into those world axes. Rotating the
+        # root as well would rotate the commanded velocity twice.
+        quatd xformOp:orient = (1, 0, 0, 0)
+
+        over "dummy_base_y"
+        {{
+            over "dummy_base_revolute_z_joint"
+            {{
+                float state:angular:physics:position = {yaw_degrees:.17g}
+                float drive:angular:physics:targetPosition = {yaw_degrees:.17g}
+            }}
+        }}
+    }}
+
+    def PhysicsScene "PhysicsScene"
+    {{
+        vector3f physics:gravityDirection = (0, 0, -1)
+        float physics:gravityMagnitude = 9.81
+    }}
+}}
+'''
+    handle = tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        prefix="ridgeback_franka_",
+        suffix=".usda",
+        delete=False,
+    )
+    with handle:
+        handle.write(document)
+    return Path(handle.name)
+
+
+COMPOSED_STAGE = create_composed_stage()
+
+# The ROS bridge reads these while Isaac Sim starts.
+os.environ["ROS_DOMAIN_ID"] = str(ROS_DOMAIN_ID)
+os.environ.setdefault("RMW_IMPLEMENTATION", "rmw_fastrtps_cpp")
+
+# SimulationApp must be created before importing Omniverse/Isaac modules.
+from isaacsim.simulation_app import SimulationApp
+
+
+simulation_app = SimulationApp({"headless": ARGS.headless})
+
+import omni.kit.app
+import omni.timeline
+import omni.usd
+import omni.graph.core as og
+import carb
+from isaacsim.core.utils import stage as stage_utils
+
+
+stop_requested = False
+
+
+def request_stop(_signum, _frame) -> None:
+    global stop_requested
+    stop_requested = True
+
+
+signal.signal(signal.SIGINT, request_stop)
+signal.signal(signal.SIGTERM, request_stop)
+
+
+def update_until_stage_loaded() -> None:
+    while stage_utils.is_stage_loading():
+        simulation_app.update()
+    for _ in range(10):
+        simulation_app.update()
+    # In standalone/headless mode the ROS bridge may otherwise defer creating
+    # publishers until it verifies a subscriber. The runner discovers topics
+    # before Nav2 starts, so publishers must be created unconditionally.
+    carb.settings.get_settings().set_bool(
+        "/exts/isaacsim.ros2.bridge/publish_without_verification", True
     )
 
 
-def _before_reset(stage):
-    """재생 전에 AMR 물리 상태와 ROS 그래프를 준비한다."""
-    from pxr import UsdPhysics
+try:
+    extension_manager = omni.kit.app.get_app().get_extension_manager()
+    extension_manager.set_extension_enabled_immediate(
+        "isaacsim.ros2.bridge", True
+    )
+    # Extension registration is asynchronous. Opening a stage containing ROS
+    # OmniGraph nodes in the same frame can race node-type registration and
+    # crash Isaac Sim 5.1 inside omni.graph/omni.usd.
+    for _ in range(10):
+        simulation_app.update()
 
-    # M0609 원본의 root_joint는 body0가 비어 있어 팔을 월드에 고정한다.
-    # 팔이 FixedJoint를 통해 chassis_link와 연결돼 있으므로 이것이 켜져 있으면
-    # 카터 전체가 월드에 고정되어 /cmd_vel을 받아도 움직이지 않는다.
-    root_joint_path = "/World/Nova_Carter_ROS/m0609/root_joint"
-    root_joint = stage.GetPrimAtPath(root_joint_path)
+    print(f"[project] scene={ARGS.scene}")
+    print(f"[project] world={WORLD_USD}", flush=True)
+    print(f"[project] robot_layer={ROBOT_USD}", flush=True)
+    print(f"[project] composed_stage={COMPOSED_STAGE}", flush=True)
+    print(f"[project] ROS_DOMAIN_ID={ROS_DOMAIN_ID}")
 
-    if not root_joint.IsValid():
+    if not stage_utils.open_stage(str(COMPOSED_STAGE)):
+        raise RuntimeError(f"Failed to open composed stage: {COMPOSED_STAGE}")
+    update_until_stage_loaded()
+
+    stage = omni.usd.get_context().get_stage()
+    if stage is None:
+        raise RuntimeError("Isaac Sim did not provide an opened USD stage")
+
+    robot_prim = stage.GetPrimAtPath(ROBOT_PRIM_PATH)
+    if not robot_prim.IsValid():
         raise RuntimeError(
-            f"월드 고정 root_joint를 찾을 수 없음: {root_joint_path}"
+            f"Robot prim was not composed at {ROBOT_PRIM_PATH}. "
+            "Check the robot USD layer."
         )
 
-    root_joint_api = UsdPhysics.Joint(root_joint)
-    root_joint_api.CreateJointEnabledAttr().Set(False)
-
-    # 중복 Articulation Root를 먼저 제거한다.
-    if root_joint.HasAPI(UsdPhysics.ArticulationRootAPI):
-        root_joint.RemoveAPI(UsdPhysics.ArticulationRootAPI)
-
-    # jointEnabled=False만으로 PhysX가 조인트를 계속 생성하므로
-    # Prim 자체를 비활성화해 물리 장면에서 완전히 제외한다.
-    root_joint.SetActive(False)
-
-    say(f"AMR 월드 고정 조인트 완전 비활성화: {root_joint_path}")
-
-    ros_bridge.ensure_navigation_graph(stage, say=say)
-
-    if (args.camera_prim or args.amr_test_overrides) and args.camera_hz < 60:
-        camera_bridge.SensorGate.preset_camera_hz(stage, R, args.camera_hz, say)
-
-    if args.amr_test_overrides:
-        camera_bridge.apply_amr_test_overrides(stage, R, say)
-
-    if args.clear_nav_obstacles:
-        obstacle_paths = (
-            "/World/books",
-            "/World/female_adult_police_02",
-            "/World/bs_bookends",
+    for graph_path in ("/Graphs/Nav2BaseController", "/Graphs/LidarSensorGraph"):
+        if not stage.GetPrimAtPath(graph_path).IsValid():
+            raise RuntimeError(f"Required graph is missing: {graph_path}")
+        graph = og.get_graph_by_path(graph_path)
+        if not graph.is_valid():
+            raise RuntimeError(f"OmniGraph runtime object is invalid: {graph_path}")
+        was_disabled = graph.is_disabled()
+        if was_disabled:
+            graph.set_disabled(False)
+        print(
+            f"[project] graph={graph_path} "
+            f"was_disabled={was_disabled} disabled={graph.is_disabled()}",
+            flush=True,
         )
 
-        for prim_path in obstacle_paths:
-            prim = stage.GetPrimAtPath(prim_path)
+    physics_scene_path = "/World/PhysicsScene"
+    if not stage.GetPrimAtPath(physics_scene_path).IsValid():
+        raise RuntimeError(f"Required PhysicsScene is missing: {physics_scene_path}")
+    print(f"[project] physics_scene={physics_scene_path}")
 
-            if not prim.IsValid():
-                say(f"통합시험 장애물 Prim 없음: {prim_path}")
-                continue
+    timeline = omni.timeline.get_timeline_interface()
+    timeline.play()
+    simulation_app.update()
+    print("[project] simulation is playing; press Ctrl+C to stop")
 
-            prim.SetActive(False)
-            say(f"통합시험 장애물 비활성화: {prim_path}")
+    frame_count = 0
+    while simulation_app.is_running() and not stop_requested:
+        simulation_app.update()
+        frame_count += 1
+        if frame_count == 60:
+            print(
+                "[project] timeline "
+                f"playing={timeline.is_playing()} "
+                f"time={timeline.get_current_time():.3f}",
+                flush=True,
+            )
 
-
-variants = (MIXED_BOOKS if args.book_variants.strip() == "mixed"
-            else [v.strip() for v in args.book_variants.split(",") if v.strip()] or None)
-
-# 월드: USD 를 열고 Prim 을 검사한 뒤 트레이·책·로봇팔을 준비한다
-stage0 = world_loader.open_world(app, usd, say)
-world_loader.check_prims(stage0, say)
-scene = BookScene(
-    app,
-    usd,
-    tray,
-    args.tray_center,
-    args.books,
-    args.place_dx,
-    say,
-    before_reset=_before_reset,
-    book_variants=variants,
-    before_scene=_before_scene,
-)
-world = scene.world
-
-# 센서
-render = args.gui or args.camera or bool(args.camera_prim)
-gate = None
-if args.camera_prim:
-    if not scene.stage.GetPrimAtPath(args.camera_prim).IsValid():
-        say(f"카메라 prim 없음: {args.camera_prim}")
-    camera_bridge.build_supplement_graph(args.camera_prim, R)
-    world.play()
-    # 부모 프레임 이름은 로봇마다 다르다 (Isaac 은 prim **이름**을 frame 으로 낸다).
-    # 예전엔 panda_link0 이 문구에 박혀 있어 M0609 에서 로그가 거짓말을 했다 (2026-09-20).
-    _parent = world_loader.BOT.base_link.split("/")[-1]
-    say(f"기존 카메라 사용 {args.camera_prim} → TF {_parent}→{args.camera_prim.split('/')[-1]}, /clock 추가")
-elif args.camera:
-    cam_path = camera_bridge.add_wrist_camera(scene.stage, R)
-    _ns = args.camera_ns.rstrip("/")
-    camera_bridge.build_ros_graph(cam_path, R, rgb=f"{_ns}/rgb", depth=f"{_ns}/depth",
-                                  info=f"{_ns}/camera_info")
-    world.play()
-    say(f"손목 카메라 {cam_path} → {_ns}/rgb {_ns}/depth {_ns}/camera_info "
-        f"(frame {camera_bridge.OPTICAL_FRAME}), /tf, /clock")
-if args.camera or args.camera_prim or args.amr_test_overrides:
-    gate = camera_bridge.SensorGate(scene.stage, R, say)
-    if args.camera_hz < 60:
-        gate.set_camera_hz(args.camera_hz)
-    say(f"센서 정책 {args.sensor_policy}: 카메라 노드 {len(gate.camera_nodes)}, 라이다 노드 {len(gate.lidar_nodes)}")
-
-# 실행기 등록 — 로봇팔과 주행. 둘 다 같은 노드를 쓰고 자기 토픽만 만든다
-node = ros_bridge.make_node("isaac_place_book_executor")
-executor = None
-nav = None
-if not args.no_navigation:
-    nav = NavigationExecutor(scene, node, say, speed=args.drive_speed)
-if not args.no_manipulation:
-    executor = ManipulationExecutor(scene, node, say, command_topic=args.command_topic,
-                                    state_topic=args.state_topic, gate=gate,
-                                    sensor_policy=args.sensor_policy, start_home=args.start_home,
-                                    render=render, gui=args.gui)
-    say("작업 실행기 시작 — 시작 홈 이동 중" if args.start_home == "move" else "작업 실행기 시작 — 홈 자세 고정")
-else:
-    say("월드만 실행한다 (로봇팔 실행기 없음)")
-
-# --- 녹화 준비: 장면 카메라 + 렌더 프로덕트 (헤드리스에서도 동작한다)
-rec = None
-if args.record_dir:
-    import numpy as _np
-    import omni.replicator.core as _rep
-    from PIL import Image as _Image
-    from pxr import Gf as _Gf, UsdGeom as _UsdGeom, UsdLux as _UsdLux
-    from isaacsim.core.prims import SingleXFormPrim as _XForm
-
-    _out = os.path.expanduser(args.record_dir)
-    os.makedirs(_out, exist_ok=True)
-    from isaacsim.core.utils.stage import get_current_stage as _get_stage
-    _st = _get_stage()
-    _UsdLux.DomeLight.Define(_st, "/World/rec_dome").CreateIntensityAttr(600.0)
-    _cam_path = "/World/rec_cam"
-    _cam = _UsdGeom.Camera.Define(_st, _cam_path)
-    _cam.CreateFocalLengthAttr(22.0)
-    _cam.CreateHorizontalApertureAttr(36.0)
-    _cam.CreateVerticalApertureAttr(20.25)
-    _cam.CreateClippingRangeAttr(_Gf.Vec2f(0.05, 100.0))
-    # 로봇·트레이가 한 화면에 들어오도록 **로봇 AABB 로 자동 구도**를 잡는다
-    from isaacsim.core.utils.bounds import compute_aabb as _aabb, create_bbox_cache as _bbc
-    _c = _bbc(); _c.Clear()
-    _bb = _np.array(_aabb(_c, world_loader.BOT.root, include_children=True), float)
-    if not _np.all(_np.isfinite(_bb)):
-        _bb = _np.array([-1, -1, 0, 1, 1, 1.5], float)
-    _mid = (_bb[:3] + _bb[3:]) / 2
-    _rad = float(_np.linalg.norm(_bb[3:] - _bb[:3]))
-    _tgt = _np.array(args.record_look, float) if args.record_look else _mid
-    # 로봇 앞쪽 비스듬히 위에서 — 트레이(앞)와 팔이 같이 보이는 각도
-    _eye = (_np.array(args.record_eye, float) if args.record_eye
-            else _mid + _np.array([_rad * 0.9, -_rad * 1.0, _rad * 0.55]))
-    say(f"녹화 구도: 로봇 중심 {_np.round(_mid,2).tolist()} 크기 {_rad:.2f} m "
-        f"→ 카메라 {_np.round(_eye,2).tolist()}")
-    _f = _tgt - _eye; _f /= (_np.linalg.norm(_f) or 1.0)
-    _up = _np.array([0.0, 0.0, 1.0])
-    _r = _np.cross(_f, _up); _r /= (_np.linalg.norm(_r) or 1.0)
-    _u = _np.cross(_r, _f)
-    _m = _np.eye(3); _m[:, 0], _m[:, 1], _m[:, 2] = _r, _u, -_f
-    _tr = _np.trace(_m)
-    if _tr > 0:
-        _sq = _np.sqrt(_tr + 1.0) * 2
-        _q = _np.array([0.25 * _sq, (_m[2, 1] - _m[1, 2]) / _sq,
-                        (_m[0, 2] - _m[2, 0]) / _sq, (_m[1, 0] - _m[0, 1]) / _sq])
-    else:
-        _i = int(_np.argmax(_np.diag(_m))); _j, _k = (_i + 1) % 3, (_i + 2) % 3
-        _sq = _np.sqrt(1.0 + _m[_i, _i] - _m[_j, _j] - _m[_k, _k]) * 2
-        _q = _np.zeros(4); _q[0] = (_m[_k, _j] - _m[_j, _k]) / _sq
-        _q[_i + 1] = 0.25 * _sq
-        _q[_j + 1] = (_m[_j, _i] + _m[_i, _j]) / _sq
-        _q[_k + 1] = (_m[_k, _i] + _m[_i, _k]) / _sq
-        _q /= _np.linalg.norm(_q)
-    _XForm(_cam_path).set_world_pose(_eye, _q)
-    _rp = _rep.create.render_product(_cam_path, (1280, 720))
-    _ann = _rep.AnnotatorRegistry.get_annotator("rgb")
-    _ann.attach(_rp)
-    rec = {"n": 0, "saved": 0, "out": _out, "ann": _ann, "img": _Image, "np": _np}
-    say(f"녹화 시작 → {_out} ({args.record_every} 스텝마다 1장, 1280x720)")
-
-t0 = time.time()
-while app.is_running():
-    # **주행이 먼저다.** 자세만 갱신하고 world.step() 은 부르지 않는다 —
-    # 스텝을 부르는 쪽은 하나여야 한다 (로봇팔 실행기, 없으면 아래 else)
-    if nav is not None:
-        nav.spin()
-    if executor is not None:
-        executor.spin()
-    else:
-        world.step(render=render)
-    if rec is not None:
-        rec["n"] += 1
-        if rec["n"] % args.record_every == 0:
-            _d = rec["ann"].get_data()
-            if _d is not None and getattr(_d, "size", 0):
-                _a = rec["np"].asarray(_d)[:, :, :3].astype("uint8")
-                rec["img"].fromarray(_a).save(
-                    os.path.join(rec["out"], f"f{rec['saved']:06d}.png"))
-                rec["saved"] += 1
-    if args.max_seconds and time.time() - t0 > args.max_seconds:
-        say("max-seconds 도달 — 종료")
-        break
-
-if rec is not None:
-    say(f"녹화 종료 — {rec['saved']}장 저장 ({rec['out']})")
-ros_bridge.shutdown(node)
-app.close()
+    timeline.stop()
+    simulation_app.update()
+finally:
+    simulation_app.close()
+    COMPOSED_STAGE.unlink(missing_ok=True)
