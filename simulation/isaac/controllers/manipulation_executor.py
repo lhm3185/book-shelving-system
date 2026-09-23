@@ -319,6 +319,21 @@ class ManipulationExecutor:
             if name == "lift" and "z0" not in job.watch:
                 job.watch["z0"] = scene.center(book)[2]
                 job.watch["rel0"] = scene.book_in_hand(book)
+                # **키네마틱 파지에서는 406 이 원리적으로 뜰 수 없다.**
+                # follow_hand() 가 매 물리 스텝마다 책의 월드 자세를 손에서 다시 써
+                # 넣으므로(set_world_pose(hp + Rh@rel, ...)), book_in_hand 는 우리가
+                # 방금 넣은 값이다 — 원점 기준이든 형상중심 기준이든 정의상 안 변한다.
+                # 이 조합에서 406 이 안 뜨는 것은 "파지가 튼튼하다" 가 아니라
+                # "재지 않았다" 는 뜻이다. 조용히 통과시키지 않고 그렇다고 적는다.
+                try:
+                    from book_scene import GRASP_KINEMATIC as _KIN406
+                except Exception:      # noqa: BLE001
+                    _KIN406 = False
+                if _KIN406 and not job.watch.get("said_kin406"):
+                    job.watch["said_kin406"] = True
+                    self.say("[JUDGE] 손 안 어긋남(406) **판별불가** — 키네마틱 파지는 "
+                             "매 스텝 책을 손에 맞춰 다시 써 넣는다. 이 신호는 "
+                             "마찰 파지(SIM_GRASP_KINEMATIC=0)에서만 의미가 있다")
                 if os.environ.get("SIM_DRIFT_LOG", "0") != "0" or \
                         os.environ.get("SIM_DRIFT_METRIC", "center") == "center":
                     try:
