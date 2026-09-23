@@ -1,0 +1,90 @@
+=== bookshelves 16개: book_cube(책 무더기) 유무와 위치 ===
+  서가                                     book_cube 서가 중심 xyz (world)        책무더기 크기
+  shelf_brown__book_shelf                있음        (-2.261, -2.422, 1.260)  [1.342, 0.219, 2.473]
+  shelf_brown__book_shelf_01             없음(빈서가)   (2.572, -2.422, 1.260)   -
+  shelf_brown__book_shelf_02             있음        (0.959, -2.422, 1.260)   [1.342, 0.219, 2.473]
+  shelf_brown__book_shelf_03             있음        (-0.659, -2.422, 1.260)  [1.342, 0.219, 2.473]
+  shelf_brown__book_shelf_04             있음        (-2.261, -0.299, 1.260)  [1.342, 0.219, 2.473]
+  shelf_brown__book_shelf_05             있음        (2.572, -0.299, 1.260)   [1.342, 0.219, 2.473]
+  shelf_brown__book_shelf_06             있음        (0.959, -0.299, 1.260)   [1.342, 0.219, 2.473]
+  shelf_brown__book_shelf_07             있음        (-0.659, -0.299, 1.260)  [1.342, 0.219, 2.473]
+  shelf_brown__book_shelf_08             있음        (-2.261, 1.827, 1.260)   [1.342, 0.219, 2.473]
+  shelf_brown__book_shelf_09             있음        (2.572, 1.827, 1.260)    [1.342, 0.219, 2.473]
+  shelf_brown__book_shelf_10             있음        (0.959, 1.827, 1.260)    [1.342, 0.219, 2.473]
+  shelf_brown__book_shelf_11             있음        (-0.659, 1.827, 1.260)   [1.342, 0.219, 2.473]
+  shelf_brown__book_shelf_12             있음        (-2.261, 4.098, 1.260)   [1.342, 0.219, 2.473]
+  shelf_brown__book_shelf_13             있음        (2.572, 4.098, 1.260)    [1.342, 0.219, 2.473]
+  shelf_brown__book_shelf_14             있음        (0.959, 4.098, 1.260)    [1.342, 0.219, 2.473]
+  shelf_brown__book_shelf_15             있음        (-0.659, 4.098, 1.260)   [1.342, 0.219, 2.473]
+
+=== /World/books (낱권 책 에셋) ===
+  thirdFloor                     Scope    active=True  크기 [1.316, 0.321, 0.287]  중심 (2.573, -2.440, 1.723)
+      decorative_book_set_01_2k__book_softcover_01_cover01 Xform
+      decorative_book_set_01_2k__book_hardcover_01_cover02 Xform
+      decorative_book_set_01_2k__catalogue_hardcover_01_cover03 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover04 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover05 Xform
+      decorative_book_set_01_2k__book_hardcover_01_cover06 Xform
+      decorative_book_set_01_2k__book_hardcover_01_cover07 Xform
+      decorative_book_set_01_2k__book_hardcover_01_cover08 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover09 Xform
+      decorative_book_set_01_2k__catalogue_softcover_01_cover10 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover11 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover12 Xform
+      decorative_book_set_01_2k__book_hardcover_01_cover13 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover14 Xform
+      decorative_book_set_01_2k__book_hardcover_01_cover15 Xform
+      decorative_book_set_01_2k__magazine_01_cover16 Xform
+      decorative_book_set_01_2k__magazine_01_cover17 Xform
+      decorative_book_set_01_2k__magazine_01_cover18 Xform
+      decorative_book_set_01_2k__magazine_01_cover19 Xform
+      decorative_book_set_01_2k__magazine_01_cover20 Xform
+      book_encyclopedia          Scope
+  secondFloor                    Scope    active=True  크기 [1.267, 0.229, 0.285]  중심 (2.544, -2.472, 1.185)
+      decorative_book_set_01_2k__magazine_01_cover21 Xform
+      decorative_book_set_01_2k__magazine_01_cover22 Xform
+      decorative_book_set_01_2k__book_hardcover_01_cover23 Xform
+      decorative_book_set_01_2k__book_hardcover_01_cover24 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover25 Xform
+      decorative_book_set_01_2k__catalogue_softcover_01_cover26 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover27 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover28 Xform
+      decorative_book_set_01_2k__book_hardcover_01_cover29 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover31 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover32 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover33 Xform
+      decorative_book_set_01_2k__book_hardcover_01_cover34 Xform
+      decorative_book_set_01_2k__book_hardcover_01_cover35 Xform
+      decorative_book_set_01_2k__book_hardcover_01_cover36 Xform
+      decorative_book_set_01_2k__book_hardcover_01_cover37 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover38 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover39 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover40 Xform
+      decorative_book_set_01_2k__book_hardcover_01_cover41 Xform
+      decorative_book_set_01_2k__book_hardcover_01_cover42 Xform
+      decorative_book_set_01_2k__magazine_01_cover43 Xform
+      decorative_book_set_01_2k__catalogue_hardcover_01_cover44 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover45 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover46 Xform
+      decorative_book_set_01_2k__book_hardcover_01_cover47 Xform
+      decorative_book_set_01_2k__book_hardcover_01_cover48 Xform
+      decorative_book_set_01_2k__book_hardcover_01_cover49 Xform
+      decorative_book_set_01_2k__magazine_01_cover50 Xform
+      decorative_book_set_01_2k__book_hardcover_01_cover51 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover52 Xform
+      decorative_book_set_01_2k__magazine_01_cover53 Xform
+      decorative_book_set_01_2k__book_hardcover_01_cover54 Xform
+      decorative_book_set_01_2k__catalogue_hardcover_01_cover55 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover56 Xform
+      decorative_book_set_01_2k__catalogue_softcover_01_cover57 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover58 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover59 Xform
+      decorative_book_set_01_2k__catalogue_hardcover_01_cover60 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover61 Xform
+      decorative_book_set_01_2k__book_hardcover_01_cover62 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover63 Xform
+      decorative_book_set_01_2k__book_softcover_01_cover64 Xform
+  etc_books                      Scope    active=False  크기 -  중심 -
+
+=== 목표 서가(shelf_brown__book_shelf_01) 선반 판 높이 ===
+  고유 z 값: [0.0, 0.443, 0.498, 0.987, 1.042, 1.526, 1.581, 2.003, 2.058, 2.474, 2.52]

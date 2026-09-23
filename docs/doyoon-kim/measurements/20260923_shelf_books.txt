@@ -1,0 +1,49 @@
+=== /World 최상위 ===
+  ridgeback_franka                   Xform      자식 23
+  bookshelves                        Scope      자식 16
+  books                              Scope      자식 3
+  walls                              Scope      자식 4
+  floor                              Scope      자식 11
+  TEMP                               Scope      자식 2
+  Looks                              Scope      자식 0
+  fixtures                           Scope      자식 0
+  tray_books                         Scope      자식 6
+
+=== 서가 하나(shelf_brown__book_shelf_01) 전체 계층 ===
+  shelf_brown__book_shelf_01               Xform      active=True
+    book_shelf_usd                           Xform      active=True
+      book_shelf_001                           Mesh       active=True  메시 정점 92
+    _materials                               Scope      active=True
+      shelf_brown__book_shelf_usd              Material   active=True
+        Principled_BSDF                          Shader     active=True
+        Image_Texture                            Shader     active=True
+        UV_Map                                   Shader     active=True
+        Image_Texture_001                        Shader     active=True
+
+=== 이름에 book 이 든 Xform 중 서가 쪽 (개별 책 후보) ===
+  /World/bookshelves/shelf_brown__book_shelf                     active=True  크기 [1.412, 0.305, 2.520]
+  /World/bookshelves/shelf_brown__book_shelf/book_shelf          active=True  크기 [1.412, 0.305, 2.520]
+  /bookshelves/shelf_brown__book_shelf/book_shelf/book_shelf_usd active=True  크기 [1.412, 0.305, 2.520]
+  /World/bookshelves/shelf_brown__book_shelf/book_cube           active=True  크기 [1.342, 0.219, 2.473]
+  ld/bookshelves/shelf_brown__book_shelf/book_cube/book_cube_usd active=True  크기 [1.342, 0.219, 2.473]
+  /World/bookshelves/shelf_brown__book_shelf_01                  active=True  크기 [1.412, 0.305, 2.520]
+  /World/bookshelves/shelf_brown__book_shelf_01/book_shelf_usd   active=True  크기 [1.412, 0.305, 2.520]
+  /World/bookshelves/shelf_brown__book_shelf_02                  active=True  크기 [1.412, 0.305, 2.520]
+  /World/bookshelves/shelf_brown__book_shelf_02/book_shelf       active=True  크기 [1.412, 0.305, 2.520]
+  okshelves/shelf_brown__book_shelf_02/book_shelf/book_shelf_usd active=True  크기 [1.412, 0.305, 2.520]
+  /World/bookshelves/shelf_brown__book_shelf_02/book_cube        active=True  크기 [1.342, 0.219, 2.473]
+  bookshelves/shelf_brown__book_shelf_02/book_cube/book_cube_usd active=True  크기 [1.342, 0.219, 2.473]
+  /World/bookshelves/shelf_brown__book_shelf_03                  active=True  크기 [1.412, 0.305, 2.520]
+  /World/bookshelves/shelf_brown__book_shelf_03/book_shelf       active=True  크기 [1.412, 0.305, 2.520]
+  okshelves/shelf_brown__book_shelf_03/book_shelf/book_shelf_usd active=True  크기 [1.412, 0.305, 2.520]
+  /World/bookshelves/shelf_brown__book_shelf_03/book_cube        active=True  크기 [1.342, 0.219, 2.473]
+  bookshelves/shelf_brown__book_shelf_03/book_cube/book_cube_usd active=True  크기 [1.342, 0.219, 2.473]
+  /World/bookshelves/shelf_brown__book_shelf_04                  active=True  크기 [1.412, 0.305, 2.520]
+  /World/bookshelves/shelf_brown__book_shelf_04/book_shelf       active=True  크기 [1.412, 0.305, 2.520]
+  okshelves/shelf_brown__book_shelf_04/book_shelf/book_shelf_usd active=True  크기 [1.412, 0.305, 2.520]
+  /World/bookshelves/shelf_brown__book_shelf_04/book_cube        active=True  크기 [1.342, 0.219, 2.473]
+  bookshelves/shelf_brown__book_shelf_04/book_cube/book_cube_usd active=True  크기 [1.342, 0.219, 2.473]
+  /World/bookshelves/shelf_brown__book_shelf_05                  active=True  크기 [1.412, 0.305, 2.520]
+  /World/bookshelves/shelf_brown__book_shelf_05/book_shelf       active=True  크기 [1.412, 0.305, 2.520]
+  okshelves/shelf_brown__book_shelf_05/book_shelf/book_shelf_usd active=True  크기 [1.412, 0.305, 2.520]
+  합계 226

@@ -93,6 +93,12 @@ TRAY_CLEAR_M = float(os.environ.get("SIM_TRAY_CLEAR", "0.004"))
 #: 레벨에 이미 책이 칸에 꽂혀 있는데 굳이 복제본을 만들어 세워 넣을 이유가 없다 —
 #: 그 과정에서 자세·치수·콜리전이 원본과 달라진다.
 USE_LEVEL_TRAY = os.environ.get("SIM_USE_LEVEL_TRAY", "1") != "0"
+#: 꽂은 책이 **옆 책 속에 박혔는지**를 기하로 본다 (`jam_report`).
+#: 서가 낱권 책에는 콜리전이 없어서 물리로는 절대 안 막힌다 — 끄면 꽉 찬 칸에
+#: 꽂아도 성공으로 보고된다. 그래서 기본은 켜짐이다.
+JAM_CHECK = os.environ.get("SIM_JAM_CHECK", "1") != "0"
+#: 허용 침투 (m). 서가 책들끼리 이미 0.7~4.6 mm 겹쳐 있어서(9/23 실측) 그보다 낮출 수 없다.
+JAM_TOL = float(os.environ.get("SIM_JAM_TOL", "0.005"))
 DECK_Z = BOT.deck_z         # 트레이가 놓이는 면의 월드 높이 (로봇별)
 # 링크가 이보다 낮으면 받침판을 뚫는 것으로 본다 (팔 베이스가 판 위에 바로 붙어 있다)
 # 팔이 받침판을 이만큼까지 파고드는 것은 눈감아 준다 (충돌 구가 근사값이라 여유가 필요하다)
@@ -273,7 +279,7 @@ class BookScene:
             f"손대지않음={HANDS_OFF} 키네마틱파지={GRASP_KINEMATIC} 그리퍼90도={GRIP_ROT90} "
             f"차체고정={FIX_BASE} 관절구간={os.environ.get('SIM_JOINT_SEGS', '(기본)')} "
             f"운반={os.environ.get('SIM_CARRY_MODE', 'joint')} 복귀={os.environ.get('SIM_RETURN_MODE', 'joint')} "
-            f"경로검사={os.environ.get('SIM_PATH_AUDIT', '0')}")
+            f"경로검사={os.environ.get('SIM_PATH_AUDIT', '0')} 겹침검사={JAM_CHECK}")
         _resolve_kiosk_tray(st, say)
         self._cache = create_bbox_cache()
 
@@ -2364,6 +2370,56 @@ class BookScene:
             c = c + Rb @ np.asarray(self.grasp_local[b][0], float)
         return Rh.T @ (c - np.asarray(hp, float)), Rh.T @ Rb
 
+    def shelf_book_boxes(self, board_z=None, tol=0.10):
+        """서가에 꽂힌 **낱권 책**들의 월드 AABB. 우리 책은 빼고 본다.
+
+        왜 필요한가 (2026-09-23 실측): 서가 낱권 책 64권은 `RigidBodyAPI` 도
+        `CollisionAPI` 도 없다 — 순전히 장식이다. 그래서 **꽉 찬 칸에 꽂아도 책이
+        옆 책을 그냥 통과하고**, `verify()` 는 우리 책 하나만 보므로 그걸 성공으로
+        보고한다. 물리가 말해 주지 않으니 기하가 말해야 한다.
+
+        `/World/books/<층>/<책>` 이 서가 책이고, 우리가 다루는 책은
+        `/World/tray_books/*`(레벨 트레이) 또는 `/World/bs_books/*`(스폰) 이다.
+        `board_z` 를 주면 그 선반판 위 `tol` 안에 있는 책만 돌려준다.
+        """
+        root = self.stage.GetPrimAtPath("/World/books")
+        if not root.IsValid():
+            return []
+        mine = set(self.books)
+        out = []
+        for floor in root.GetChildren():
+            for c in floor.GetChildren():
+                path = str(c.GetPath())
+                if path in mine:
+                    continue
+                b = self.aabb(path)
+                if not np.all(np.isfinite(b)) or np.any(b[3:] - b[:3] <= 0):
+                    continue
+                if board_z is not None and abs(float(b[2]) - float(board_z)) > tol:
+                    continue
+                out.append((path, b))
+        return out
+
+    def jam_report(self, bb, board_z):
+        """꽂은 책이 **옆 책 속에 박혀 있는가** — 침투 깊이(m)와 최악의 이웃.
+
+        겹침 판정은 세 축 모두 겹칠 때만 성립하고, 침투 깊이는 **떼어내는 데 필요한
+        최소 이동량**(세 축 겹침 중 가장 작은 값)으로 잰다.
+
+        주의: 서가 책들끼리도 AABB 가 이미 −0.7~−4.6 mm 겹쳐 있다(9/23 실측,
+        `secondFloor` 43권). 그래서 임계값 기본을 5 mm 로 둔다 — 이건 **관측된
+        바닥값**이지 통과시키려고 올린 문턱이 아니다.
+        """
+        worst, who, axes = 0.0, "", None
+        for path, nb in self.shelf_book_boxes(board_z):
+            ov = np.minimum(bb[3:], nb[3:]) - np.maximum(bb[:3], nb[:3])
+            if np.any(ov <= 0):
+                continue                      # 한 축이라도 안 겹치면 떨어져 있다
+            d = float(np.min(ov))
+            if d > worst:
+                worst, who, axes = d, path.rsplit("/", 1)[-1], ov.copy()
+        return worst, who, axes
+
     def verify(self, plan):
         """꽂힌 책 판정 (multi_book 과 같은 기준)"""
         bb = self.aabb(plan["book"])
@@ -2375,6 +2431,17 @@ class BookScene:
             "x": abs((bb[0] + bb[3]) / 2 - plan["place_x"]) < 0.015,
             "floor": abs(bb[2] - plan["floor_z"]) < 0.03,
         }
+        # 옆 책과 겹쳤는가 (T1). 물리가 막아 주지 않으므로 기하로 잰다 — 위 머리말 참조.
+        if JAM_CHECK:
+            jam, who, axes = self.jam_report(bb, plan.get("floor_z"))
+            checks["no_jam"] = jam <= JAM_TOL
+            if jam > 0:
+                self.say(f"[겹침] 꽂은 책이 '{who}' 와 {jam*1000:.1f} mm 겹친다 "
+                         f"(축별 {np.round(axes*1000, 1).tolist()} mm, 임계 {JAM_TOL*1000:.0f} mm) "
+                         f"— 서가 책은 콜리전이 없어 물리로는 안 막힌다")
+            else:
+                n = len(self.shelf_book_boxes(plan.get("floor_z")))
+                self.say(f"[겹침] 옆 책과 겹치지 않음 (그 판의 서가 책 {n}권과 대조)")
         return all(checks.values()), checks, bb
 
     def survey(self):
