@@ -44,8 +44,10 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--usd", default=os.environ.get("SIM_USD", ""))
 ap.add_argument("--shelf", default="/World/bookshelves/shelf_brown__book_shelf_01",
                 help="낱권 책이 있는 서가. 나머지 15개는 책이 통짜 메시 하나라 잴 것이 없다")
-ap.add_argument("--floors", nargs="+", default=["thirdFloor", "secondFloor"],
-                help="/World/books 아래 층 이름")
+ap.add_argument("--floors", nargs="*", default=None,
+                help="/World/books 아래 층 이름. **비우면 있는 것을 전부** 잰다 — "
+                     "층 이름은 레벨이 바뀌면 같이 바뀌므로(9/23 secondFloor→thirdFloor, "
+                     "forthFloor 신설) 이름을 박아 두면 새 층을 조용히 놓친다")
 ap.add_argument("--report", default="", help="사람이 읽을 보고서 경로 (.txt)")
 ap.add_argument("--yaml", default="", help="정답지 경로 (.yaml)")
 ap.add_argument("--book-thick-mm", type=float, default=35.3, help="우리가 꽂을 책 두께")
@@ -146,7 +148,11 @@ w(f"  (고유 z 전부: {zs})")
 
 # ------------------------------------------------------------------ ②③ 층별
 floors = {}
-for name in a.floors:
+_root = st.GetPrimAtPath("/World/books")
+_names = a.floors if a.floors else [c.GetName() for c in _root.GetChildren()]
+w("")
+w(f"  /World/books 아래 층: {[c.GetName() for c in _root.GetChildren()]}")
+for name in _names:
     sc = st.GetPrimAtPath(f"/World/books/{name}")
     if not sc.IsValid():
         w(f"\n[건너뜀] /World/books/{name} 없음")
