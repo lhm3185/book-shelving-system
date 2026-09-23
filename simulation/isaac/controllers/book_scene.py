@@ -2136,10 +2136,35 @@ class BookScene:
         ])
 
     def trace(self, book, tag):
-        """문제를 찾을 때 책 위치를 단계별로 남긴다 (책 종류가 섞이면 실패 지점이 달라진다)"""
+        """문제를 찾을 때 책 위치를 단계별로 남긴다 (책 종류가 섞이면 실패 지점이 달라진다).
+
+        **기울기를 같이 남긴다.** 2026-09-24 에 꽂힌 책이 늘 2~3° 비뚤다는 것을 알았는데,
+        그것이 **놓기 전에 이미 있는지 놓은 뒤에 생기는지**를 가를 자료가 없었다.
+        `놓기직전` 과 `놓음` 두 줄을 견주면 한 판으로 갈린다.
+        """
         b = self.aabb(book); c = (b[:3] + b[3:]) / 2
         self.say(f"  [{tag}] {book.rsplit('/', 1)[1]} 중심 {np.round(c, 3).tolist()} "
-                 f"크기 {np.round([b[3] - b[0], b[4] - b[1], b[5] - b[2]], 3).tolist()}")
+                 f"크기 {np.round([b[3] - b[0], b[4] - b[1], b[5] - b[2]], 3).tolist()} "
+                 f"틀어짐 {self.axis_skew_deg(book):.2f}°")
+
+    def axis_skew_deg(self, book) -> float:
+        """책이 **세상 축에서** 얼마나 틀어져 있는가 (도). 반듯하면 0.
+
+        축 이름은 상관없다 — 어느 축이 어디로 가든, 세 축이 세상 축에 나란하기만 하면
+        0 이다. 그래서 90° 회전(트레이 ↔ 서가)에는 안 걸리고 **기울기만** 잡는다.
+        """
+        try:
+            q = SingleXFormPrim(book).get_world_pose()[1]
+            R = R_from_quat(np.asarray(q, float))
+            worst = 0.0
+            for j in range(3):
+                v = R[:, j]
+                # 가장 가까운 세상 축과의 각 (부호 무시)
+                c = float(np.max(np.abs(v)))
+                worst = max(worst, math.degrees(math.acos(min(1.0, max(0.0, c)))))
+            return worst
+        except Exception:      # noqa: BLE001 - 계측이 작업을 막으면 안 된다
+            return float("nan")
 
     def diag_attach_tick(self):
         """`attach()` **한 스텝 뒤** 앵커 기대값과 실제 책 자세의 차이를 손 기준으로 적는다.
@@ -2505,10 +2530,14 @@ class BookScene:
         # 정렬을 켰는데 이 값이 0 에 가까우면 명령이 손까지 못 갔다는 뜻이고,
         # 정렬한 각과 같으면 손은 돌았는데 효과가 없었다는 뜻이다. 둘은 고칠 곳이 다르다.
         try:
-            _hand_tilt = quat_angle(np.asarray(hq, float), np.asarray(self.DOWN, float))
-            self.say(f"[파지] 손이 기준자세(DOWN)에서 {math.degrees(_hand_tilt):.2f}° 돌아 있다 · "
-                     f"손 기준 책 자세 {np.round(np.asarray(rel_q, float), 4).tolist()} "
-                     f"— **꽂힐 때의 기울기는 이 상대 자세가 정한다**")
+            _a = math.degrees(quat_angle(np.asarray(hq, float), np.asarray(self.DOWN, float)))
+            # `hq` 는 손 **링크**의 자세이고 `DOWN` 은 손끝 기준이라 규약 차이로 180°
+            # 가까이 나온다. 2026-09-24 에 179.94° 가 찍혀 읽을 수 없었다. 규약 차이를
+            # 접어 **기준자세에서 벗어난 양**만 남긴다 — 정렬을 켜면 이 값이 그만큼 커져야 한다.
+            _dev = min(_a, 180.0 - _a)
+            self.say(f"[파지] 손이 기준자세에서 {_dev:.2f}° 벗어나 있다 (원값 {_a:.2f}°) · "
+                     f"손 기준 책 자세 {np.round(np.asarray(rel_q, float), 4).tolist()} · "
+                     f"책이 세상 축에서 {self.axis_skew_deg(book):.2f}° 틀어져 있다")
         except Exception as _exc:      # noqa: BLE001 - 계측이 작업을 막으면 안 된다
             self.say(f"[파지] 손 기울기 계산 실패: {type(_exc).__name__}: {_exc}")
         if GRASP_KINEMATIC:
