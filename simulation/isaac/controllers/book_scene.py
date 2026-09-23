@@ -544,6 +544,30 @@ class BookScene:
                 if min(d) < 0.005:
                     raise RuntimeError(f"레벨 책 치수가 비었다 {path} {d}")
                 self.dims[path] = d
+                # **책 콜리전 근사를 바꾼다** (`SIM_BOOK_COLL`, 기본 그대로 둠).
+                #
+                # 레벨 책은 `convexHull` 이다. 그런데 바로 위 스폰 경로(561~564)에는
+                # 이런 주석이 이미 붙어 있다:
+                #
+                #   "표지가 둥근 책은 convexHull 이면 흔들려 넘어진다. 책은 상자에
+                #    가까우므로 boundingCube 로 두면 트레이에 그대로 서 있는다."
+                #
+                # 2026-09-24: 꽂힌 책이 무엇을 해도 2.1~3.5° 로 기운다. 도착 yaw ·
+                # 파지 정렬 · 파지 시점 기울기 · 손 안 자세 · 떠오름 16 mm · 콜라이더
+                # 면 위치를 전부 지웠는데 안 움직인다. **끌개가 있다**는 뜻이고,
+                # 둥근 표지의 볼록 껍질은 바로 그런 끌개다 — 밑면이 평평하지 않으면
+                # 어디서 놓든 같은 각도로 눕는다. 위 주석이 이미 그렇게 말하고 있다.
+                #
+                # `boundingCube` 는 동적 강체에도 합법이다 (상자라서). `none` 과 달리
+                # PhysX 가 조용히 갈아치우지 않는다.
+                _bc = os.environ.get("SIM_BOOK_COLL", "").strip()
+                if _bc:
+                    _n = 0
+                    for _m in Usd.PrimRange(c):
+                        if _m.HasAPI(UsdPhysics.CollisionAPI):
+                            UsdPhysics.MeshCollisionAPI.Apply(_m).CreateApproximationAttr().Set(_bc)
+                            _n += 1
+                    say(f"[책콜리전] {path.rsplit('/', 1)[-1][:34]} — {_n}개를 '{_bc}' 로")
                 say(f"[레벨책] {path.rsplit('/', 1)[-1][:40]}  중심 {np.round(ctr, 3).tolist()}  "
                     f"치수 {[round(float(v), 3) for v in d]}")
             if not self.books:
