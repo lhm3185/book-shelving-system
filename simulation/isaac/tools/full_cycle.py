@@ -165,7 +165,16 @@ def main():
         import subprocess
         import os
         here = os.path.dirname(os.path.abspath(__file__))
-        r = subprocess.run([sys.executable, os.path.join(here, "pick_from_vision.py")])
+        # **실제로 선 자리를 하위 프로세스에 넘긴다.** pick_from_vision 은 SIM_PICK_Y 에서
+        # 짝 규칙으로 GOAL_Y 를 만드는데, 안 넘기면 기준점(−3.019)을 보고 0.5495 를 만든다.
+        # 그러면 차체는 여기로 왔는데 팔은 저기를 겨누는, 짝 규칙이 막으려던 바로 그
+        # 사고가 난다 (2026-09-23 실측: 여유 −0.001 rad, spine·floor 판정 실패로 409).
+        # `--pick-y` 로 자리를 바꿔도 이 경로로 따라간다.
+        _env = dict(os.environ, SIM_PICK_Y=f"{float(a.pick_y):.6g}")
+        print(f"       짝 규칙: 선 자리 y {a.pick_y:+.4f} → 팔 기준 목표 y "
+              f"{0.5495 + (-3.019 - float(a.pick_y)):.4f} "
+              f"{'(SIM_GOAL_Y 로 덮어씀)' if os.environ.get('SIM_GOAL_Y') else ''}")
+        r = subprocess.run([sys.executable, os.path.join(here, "pick_from_vision.py")], env=_env)
         ok = r.returncode == 0
         print("       " + ("파지·반납 성공" if ok else f"**파지 실패 (코드 {r.returncode})**"))
         rclpy.init()
