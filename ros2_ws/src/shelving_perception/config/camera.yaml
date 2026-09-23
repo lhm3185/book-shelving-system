@@ -8,7 +8,7 @@ vision_manager:
     perception_action: /detect_target_slot
     wait_for_trigger: true
     camera_frame: sim_camera
-    target_frame: world
+    target_frame: arm_base_link
     depth_registered: true
     depth_scale: 0.0
     sync_slop: 0.1
@@ -30,4 +30,5 @@ vision_manager:
     gripper_pitch: 0.0
     gripper_yaw_offset: 0.0
     insertion_depth: 0.30
+    slot_center_inset: 0.024
     pre_insert_offset: 0.05

@@ -6,9 +6,11 @@ vision_manager:
     camera_info_topic: /camera_info
     trigger_topic: /perception/detect_request
     perception_action: /detect_target_slot
+    # 통합 실행에서는 manipulation_node가 이 액션을 소유하며 두 층 팔 스캔을 조율합니다.
+    enable_action_server: false
     wait_for_trigger: true
     camera_frame: sim_camera
-    target_frame: world
+    target_frame: arm_base_link
     depth_registered: true
     depth_scale: 0.0
     sync_slop: 0.1
@@ -30,6 +32,8 @@ vision_manager:
     gripper_pitch: 0.0
     gripper_yaw_offset: 0.0
     insertion_depth: 0.30
+    # 책장 전면 → 삽입 완료 후 책등 위치의 실측 여유(m).
+    slot_center_inset: 0.024
     pre_insert_offset: 0.05
     # Shelf targeting is disabled for the book-only validation stage.
     # target_topic: /perception/empty_shelf_position
@@ -42,3 +46,7 @@ vision_manager:
     # pre_insert_offset: 0.05
     # target_confidence: 1.0
     confidence_threshold: 0.75
+    # 트레이 ROI(팔 기준 3D 상자). 이 레벨은 반납기 트레이(yaw 0)가 카트(yaw 90)에 실려 **책이 팔 +Y 방향으로**
+    # 늘어선다 — 기본 상자(x 방향으로 길쭉)는 가운데 3권만 덮었다 (2026-09-23 스냅샷). y 를 -0.20~0.30 으로 눕힌다.
+    book_roi_min: [-0.69, -0.20, 0.00]
+    book_roi_max: [-0.26, 0.30, 0.32]

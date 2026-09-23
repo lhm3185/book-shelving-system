@@ -1,0 +1,191 @@
+"""서가 스캔 자세 계획 — 카메라를 어디에 두고 어디를 볼지 정한다.
+
+**베이스를 움직이지 않는다.** 반납할 그 자리에서 팔만 접어 선반을 훑는다.
+그래야 비전이 기억한 빈칸 좌표를 `arm_base_link` 그대로 쓸 수 있다 —
+베이스가 움직이면 그 사이에 좌표계가 틀어진다 (2026-09-21: 주행 뒤 8.1 cm·4.37°).
+
+## 좌표와 실측값 (2026-09-22, Isaac 5.1.0 / Franka + RSD455)
+
+손 ↔ 카메라는 고정이다. 손 기준으로:
+
+    위치   (-0.0400, +0.0015, +0.0164) m
+    시선   손의 +Z   (= 그리퍼가 접근하는 방향)
+    위쪽   손의 +X
+
+즉 **카메라는 그리퍼가 가는 쪽을 본다.** 스캔 자세는 "선반을 향해 손을 뻗는 자세"와
+같은 계열이라, 파지 자세에서 크게 벗어나지 않는다.
+
+## 어디까지 볼 수 있나 (IK 실측, 팔 베이스 월드 z 0.28)
+
+| 선반판 z | 결과 |
+| --- | --- |
+| 0.498 | **내려다보면**(-10°) 정면 포함 전부 풀린다. 수평·올려보기로는 정면에 해가 없다 |
+| 1.042 | 자유롭게 (수평, 거리 0.55~0.75 전부) |
+| 1.581 | **30° 이상 올려다보면** 잡힌다 |
+| 2.058 | **어떤 각도·거리로도 해가 없다** — 팔 길이의 한계 |
+
+0.498 이 수평에서 정면만 안 되는 이유: 카메라를 낮게 두고 수평으로 보려면 팔을 접어야 하는데
+정면에서는 팔꿈치가 걸린다. **내려다보면 팔을 펴고 볼 수 있어** 풀린다.
+처음에는 올려다보는 각만 시험해서 "정면은 불가" 라고 판단했다 — 아래쪽도 봤어야 했다.
+
+**스캔 범위가 반납 범위보다 한 단 넓다.** 1.581 은 보이지만 꽂을 수는 없다
+(삽입은 손을 0.75 m 앞으로 뻗어야 해서 1.1~1.2 m 가 한계).
+따라서 "보이는데 못 넣는 칸"이 실제로 생기고, 그 판정은 로봇팔이 해야 한다.
+"""
+
+import math
+
+import numpy as np
+
+# 손 기준 카메라 (실측)
+T_HAND_CAM = np.array([-0.0400, 0.0015, 0.0164])
+# 열 = 손 기준 카메라 축 (camX, camY, camZ)
+R_HAND_CAM = np.array([[0.0, 1.0, 0.0],
+                       [1.0, 0.0, 0.0],
+                       [0.0, 0.0, -1.0]])
+
+SHELF_FACE_Y = 0.749        # 팔 기준 서가 앞면 (검증된 파지 위치에서)
+BOOK_CENTER_H = 0.12        # 선반판 위 책 중심 높이 (대략)
+ARM_BASE_Z = 0.28           # 팔 베이스 월드 높이 — 선반판 z 를 팔 기준으로 바꿀 때 쓴다
+
+#: 판별 스캔 자세. (선반판 월드 z, 좌우 위치 cx, 카메라–목표 거리 d, 위로 드는 각 deg)
+#: 전부 **IK 해가 있는 것으로 실측된 조합**이다 (2026-09-22).
+#:
+#: 아래 판은 **내려다본다**(-10°). 수평·올려보기로는 정면(cx=0)에 해가 없었는데,
+#: 내려다보면 풀린다 — 카메라를 낮게 두고 수평으로 보려면 팔을 접어야 해서
+#: 정면에서 팔꿈치가 걸리기 때문이다. 내려다보면 팔을 펴고 볼 수 있다.
+#:
+#: 순서도 관절 변화를 줄이려고 고른 것이다. 이웃 자세 사이 최대 변화:
+#:   수평 + 앞 해만 씨앗    254.6°   ← 처음
+#:   다중 씨앗              172.4°
+#:   **아래판 내려다보기     83.3°**  ← 채택
+#: 좌우를 지그재그로 도는 '뱀 순서' 는 오히려 102.7° 로 나빴다.
+SCAN_TABLE = (
+    # 아래 판 — 내려다본다. 정면도 풀린다
+    (0.498, -0.30, 0.75, -10.0),
+    (0.498, 0.00, 0.75, -10.0),
+    (0.498, +0.30, 0.75, -10.0),
+    # 가운데 판 — 수평. 가장 자유롭다
+    (1.042, +0.30, 0.65, 0.0),
+    (1.042, 0.00, 0.65, 0.0),
+    (1.042, -0.30, 0.65, 0.0),
+    # 위 판 — 40° 올려다봐야 잡힌다. 꽂을 수는 없지만 **보이는 것은 보고한다**
+    (1.581, -0.30, 0.60, 40.0),
+    (1.581, 0.00, 0.60, 40.0),
+    (1.581, +0.30, 0.60, 40.0),
+)
+
+#: IK 를 풀 때 쓸 씨앗 수. 앞 자세 하나만 쓰면 가지가 튀어 관절이 크게 돈다.
+#: joint_1·3·5·7 을 ±0.6/±1.2 rad 흔든 변형까지 풀어 **앞 자세와 가장 가까운 해**를 고른다.
+SEED_JOINTS = (0, 2, 4, 6)
+SEED_DELTAS = (-1.2, -0.6, 0.6, 1.2)
+
+#: 이 값을 넘는 관절 변화가 이웃 자세 사이에 생기면 경고한다 (rad)
+MAX_STEP_RAD = 1.6
+
+#: 팔이 꽂을 수 있는 선반판. 스캔 범위보다 좁다 (위 문서 참조)
+REACHABLE_BOARDS = (0.498, 1.042)
+
+
+def camera_rotation(tilt_rad):
+    """팔 기준 카메라 회전 — +Y 를 보되 위로 `tilt_rad` 만큼 든다.
+
+    열이 카메라 축이다: camX = 팔 +X, camY(위) 와 camZ 는 tilt 만큼 돌아간다.
+    카메라는 자기 **-Z** 를 보므로 camZ = -시선이다.
+    """
+    c, s = math.cos(tilt_rad), math.sin(tilt_rad)
+    return np.array([[1.0, 0.0, 0.0],
+                     [0.0, -s, -c],
+                     [0.0, c, -s]])
+
+
+def camera_pose(board_z, cx, distance, tilt_deg, arm_base_z=ARM_BASE_Z,
+                shelf_face_y=SHELF_FACE_Y):
+    """스캔 한 자세의 **카메라** 위치·회전 (팔 기준).
+
+    목표점은 선반 앞면(`SHELF_FACE_Y`)의 책 중심 높이다. 카메라는 그 점에서
+    시선 방향으로 `distance` 만큼 물러난 자리에 놓는다.
+    """
+    tilt = math.radians(tilt_deg)
+    target_z = board_z + BOOK_CENTER_H - arm_base_z
+    view = np.array([0.0, math.cos(tilt), math.sin(tilt)])   # 시선 (팔 기준)
+    pos = np.array([cx, shelf_face_y, target_z]) - distance * view
+    return pos, camera_rotation(tilt)
+
+
+def hand_pose(board_z, cx, distance, tilt_deg, arm_base_z=ARM_BASE_Z,
+              shelf_face_y=SHELF_FACE_Y):
+    """같은 자세를 **손** 기준으로 바꾼다 — IK 는 손을 푼다.
+
+    카메라는 손에 고정돼 있으므로 손 자세는 카메라 자세에서 그 고정 변환만큼 뺀 것이다.
+    """
+    cam_p, R_arm_cam = camera_pose(
+        board_z, cx, distance, tilt_deg, arm_base_z, shelf_face_y)
+    R_arm_hand = R_arm_cam @ R_HAND_CAM.T
+    return cam_p - R_arm_hand @ T_HAND_CAM, R_arm_hand
+
+
+def scan_poses(table=SCAN_TABLE, arm_base_z=ARM_BASE_Z,
+               shelf_face_y=SHELF_FACE_Y):
+    """스캔 순서대로 (이름, 손 위치, 손 회전, 메타) 를 내놓는다.
+
+    순서는 **아래에서 위로** 간다. 팔을 접었다 펴는 큰 이동을 줄이기 위해서다.
+    """
+    out = []
+    for board_z, cx, distance, tilt_deg in table:
+        p, R = hand_pose(
+            board_z, cx, distance, tilt_deg, arm_base_z, shelf_face_y)
+        side = "L" if cx < 0 else ("R" if cx > 0 else "C")
+        name = f"scan_{board_z:.3f}_{side}"
+        out.append((name, p, R, {"board_z": board_z, "cx": cx,
+                                 "distance": distance, "tilt_deg": tilt_deg,
+                                 "reachable": is_reachable_board(board_z)}))
+    return out
+
+
+def is_reachable_board(board_z, boards=REACHABLE_BOARDS, tol=0.01):
+    """이 선반판에 **꽂을 수** 있나. 스캔은 되지만 못 꽂는 판이 있다."""
+    return any(abs(board_z - b) <= tol for b in boards)
+
+
+def unreachable_slots(slots, boards=REACHABLE_BOARDS, tol=0.01, arm_base_z=ARM_BASE_Z):
+    """비전이 준 빈칸 중 **팔이 못 닿는 것**을 가려낸다 (1차 거름).
+
+    높이 문턱은 1차일 뿐이다. 경계 근처는 계획기로 실제 풀어 봐야 확정된다 —
+    도달 한계는 높이만이 아니라 수평 거리와 손 방향에도 걸리기 때문이다.
+    `slots` 는 팔 기준 (x, y, z) 목록이고, z 를 선반판 월드 높이로 되돌려 비교한다.
+    """
+    out = []
+    for i, s in enumerate(slots):
+        board = float(s[2]) + arm_base_z - BOOK_CENTER_H
+        if not is_reachable_board(board, boards, tol):
+            out.append((i, board))
+    return out
+
+
+def seeds_for(q_prev, home):
+    """IK 씨앗 목록 — 앞 자세, 홈, 그리고 앞 자세를 흔든 변형들.
+
+    앞 자세 하나만 씨앗으로 쓰면 Lula 가 자세마다 다른 가지를 골라 관절이 크게 돈다
+    (실측 254.6°). 여러 씨앗으로 풀어 **앞 자세와 가장 가까운 해**를 고르면 줄어든다.
+    """
+    out = [np.asarray(q_prev, float), np.asarray(home, float)]
+    for j in SEED_JOINTS:
+        for d in SEED_DELTAS:
+            v = np.asarray(q_prev, float).copy()
+            v[j] += d
+            out.append(v)
+    return out
+
+
+def pick_closest(candidates, q_prev):
+    """해 후보 중 앞 자세와 **가장 가까운** 것. 없으면 None."""
+    if not candidates:
+        return None
+    return min(candidates, key=lambda c: float(np.max(np.abs(np.asarray(c, float)
+                                                            - np.asarray(q_prev, float)))))
+
+
+def step_size(q_a, q_b):
+    """두 자세 사이 **가장 크게 도는 관절**의 변화량 (rad)."""
+    return float(np.max(np.abs(np.asarray(q_b, float) - np.asarray(q_a, float))))

@@ -35,11 +35,12 @@ export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 export FASTRTPS_DEFAULT_PROFILES_FILE="${FASTRTPS_DEFAULT_PROFILES_FILE-$REPO/config/fastdds_local.xml}"
 LOG="${LOG:-/tmp/b1_demo}"; mkdir -p "$LOG"
 
-KEEP_SIM=0; DO_PATROL=1; SPEED=0.5; GOAL_X=""
+KEEP_SIM=0; DO_PATROL=1; SPEED=0.5; GOAL_X=""; PATROL_ARGS=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --keep-sim)  KEEP_SIM=1 ;;
         --no-patrol) DO_PATROL=0 ;;
+        --patrol-zero) PATROL_ARGS+=(--zero) ;;   # 0 m 주행 (코드 경로는 그대로)
         --speed)     SPEED="$2"; shift ;;
         --goal-x)    GOAL_X="$2"; shift ;;
         *) echo "모르는 인자: $1"; exit 2 ;;
@@ -148,7 +149,7 @@ sleep 5
 # ------------------------------------------------------------------ 3. 순회
 if [ "$DO_PATROL" -eq 1 ]; then
     echo "[3/4] 도서관 한 바퀴 (약 $(python3 -c "print(int(32.04/$SPEED))")초)"
-    python3 "$REPO/simulation/isaac/tools/patrol.py" --speed "$SPEED" || {
+    python3 "$REPO/simulation/isaac/tools/patrol.py" --speed "$SPEED" "${PATROL_ARGS[@]}" || {
         echo "**주행 실패** — 여기서 멈춘다"; exit 1; }
 else
     echo "[3/4] 주행 건너뜀"

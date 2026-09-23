@@ -1,0 +1,35 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/keep_going.sh\"" }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Read", "Edit", "Write", "Glob", "Grep",
+      "Bash(git status *)", "Bash(git diff *)", "Bash(git log *)", "Bash(git add *)",
+      "Bash(git commit *)", "Bash(git tag *)", "Bash(git stash *)", "Bash(git checkout -- *)",
+      "Bash(git push origin feature/robot_control *)",
+      "Bash(ssh rokey@10.10.0.2 *)", "Bash(scp *)",
+      "Bash(python3 *)", "Bash(bash *)", "Bash(./scripts/*)", "Bash(./simulation/*)",
+      "Bash(colcon build *)", "Bash(source *)", "Bash(ros2 *)",
+      "Bash(ps *)", "Bash(kill *)", "Bash(sleep *)", "Bash(tail *)", "Bash(grep *)",
+      "Bash(ls *)", "Bash(cat *)", "Bash(mkdir *)", "Bash(df *)", "Bash(date *)",
+      "Bash(touch night/*)", "Bash(echo *)", "Bash(timeout *)"
+    ],
+    "deny": [
+      "Bash(pkill *)", "Bash(killall *)",
+      "Bash(git push origin main *)", "Bash(git push --force *)", "Bash(git push -f *)",
+      "Bash(git reset --hard *)", "Bash(rm -rf *)",
+      "Bash(gh pr *)",
+      "Edit(ros2_ws/src/shelving_perception/**)", "Edit(ros2_ws/src/shelving_system/**)",
+      "Edit(ros2_ws/src/shelving_navigation/**)", "Edit(ros2_ws/src/shelving_interfaces/**)",
+      "Write(ros2_ws/src/shelving_perception/**)", "Write(ros2_ws/src/shelving_system/**)",
+      "Write(ros2_ws/src/shelving_navigation/**)", "Write(ros2_ws/src/shelving_interfaces/**)"
+    ]
+  }
+}

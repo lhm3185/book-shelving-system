@@ -99,6 +99,10 @@ class Primitive:
     # 하위 클래스가 구현한다
     def on_start(self, ctx: Context) -> None: ...
 
+    def timeout_detail(self, ctx: Context) -> str:
+        """시간 초과 때 덧붙일 설명 — **느려서인지, 막혀서인지** 가릴 수 있게 (하위 클래스가 채운다)"""
+        return ""
+
     def on_update(self, ctx: Context) -> Status:
         return Status.SUCCEEDED
 
@@ -116,7 +120,7 @@ class Primitive:
             self.start(ctx)
         self._elapsed += 1
         if self._elapsed > self._limit:
-            ctx.error = f"{self.name}: 제한 시간 초과 ({self._limit} 스텝)"
+            ctx.error = f"{self.name}: 제한 시간 초과 ({self._limit} 스텝){self.timeout_detail(ctx)}"
             ctx.error_code = 404
             return Status.FAILED
         return self.on_update(ctx)
@@ -142,11 +146,19 @@ class MoveJoint(Primitive):
     name = "move_joint"
 
     def __init__(self, target: Sequence[float], speed_scale: float = 1.0,
-                 timeout_s: Optional[float] = None):
+                 timeout_s: Optional[float] = None, tolerance: Optional[float] = None):
         super().__init__(timeout_s)
+        self.tolerance = tolerance      # None 이면 설정(tolerance.joint_rad)
         self.target = np.asarray(target, dtype=float)
         self.speed_scale = speed_scale
         self._cmd: Optional[np.ndarray] = None
+
+    def timeout_detail(self, ctx: Context) -> str:
+        q = np.asarray(ctx.backend.get_joint_positions(), dtype=float)
+        n = min(len(q), len(self.target))
+        err = np.abs(q[:n] - self.target[:n])
+        return (f" — 진행 {self._s:.2f}/{self._length:.2f} rad, 남은 관절 오차 최대 {float(err.max()):.3f} rad"
+                f" (관절 {int(err.argmax()) + 1}), 오차 {np.round(err, 3).tolist()}")
 
     def on_start(self, ctx: Context) -> None:
         self._start = np.asarray(ctx.backend.get_joint_positions(), dtype=float).copy()
@@ -162,7 +174,7 @@ class MoveJoint(Primitive):
         max_speed = ctx.cfg("speed", "joint_rad_s", default=1.0) * self.speed_scale
         accel = ctx.cfg("speed", "joint_rad_s2", default=2.0) * self.speed_scale
         dt = ctx.backend.dt
-        tolerance = ctx.cfg("tolerance", "joint_rad", default=0.01)
+        tolerance = self.tolerance if self.tolerance is not None else ctx.cfg("tolerance", "joint_rad", default=0.01)
 
         remaining = self._length - self._s
         if remaining > 1e-12:

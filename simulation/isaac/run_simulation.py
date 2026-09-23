@@ -52,14 +52,23 @@ ap.add_argument("--camera-hz", type=float, default=10.0)
 ap.add_argument("--sensor-policy", choices=["gated", "always"], default="gated")
 ap.add_argument("--amr-test-overrides", action="store_true",
                 help="AMR 에셋의 라이다 fullScan·TF 네임스페이스를 실행에서만 보완 (파일 미수정)")
-ap.add_argument("--start-home", choices=["move", "snap"], default="move",
+ap.add_argument("--start-home", choices=["move", "snap", "keep"], default="move",
                 help="move: 접은 채 홈으로 이동(검증된 경로). snap 은 첫 작업이 M406 으로 실패한다")
 ap.add_argument("--max-seconds", type=float, default=0.0, help="0 이면 계속 실행")
 ap.add_argument("--no-manipulation", action="store_true", help="로봇팔 실행기를 붙이지 않는다 (월드만 확인)")
 ap.add_argument("--no-navigation", action="store_true",
                 help="주행 실행기를 붙이지 않는다")
 ap.add_argument("--drive-speed", type=float, default=0.4, help="주행 속도 (m/s)")
+ap.add_argument("--probe-tray", action="store_true",
+                help="장면만 세우고 **설정 칸 좌표 vs 실제 책 위치**를 찍은 뒤 끝낸다 "
+                     "(파지하지 않는다). 세션을 여러 번 돌려 계통/무작위를 가른다")
 args = ap.parse_args()
+
+# 레벨에 저장된 관절 자세를 쓰는 모드에서는 USD의 drive target도 그대로 둔다.
+# 그렇지 않으면 BookScene 초기화가 target을 0도로 바꿔 카메라가 책장을 보던
+# 7축 자세가 재생 직후 풀린다.
+if args.start_home == "keep":
+    os.environ["SIM_PRESERVE_DRIVE_TARGETS"] = "1"
 
 # 저장소 코드를 그대로 쓴다 (~/arm 으로 복사하지 않는다)
 sys.path.insert(0, str(HERE))
@@ -147,6 +156,40 @@ if args.camera or args.camera_prim or args.amr_test_overrides:
     if args.camera_hz < 60:
         gate.set_camera_hz(args.camera_hz)
     say(f"센서 정책 {args.sensor_policy}: 카메라 노드 {len(gate.camera_nodes)}, 라이다 노드 {len(gate.lidar_nodes)}")
+
+# --- 트레이 오차 측정: 장면만 세우고 표를 찍은 뒤 끝낸다
+if args.probe_tray:
+    import json as _json
+    for _ in range(int(os.environ.get("SIM_PROBE_SETTLE_STEPS", "120"))):
+        world.step(render=False)
+    # **로봇이 실제로 쓰는 설정값**과 비교한다 (시뮬이 아는 값이 아니라).
+    # 이 파일이 파지 목표의 출처다 — 여기가 틀리면 파지가 틀린다
+    _cfg = None
+    try:
+        import yaml as _yaml
+        _pf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
+                           "ros2_ws/src/shelving_manipulation/config/book_profiles.yaml")
+        with open(os.path.abspath(_pf), encoding="utf-8") as _fh:
+            _slots = ((_yaml.safe_load(_fh) or {}).get("tray") or {}).get("slots") or []
+        _cfg = [sl["center"] for sl in sorted(_slots, key=lambda x: x.get("index", 0))]
+        say(f"[PROBE] 설정 칸 {len(_cfg)}개 ({os.path.basename(_pf)})")
+    except Exception as _exc:      # noqa: BLE001
+        say(f"[PROBE] 설정 칸을 못 읽었다: {type(_exc).__name__}: {_exc}")
+    _rows = []
+    for _i, _b in enumerate(scene.books):
+        _c = scene.center(_b)
+        _arm = scene.to_arm(_c)
+        _row = {"slot": _i, "book": _b.rsplit("/", 1)[-1],
+                "world": [round(float(v), 5) for v in _c],
+                "arm": [round(float(v), 5) for v in _arm]}
+        if _cfg is not None and _i < len(_cfg):
+            _row["cfg"] = [round(float(v), 5) for v in _cfg[_i]]
+            _row["err_mm"] = [round(float((_arm[_k] - _cfg[_i][_k]) * 1000), 2) for _k in (0, 1, 2)]
+        _rows.append(_row)
+        say(f"[PROBE] {_json.dumps(_row, ensure_ascii=False)}")
+    say(f"[PROBE] done books={len(_rows)}")
+    app.close()
+    raise SystemExit(0)
 
 # 실행기 등록 — 로봇팔과 주행. 둘 다 같은 노드를 쓰고 자기 토픽만 만든다
 node = ros_bridge.make_node("isaac_place_book_executor")

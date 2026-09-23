@@ -151,6 +151,10 @@ class VisionManager(Node):
         # task_manager와 통신할 action 이름을 읽습니다.
         self.perception_action = self.declare_parameter(
             'perception_action', '/detect_target_slot').value
+        # 통합 운용에서는 manipulation_node가 동일한 기존 액션 계약을 제공하면서
+        # 팔 스캔까지 조율한다. 단독 비전 시험에서는 이 서버를 다시 켤 수 있다.
+        self.enable_action_server = bool(self.declare_parameter(
+            'enable_action_server', True).value)
         # True이면 요청을 받은 뒤에만 한 프레임을 처리합니다.
         self.wait_for_trigger = bool(self.declare_parameter(
             'wait_for_trigger', True).value)
@@ -227,6 +231,11 @@ class VisionManager(Node):
         # action 결과 TargetSlot에 넣을 삽입 깊이입니다.
         self.insertion_depth = float(self.declare_parameter(
             'insertion_depth', 0.25).value)
+        # Depth가 주는 책장 전면에서, 삽입 완료 후 책등이 안쪽에 놓일 여유입니다.
+        # manipulation의 MEASURED_INSET와 같은 값이어야 TargetSlot.pose가
+        # "삽입 완료 후 책 AABB 중심" 계약을 만족합니다.
+        self.slot_center_inset = float(self.declare_parameter(
+            'slot_center_inset', 0.024).value)
         # 삽입 전 대기 위치의 오프셋입니다.
         self.pre_insert_offset = float(self.declare_parameter(
             'pre_insert_offset', 0.05).value)
@@ -278,6 +287,10 @@ class VisionManager(Node):
                 '-p model_path:=/path/to/book_best.pt')
         if self.depth_debug_max_m <= 0:
             raise ValueError('depth_debug_max_m must be positive')
+        if self.insertion_depth <= 0:
+            raise ValueError('insertion_depth must be positive')
+        if self.slot_center_inset < 0:
+            raise ValueError('slot_center_inset must be non-negative')
 
         # 학습된 YOLO 모델을 메모리에 로드합니다.
         self.model = YOLO(self.model_path)
@@ -306,22 +319,39 @@ class VisionManager(Node):
         self._action_result = None
         # 책을 잡은 뒤 사용할 빈 위치를 검출 프레임 사이에 보존합니다.
         self._remembered_empty_position = None
+        # **빈칸 검출은 서가 스캔 중에만 한다.** 스캔이 끝나고 트레이 책을 볼 때도 빈칸 점이 뜨고
+        # 기억한 좌표를 다시 보내서, 조작 노드가 트레이 위 점(y 0.09)을 빈칸으로 받았다 (2026-09-23).
+        # 조작 노드가 /perception/slot_scan_active 로 스캔 구간을 알려준다.
+        self._slot_scan_active = False
+        self.create_subscription(
+            Bool, '/perception/slot_scan_active',
+            lambda m: setattr(self, '_slot_scan_active', bool(m.data)), 10)
         # task_manager가 보내는 DetectTargetSlot goal을 받는 action 서버입니다.
-        self._action_server = ActionServer(
-            self,
-            DetectTargetSlot,
-            self.perception_action,
-            execute_callback=self._execute_detection,
-            goal_callback=self._accept_detection_goal,
-            cancel_callback=self._cancel_detection_goal,
-            callback_group=self._action_group,
-        )
+        self._action_server = None
+        if self.enable_action_server:
+            self._action_server = ActionServer(
+                self,
+                DetectTargetSlot,
+                self.perception_action,
+                execute_callback=self._execute_detection,
+                goal_callback=self._accept_detection_goal,
+                cancel_callback=self._cancel_detection_goal,
+                callback_group=self._action_group,
+            )
         # 책마다 변환된 3차원 위치를 PointStamped로 발행합니다.
         self.book_pub = self.create_publisher(PointStamped, self.book_topic, 10)
         # 책마다 변환된 pose를 PoseStamped로 발행합니다.
         self.book_pose_pub = self.create_publisher(
             PoseStamped, self.book_pose_topic, 10)
         # 검출 결과를 그린 디버그 영상을 Image 메시지로 발행합니다.
+        # **책을 고른 프레임은 debug_image 에 붙잡아 둔다.** 책 검출은 잡히는 즉시 요청이 끝나 한두 프레임만 그려지고
+        # 지나가서 rqt 로 놓치기 쉬웠다 (2026-09-23 지적). 3D 좌표를 덧그린 그 프레임을 새 프레임이 올 때까지
+        # (최대 pick_hold_s) 1 Hz 로 같은 토픽에 다시 발행한다 — 별도 토픽은 두지 않는다.
+        self._last_pick_msg = None
+        self._last_debug_bgr = None
+        self._pick_hold_until = 0.0
+        self.pick_hold_s = float(self.declare_parameter('pick_hold_s', 20.0).value)
+        self.create_timer(1.0, self._republish_pick_image)
         self.debug_image_pub = self.create_publisher(
             Image, self.debug_image_topic, 10)
         # Depth 자체 위에서 목표점과 세 샘플 범위를 확인할 디버그 영상입니다.
@@ -539,7 +569,9 @@ class VisionManager(Node):
             detected_targets, roi_dropped = self._filter_book_roi(
                 detected_targets, rgb_msg.header.frame_id, rgb_msg.header.stamp)
             # 책장 전체의 bbox와 클래스를 책장 YOLO 모델로 검출합니다.
-            shelf_detection = self._detect_shelf(rgb_image)
+            # **서가 스캔 중에만** 책장·빈 공간을 본다. 트레이 책을 볼 때도 빈 공간 점이 그려져
+            # 헷갈렸다 (2026-09-23 지적) — 계산 자체를 건너뛰어야 debug 화면에도 안 나온다.
+            shelf_detection = self._detect_shelf(rgb_image) if self._slot_scan_active else None
             # 책장 ROI 안에서 좌우보다 깊은 연결영역을 찾아 빈 공간의 중심과
             # 좌/중/우 Depth를 얻습니다. 고정 index/월드 좌표는 사용하지 않습니다.
             target_inspection = self.target_detector.find_empty_position(
@@ -550,7 +582,7 @@ class VisionManager(Node):
                 cx,
                 cy,
                 depth_scale,
-            )
+            ) if self._slot_scan_active else None
             # 책과 책장 검출 결과를 화면과 debug image 토픽에 표시합니다.
             self._publish_debug_image(
                 rgb_image,
@@ -627,6 +659,7 @@ class VisionManager(Node):
             if book_pose is not None:
                 self.book_pose_pub.publish(book_pose)
             # 사람이 확인할 수 있도록 검출 위치와 각도를 로그로 출력합니다.
+            self._publish_pick_image(book_point, target)
             self.get_logger().info(
                 f"Book picked(best): xyz=({book_point.point.x:.3f}, "
                 f"{book_point.point.y:.3f}, {book_point.point.z:.3f}), "
@@ -637,6 +670,8 @@ class VisionManager(Node):
 
         # 투영 및 좌/우 깊이 경계가 모두 확인된 경우에만 목표점을 빈 위치로 사용합니다.
         transformed_empty_position = None
+        if not self._slot_scan_active:
+            target_inspection = None      # 스캔 밖(책 검출·주행)에서는 빈칸을 보지도, 그리지도, 다시 보내지도 않는다
         if target_inspection is not None:
             self._log_target_inspection(target_inspection)
         if target_inspection and target_inspection['is_empty']:
@@ -669,7 +704,7 @@ class VisionManager(Node):
             transformed_empty_position or self._remembered_empty_position)
 
         # 책 검출 후에도 기억한 삽입 좌표를 다시 발행해 로봇 팔이 받도록 합니다.
-        if detected_targets and placement_position is not None:
+        if detected_targets and placement_position is not None and self._slot_scan_active:
             self.empty_slot_pub.publish(placement_position)
             self.get_logger().info(
                 'Resent remembered empty shelf position after book detection')
@@ -756,6 +791,8 @@ class VisionManager(Node):
                 kept.append(target)
             else:
                 dropped += 1
+                # **버린 책의 좌표를 남긴다** — ROI 밖이라는 말만으로는 어디에 있었는지 알 수 없다 (2026-09-23)
+                self.get_logger().info(f'ROI 밖 책: ({p.x:.3f}, {p.y:.3f}, {p.z:.3f}) @{self.target_frame}')
         if dropped:
             self.get_logger().info(
                 f'ROI 밖 책 {dropped}권 제외 (남은 {len(kept)}권). '
@@ -815,6 +852,31 @@ class VisionManager(Node):
                 f'Could not transform {source_frame} to '
                 f'{self.target_frame}: {error}')
             return None
+
+    def _publish_pick_image(self, book_point, target):
+        """방금 고른 책의 3D 좌표(팔 기준)를 마지막 debug 영상에 덧그려 debug_image 로 내고 잠시 붙잡아 둔다."""
+        try:
+            if self._last_debug_bgr is None:
+                return
+            img = self._last_debug_bgr.copy()
+            cu, cv_ = target.get('center', (img.shape[1] // 2, img.shape[0] // 2))
+            cu, cv_ = int(cu), int(cv_)
+            cv2.circle(img, (cu, cv_), 9, (0, 0, 255), 2)
+            text = (f"PICK ({book_point.point.x:+.3f}, {book_point.point.y:+.3f}, {book_point.point.z:+.3f}) "
+                    f"{book_point.header.frame_id} conf {target['confidence']:.2f}")
+            cv2.rectangle(img, (0, img.shape[0] - 28), (img.shape[1], img.shape[0]), (0, 0, 0), -1)
+            cv2.putText(img, text, (6, img.shape[0] - 9), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2, cv2.LINE_AA)
+            msg = _bgr8_to_imgmsg(img)
+            msg.header = book_point.header
+            self._last_pick_msg = msg
+            self._pick_hold_until = time.monotonic() + self.pick_hold_s
+            self.debug_image_pub.publish(msg)
+        except Exception as error:       # noqa: BLE001 - 화면 때문에 검출을 멈추지 않는다
+            self.get_logger().warning(f'파지 화면 표시 실패: {type(error).__name__}: {error}', throttle_duration_sec=10.0)
+
+    def _republish_pick_image(self):
+        if self._last_pick_msg is not None and time.monotonic() < self._pick_hold_until:
+            self.debug_image_pub.publish(self._last_pick_msg)
 
     def _publish_debug_image(self, *args, **kwargs):
         """디버그 영상을 발행합니다. **그리다 실패해도 검출을 멈추지 않습니다**.
@@ -925,11 +987,13 @@ class VisionManager(Node):
         # cv_bridge 의 타입 표(키 32..36)와 자체 계산값(16)이 어긋나 cv2_to_imgmsg 가
         # KeyError 로 죽습니다 (2026-09-21 GPU PC 10.10.0.1, cv2 5.0.0 에서 확인).
         # bgr8 은 바이트를 그대로 옮기면 되므로 직접 만듭니다 — OpenCV 판 번호와 무관합니다.
+        self._last_debug_bgr = debug_image          # 책 좌표를 덧그려 '파지 화면' 으로 남기려고 (아래 _publish_pick_image)
         debug_msg = _bgr8_to_imgmsg(debug_image)
         # 원본 RGB와 같은 timestamp/frame을 유지합니다.
         debug_msg.header = header
         # 다른 PC의 rqt_image_view가 구독할 수 있도록 발행합니다.
         self.debug_image_pub.publish(debug_msg)
+        self._last_pick_msg = None            # 새 검출 프레임이 왔으니 붙잡아 둔 파지 화면은 놓는다
 
     def _publish_depth_debug_image(
         self,
@@ -1095,11 +1159,18 @@ class VisionManager(Node):
             1.0,
         )
 
-        # action 결과의 TargetSlot에 빈 단 위치를 기록합니다.
+        # Depth 검출점은 책장 전면입니다. TargetSlot 계약은 "삽입 완료 후 책
+        # AABB 중심"이므로 +Y(서가 안쪽)로 책 깊이 절반과 실측 inset만큼 옮깁니다.
+        goal = goal_handle.request
+        book_half_depth = max(0.0, float(goal.book_width)) * 0.5
+        slot_center_y = (
+            empty_point.point.y + book_half_depth + self.slot_center_inset)
+
+        # action 결과의 TargetSlot에 삽입 완료 후 책 중심을 기록합니다.
         slot = result.target_slot
         slot.header = empty_point.header
         slot.pose.position.x = empty_point.point.x
-        slot.pose.position.y = empty_point.point.y
+        slot.pose.position.y = slot_center_y
         slot.pose.position.z = empty_point.point.z
         # 로봇팔 삽입 규약인 yaw +90도 회전을 quaternion으로 설정합니다.
         slot.pose.orientation.x = 0.0
@@ -1107,16 +1178,10 @@ class VisionManager(Node):
         slot.pose.orientation.z = math.sqrt(0.5)
         slot.pose.orientation.w = math.sqrt(0.5)
 
-        # goal의 책 크기를 이용해 삽입 가능한 폭과 높이를 계산합니다.
-        goal = goal_handle.request
-        slot.available_width = max(
-            0.0,
-            float(goal.book_thickness + 2.0 * goal.safety_margin),
-        )
-        slot.available_height = max(
-            0.0,
-            float(goal.book_height + goal.safety_margin),
-        )
+        # 현재 알고리즘은 중심만 검증하고 실제 가용 폭·높이를 재지 않습니다.
+        # 요청값으로 가용 크기를 꾸미면 안전 검사가 무의미해지므로 "미제공"인 0을 냅니다.
+        slot.available_width = 0.0
+        slot.available_height = 0.0
         # 삽입 관련 파라미터를 결과에 기록합니다.
         slot.insertion_depth = self.insertion_depth
         slot.pre_insert_offset = self.pre_insert_offset
@@ -1124,7 +1189,9 @@ class VisionManager(Node):
         slot.confidence = 1.0
         result.success = True
         result.error_code = 0
-        result.message = 'Empty shelf position detected from depth.'
+        result.message = (
+            'Empty shelf front detected from depth and converted to '
+            'the inserted book AABB center.')
         self._publish_action_feedback(
             goal_handle,
             'TRANSFORMING_FRAME',

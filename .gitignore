@@ -12,3 +12,4 @@ scripts/demo/demo_local.env
 
 # 웹 클로드 왕복 등 팀 내부 소통 문서 — 공개 저장소에 두지 않는다 (로컬에는 남긴다)
 docs/doyoon-kim/web_claude/
+night/
