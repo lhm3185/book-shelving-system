@@ -120,6 +120,23 @@ DEFAULT_LIMITS = {
     # 4.36° 돌아간 상태에서 읽은 값이었다. 기울기를 걷어내면 칸별 퍼짐이 0 이다.
     # 복귀 보정이 들어간 지금 다시 재 봐야 한다 (A/B 용 스위치).
     'snap_grasp_y': False,
+    # 책 치수를 **관측에서** 가져올 것인가. **기본 꺼짐 — 기준선을 깨지 않기 위해.**
+    #
+    # 왜 필요한가: `GraspObservation` 은 비전이 잰 `thickness`·`width` 를 이미 싣고
+    # 오는데, 검사는 그것을 버리고 `book_profiles.yaml` 의 `default` 한 줄과 비교해
+    # 왔다. 트레이에 규격이 다른 책(카탈로그)이 서 있으면 **관측이 정확할수록 410 이
+    # 난다.** 2026-09-23 데스크탑 판이 그것이다.
+    #
+    # 켜면 무엇이 달라지나: 높이 검사가 '관측 ↔ 규격' 비교에서 '관측 ↔ 관측'
+    # 자기정합 검사로 바뀐다. 검사가 무력해지지 않는다 — 비전이 윗면 대신 AABB
+    # 중심을 보내면 z 가 폭의 절반(≈80 mm)만큼 어긋나므로 여전히 걸린다.
+    # 대신 '규격과 다른 책이다' 는 못 잡으므로 치수 타당범위 검사를 같이 켠다.
+    #
+    # **전환은 사람이 정한다.** 비전의 `width` 가 물리 치수인지 이미지 bbox 폭인지
+    # 아직 실측으로 확인되지 않았다 — A/B 로 한 판 돌려 보고 정한다.
+    'use_observed_dims': False,
+    'observed_thickness_range': [0.005, 0.10],   # m, 타당범위
+    'observed_width_range': [0.05, 0.40],        # m
 }
 
 
@@ -177,6 +194,21 @@ def resolve_book(goal: PlaceGoal, profile: BookDims,
     return BookDims(*dims), Check(OK, '')
 
 
+def observed_dims(goal: PlaceGoal, limits: Optional[dict] = None
+                  ) -> Tuple[float, float, str]:
+    """이 판에서 **실제로 쓸** 두께·폭과 그 출처 ('관측' 또는 '규격').
+
+    높이는 `GraspObservation` 에 없다 — 규격을 그대로 쓴다.
+    스위치가 꺼져 있거나 관측이 치수를 안 실어 보내면 지금까지의 동작 그대로다.
+    """
+    lim = _merged(limits)
+    g = goal.grasp
+    if lim['use_observed_dims'] and g is not None \
+            and g.thickness > 0 and g.width > 0:
+        return g.thickness, g.width, '관측'
+    return goal.book_thickness, goal.book_width, '규격'
+
+
 def validate_grasp(goal: PlaceGoal, tray_slots, limits: Optional[dict] = None) -> Check:
     """
     비전이 준 파지 관측을 쓰기 전에 검사한다 (계약 5절).
@@ -203,13 +235,28 @@ def validate_grasp(goal: PlaceGoal, tray_slots, limits: Optional[dict] = None) -
             return Check(410, f'파지 관측 x {g.top_center[0]:+.3f} 가 트레이 범위 밖')
         if not (min(ys) - 0.15 <= g.top_center[1] <= max(ys) + 0.15):
             return Check(410, f'파지 관측 y {g.top_center[1]:+.3f} 가 트레이 범위 밖')
-        want_top = tray_slots[0].center[2] + goal.book_width / 2.0
-        if goal.book_width > 0 and abs(g.top_center[2] - want_top) > 0.01:
+        # **0 번 칸이 아니라 가장 가까운 칸**의 z 를 쓴다. 칸마다 z 가 다르면
+        # 0 번 고정은 그 차이만큼 조용히 틀린다 (지금 레벨은 0.3 mm 라 안 드러난다).
+        near = min(tray_slots, key=lambda sl: abs(sl.center[0] - g.top_center[0]))
+        _t, _w, _src = observed_dims(goal, lim)
+        want_top = near.center[2] + _w / 2.0
+        if _w > 0 and abs(g.top_center[2] - want_top) > 0.01:
             return Check(410,
-                         f'관측 높이가 책 규격과 다르다: top z {g.top_center[2]:.4f}, '
-                         f'기대 {want_top:.4f} (칸 중심 + 책 폭/2). '
+                         f'관측 높이가 책 {_src}과 다르다: top z {g.top_center[2]:.4f}, '
+                         f'기대 {want_top:.4f} (칸 중심 {near.center[2]:.4f} + 폭 {_w:.4f}/2). '
                          f'윗면 중심이 아닌 다른 점을 보냈을 수 있다')
-    if g.thickness > 0 and goal.book_thickness > 0 \
+    if lim['use_observed_dims']:
+        # 관측을 믿기로 했으면 '규격과 같은가' 대신 **치수가 말이 되는가**를 본다.
+        # 이것이 없으면 검사가 통째로 무력해진다 — 관측을 관측과 비교하게 되므로.
+        for name, val, lo_hi in (('두께', g.thickness, lim['observed_thickness_range']),
+                                 ('폭', g.width, lim['observed_width_range'])):
+            if val <= 0:
+                continue
+            lo, hi = lo_hi
+            if not (lo <= val <= hi):
+                return Check(410, f'관측 {name} {val:.4f} m 가 타당범위 '
+                                  f'[{lo:.3f}, {hi:.3f}] 밖이다')
+    elif g.thickness > 0 and goal.book_thickness > 0 \
             and abs(g.thickness - goal.book_thickness) > 0.005:
         return Check(410, f'관측 두께 {g.thickness:.4f} ≠ 규격 {goal.book_thickness:.4f}')
     # **손가락이 무언가에 닿지 않는가.** 여기가 가장 좁다.
@@ -221,14 +268,15 @@ def validate_grasp(goal: PlaceGoal, tray_slots, limits: Optional[dict] = None) -
     #
     # 2026-09-21 까지 **바깥쪽만 보고 있었다** (8.3 mm). 실제로 먼저 닿는 것은
     # 안쪽(5.0 mm)이라 검사가 3.3 mm 만큼 느슨했다.
-    if tray_slots and len(tray_slots) >= 2 and goal.book_thickness > 0:
+    if tray_slots and len(tray_slots) >= 2 and observed_dims(goal, lim)[0] > 0:
         centers = sorted(sl.center[0] for sl in tray_slots)
         pitch = min(b - a for a, b in zip(centers, centers[1:]))
-        book = BookDims(goal.book_thickness, goal.book_height, goal.book_width)
+        _t, _w, _ = observed_dims(goal, lim)
+        book = BookDims(_t, goal.book_height, _w)
         finger_inner = grip_open_per_finger(book, lim)
         finger_outer = finger_inner + lim['finger_thickness']
-        inner_gap = finger_inner - goal.book_thickness / 2
-        outer_gap = (pitch - goal.book_thickness / 2) - finger_outer
+        inner_gap = finger_inner - _t / 2
+        outer_gap = (pitch - _t / 2) - finger_outer
         # 기본은 바깥쪽만 본다 (지금까지의 동작). `guard_inner_clearance` 를 켜면
         # 좁은 쪽까지 본다 — 손이 어긋나면 양쪽이 동시에 줄기 때문에 그쪽이 옳지만,
         # 검사가 엄해져 기준선이 달라지므로 전환은 측정 뒤에 사람이 정한다
@@ -292,7 +340,7 @@ def snap_grasp_to_slot(goal: PlaceGoal, tray_slots, limits: Optional[dict] = Non
             f'({dx * 1000:+.1f} mm{moved_y}, 칸 간격 {pitch * 1000:.0f} mm)')
 
 
-def grasp_pick_center(goal: PlaceGoal):
+def grasp_pick_center(goal: PlaceGoal, limits: Optional[dict] = None):
     """
     비전 윗면 중심을 로봇팔이 쓰는 AABB 중심으로 바꾼다 (관측이 없으면 None).
 
@@ -300,10 +348,13 @@ def grasp_pick_center(goal: PlaceGoal):
     유도는 치수를 아는 쪽(로봇팔)이 한다 — 비전에게 가려진 면까지 추정하게 하지 않는다.
     """
     g = goal.grasp
-    if g is None or goal.book_width <= 0:
+    if g is None:
+        return None
+    _t, w, _ = observed_dims(goal, limits)
+    if w <= 0:
         return None
     x, y, z = g.top_center
-    return [float(x), float(y), float(z) - goal.book_width / 2.0]
+    return [float(x), float(y), float(z) - w / 2.0]
 
 
 def validate_goal(goal: PlaceGoal, book: BookDims, limits: Optional[dict] = None) -> Check:

@@ -311,3 +311,70 @@ def test_clearances_are_currently_lopsided():
     assert inner == pytest.approx(0.005, abs=1e-6), '안쪽 여유 = grip_clearance 그 자체'
     assert outer == pytest.approx(0.0083, abs=1e-4)
     assert min(inner, outer) == inner, '좁은 쪽은 안쪽이다 — 허용치는 이 값이어야 한다'
+
+
+# ------------------------------------------------------- 관측 치수 (use_observed_dims)
+#
+# 2026-09-23 데스크탑 판이 410 으로 멈춘 자리다. 트레이에 규격과 다른 책(카탈로그)이
+# 서 있고 비전이 그것을 골랐는데, 검사는 관측이 실어 온 치수를 버리고 `default`
+# 프로파일 한 줄과 비교했다. **관측이 정확할수록 떨어지는 검사**였다.
+
+CATALOGUE = BookDims(0.0353, 0.2374, 0.2165)   # 폭(책등→앞마구리)만 다르다
+_SLOTS6 = [TraySlot(i, (-0.6623 + 0.075 * i, 0.0788, 0.1119)) for i in range(6)]
+_ON = {'use_observed_dims': True}
+
+
+def _obs(width, thickness=BOOK.thickness, x=-0.5123, top_z=None, slot_z=0.1119):
+    """관측을 실은 목표. `top_z` 를 안 주면 **관측과 자기정합하는** 윗면을 만든다."""
+    from shelving_manipulation.grasp_planner import GraspGoal
+    g = goal(book_width=BOOK.width, book_height=BOOK.height, book_thickness=BOOK.thickness)
+    z = slot_z + width / 2 if top_z is None else top_z
+    return replace(g, grasp=GraspGoal(
+        frame_id='arm_base_link', top_center=(x, 0.0788, z),
+        spine_yaw=0.0, thickness=thickness, width=width, confidence=0.9))
+
+
+def test_other_book_is_410_today_and_passes_with_switch():
+    """규격과 다른 책: 지금은 410, 스위치를 켜면 통과한다 (기본값은 안 바뀐다)."""
+    from shelving_manipulation.grasp_planner import validate_grasp
+    cat = _obs(CATALOGUE.width)
+    assert validate_grasp(cat, _SLOTS6).code == 410        # 기준선 — 오늘의 동작
+    assert validate_grasp(cat, _SLOTS6, _ON).ok
+
+
+def test_switch_on_still_catches_wrong_point():
+    """켜도 검사가 무력해지지 않는다 — 윗면 대신 AABB 중심을 보내면 여전히 걸린다."""
+    from shelving_manipulation.grasp_planner import validate_grasp
+    bad = _obs(CATALOGUE.width, top_z=0.1119)              # 폭의 절반만큼 낮다
+    check = validate_grasp(bad, _SLOTS6, _ON)
+    assert check.code == 410 and '높이' in check.message
+
+
+@pytest.mark.parametrize('width, thickness, word', [
+    (0.60, BOOK.thickness, '폭'),          # 60 cm 책은 없다
+    (0.02, BOOK.thickness, '폭'),
+    (BOOK.width, 0.30, '두께'),            # 30 cm 두께도 없다
+])
+def test_switch_on_rejects_implausible_dims(width, thickness, word):
+    """관측을 믿기로 했으면 '규격과 같은가' 대신 **말이 되는가**를 본다."""
+    from shelving_manipulation.grasp_planner import validate_grasp
+    check = validate_grasp(_obs(width, thickness), _SLOTS6, _ON)
+    assert check.code == 410 and word in check.message
+
+
+def test_height_uses_nearest_slot_not_slot_zero():
+    """칸마다 z 가 다르면 0 번 고정은 그 차이만큼 조용히 틀린다."""
+    from shelving_manipulation.grasp_planner import validate_grasp
+    slots = list(_SLOTS6)
+    slots[0] = TraySlot(0, (-0.6623, 0.0788, 0.1119 + 0.05))   # 0 번만 5 cm 높다
+    ok = _obs(BOOK.width, x=slots[3].center[0], slot_z=slots[3].center[2])
+    assert validate_grasp(ok, slots).ok
+
+
+def test_pick_center_uses_observed_width():
+    """윗면 → AABB 중심 변환도 같은 폭을 써야 한다 — 안 그러면 8 cm 어긋난다."""
+    from shelving_manipulation.grasp_planner import grasp_pick_center
+    cat = _obs(CATALOGUE.width)
+    assert grasp_pick_center(cat)[2] == pytest.approx(
+        cat.grasp.top_center[2] - BOOK.width / 2, abs=1e-6)          # 규격 (지금)
+    assert grasp_pick_center(cat, _ON)[2] == pytest.approx(0.1119, abs=1e-6)   # 관측
