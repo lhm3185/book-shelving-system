@@ -2010,7 +2010,25 @@ class BookScene:
                 "grasp_align_deg": round(math.degrees(_align), 3),
                 # **지금 이 순간의** 칸 방향 폭. `dims` 는 장면을 만들 때 잰 값이라
                 # 그 뒤 책이 기울면 낡는다 — 손가락을 얼마나 벌릴지는 지금 값으로 정해야 한다
-                "span_now": float(bb[3] - bb[0])}, 0, ""
+                "span_now": float(self._span_along(bb, self._close_axis_w()))}, 0, ""
+
+    def _close_axis_w(self):
+        """손가락이 닫히는 방향 (월드 단위벡터). `SIM_GRIP_ROT90` 을 따른다."""
+        _cy, _sy = math.cos(self.tray_yaw), math.sin(self.tray_yaw)
+        return (np.array([-_sy, _cy, 0.0]) if GRIP_ROT90
+                else np.array([_cy, _sy, 0.0]))
+
+    @staticmethod
+    def _span_along(bb, axis):
+        """축정렬 상자가 `axis` 방향으로 차지하는 폭. 상자라서 성분 절댓값의 가중합이다.
+
+        2026-09-24: 여기서 월드 x 만 집었다가 **책 높이 227 mm 의 절반**을 두께 반폭으로
+        읽었다. 트레이에 선 책은 두께축이 월드 y 이고, 서가에 꽂힌 책은 월드 x 다 —
+        어느 쪽이든 **손가락이 닫히는 축**으로 재야 한다.
+        """
+        a = np.abs(np.asarray(axis, float))
+        d = np.array([bb[3] - bb[0], bb[4] - bb[1], bb[5] - bb[2]], float)
+        return float(np.dot(a, d))
 
     def fit_bookends(self, place_x, thickness):
         """북엔드 한 쌍을 이 책 두께에 맞춘다 (책마다 두께가 달라서 — 꽂기 전에만 옮긴다)"""
@@ -2112,7 +2130,7 @@ class BookScene:
         # 그 상태로 충돌을 켜면 겹침이 한꺼번에 풀리며 책이 튀어 0.44 s 만에 바닥(z 0.075)에 있었다.
         # 기본(꺼짐)은 지금 순서 그대로: detach → 벌림.
         if GRASP_KINEMATIC and os.environ.get("SIM_RELEASE_OPEN_FIRST", "0") != "0":
-            release = [Call("release", lambda: self.trace(book, "놓기직전")),
+            release = [Call("release", lambda: self.trace(book, "놓기직전", plan)),
                        named(SetGripper(o, settle_s=0.4), "release"), Call("detach", self.detach),
                        named(Wait(0.4), "release")]
         else:
@@ -2128,14 +2146,35 @@ class BookScene:
             JointPath("lift", s["lift"][1:], 0.25 * SPEED_SCALE),
             JointPath("carry_rotate", s["carry_rotate"][1:], 0.35 * SPEED_SCALE), JointPath("wedge", s["wedge"][1:], 0.35 * SPEED_SCALE),
             *release,
-            Call("release", lambda: self.trace(book, "놓음")),
+            Call("release", lambda: self.trace(book, "놓음", plan)),
             JointPath("back", s["back"][1:], 0.3 * SPEED_SCALE), named(SetGripper(0.0, settle_s=0.4), "touch"),
             JointPath("touch", s["touch"][1:], 0.3 * SPEED_SCALE), JointPath("push", s["push"][1:], 0.12 * SPEED_SCALE), named(Wait(0.3), "push"),
             JointPath("retreat", s["retreat"][1:], 0.35 * SPEED_SCALE), named(SetGripper(o, settle_s=0.3), "retreat"),
             JointPath("return", s["return"][1:], 0.5 * SPEED_SCALE),
         ])
 
-    def trace(self, book, tag):
+    def release_clearances(self, book, plan):
+        """놓기 직전 책이 **무엇에 얼마나 가까운가** — 칸 바닥·북엔드 (m, 양수 = 떨어져 있음).
+
+        왜: 2026-09-24 실측에서 놓는 순간 책이 16 mm 떠오르며 2° 돌았다. 그 두 가지는
+        **침투 해소**의 두 얼굴이다 — 운반 동안 책 충돌을 꺼 두므로, 놓으며 켜는 순간
+        겹쳐 있던 만큼 밀려난다. 겹친 상대를 찾으면 고칠 곳이 정해진다.
+        """
+        bb = self.aabb(book)
+        out = {"밑면−칸바닥": float(bb[2]) - float(plan.get("floor_z", float("nan")))}
+        key = (min(self.bookends, key=lambda k: abs(k - plan.get("place_x", 0.0)))
+               if getattr(self, "bookends", None) else None)
+        if key is not None:
+            for _nm, _pth in zip(("북엔드왼", "북엔드오"), self.bookends[key][:2]):
+                try:
+                    nb = self.aabb(_pth)
+                    ov = np.minimum(bb[3:], nb[3:]) - np.maximum(bb[:3], nb[:3])
+                    out[_nm] = float(np.min(ov)) * -1.0   # 양수 = 떨어져 있음
+                except Exception:      # noqa: BLE001
+                    pass
+        return out
+
+    def trace(self, book, tag, plan=None):
         """문제를 찾을 때 책 위치를 단계별로 남긴다 (책 종류가 섞이면 실패 지점이 달라진다).
 
         **기울기를 같이 남긴다.** 2026-09-24 에 꽂힌 책이 늘 2~3° 비뚤다는 것을 알았는데,
@@ -2145,7 +2184,10 @@ class BookScene:
         b = self.aabb(book); c = (b[:3] + b[3:]) / 2
         self.say(f"  [{tag}] {book.rsplit('/', 1)[1]} 중심 {np.round(c, 3).tolist()} "
                  f"크기 {np.round([b[3] - b[0], b[4] - b[1], b[5] - b[2]], 3).tolist()} "
-                 f"틀어짐 {self.axis_skew_deg(book):.2f}°")
+                 f"틀어짐 {self.axis_skew_deg(book):.2f}°"
+                 + ("" if plan is None else "  여유 " + " · ".join(
+                     f"{k} {v*1000:+.1f} mm"
+                     for k, v in self.release_clearances(book, plan).items())))
 
     def axis_skew_deg(self, book) -> float:
         """책이 **세상 축에서** 얼마나 틀어져 있는가 (도). 반듯하면 0.
