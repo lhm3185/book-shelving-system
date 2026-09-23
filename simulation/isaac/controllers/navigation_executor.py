@@ -16,11 +16,15 @@ Ridgeback 은 전방향(홀로노믹)이라 몸통을 돌리지 않고 옆으로
 
     수신 /navigation/sim/command   std_msgs/String (JSON)
          {"type": "patrol", "route": [[x, y], ...], "speed": 0.4}
-         {"type": "goto",   "x": 1.0, "y": 2.0}
+         {"type": "goto",   "x": 1.0, "y": 2.0, "yaw_deg": 0.0}
          {"type": "cancel"}
+         `yaw_deg` 를 주면 도착해서 그 방향으로 돈다 (없으면 방향을 건드리지 않는다).
     발행 /navigation/sim/state     std_msgs/String (JSON)
          {"status": "running"|"succeeded"|"failed"|"idle",
-          "leg": 2, "legs": 5, "remaining": 3.21, "pose": [x, y, yaw]}
+          "leg": 2, "legs": 5, "remaining": 3.21, "pose": [x, y, yaw_deg]}
+         **pose 의 yaw 는 도(度)다** — 명령의 `yaw_deg` 와 같은 단위라 그대로 되돌려
+         줄 수 있다. 예전에는 pose 에 x, y 만 실려서 출발 방향을 아무도 몰랐고,
+         복귀가 자리만 맞추고 방향은 틀린 채 끝났다 (2026-09-23 수정).
 """
 
 import json
@@ -135,10 +139,15 @@ class NavigationExecutor:
 
     # ---------------------------------------------------------------- 발행
     def publish(self, **extra):
-        p, _ = self.root.get_world_pose()
+        # **yaw 를 같이 실어 보낸다.** 계약(머리말)은 처음부터 `[x, y, yaw]` 였는데
+        # 코드는 x, y 만 보내고 있었다. 그래서 full_cycle 이 **출발 방향을 알 길이
+        # 없었고**, ⑤ 복귀가 자리로는 돌아오는데 방향은 파지할 때 각도(yaw 0) 그대로
+        # 남았다 — "복귀했는데 처음 자세가 아니다" 의 원인이다 (2026-09-23).
+        p, q = self.root.get_world_pose()
         state = {"status": self.status, "legs": self.legs,
                  "leg": self.legs - len(self.route),
-                 "pose": [round(float(p[0]), 4), round(float(p[1]), 4)],
+                 "pose": [round(float(p[0]), 4), round(float(p[1]), 4),
+                          round(math.degrees(_yaw(q)), 3)],
                  "stamp": time.time()}
         state.update(extra)
         self.pub.publish(String(data=json.dumps(state)))

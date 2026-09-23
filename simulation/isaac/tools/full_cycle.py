@@ -56,6 +56,7 @@ class Cycle(Node):
         self.create_subscription(String, "/navigation/sim/state",
                                  lambda m: self.nav_state.append(m.data), 20)
         self.home = None          # 출발 자리 — 첫 주행 보고에서 읽는다
+        self.home_yaw = None      # 출발 **방향**(도). 복귀 때 여기로 되돌린다
 
     # ------------------------------------------------------------------ 도움
     def wait_for(self, pub, seconds=15.0):
@@ -81,8 +82,15 @@ class Cycle(Node):
             while self.nav_state:
                 st = json.loads(self.nav_state.pop(0))
                 if self.home is None and st.get("pose"):
-                    self.home = tuple(st["pose"][:2])
-                    print(f"       출발 자리 기억: ({self.home[0]:+.3f}, {self.home[1]:+.3f})")
+                    # **방향까지 기억한다.** 자리만 기억하면 복귀가 자리는 맞추고
+                    # 방향은 파지할 때 각도 그대로 남는다 — 그러면 홈으로 돌아온
+                    # 의미가 없다 (2026-09-23 지적). pose 의 yaw 는 도(度)다.
+                    _p = st["pose"]
+                    self.home = tuple(_p[:2])
+                    self.home_yaw = float(_p[2]) if len(_p) > 2 else None
+                    print(f"       출발 자리 기억: ({self.home[0]:+.3f}, {self.home[1]:+.3f})"
+                          + (f" 방향 {self.home_yaw:+.1f}°" if self.home_yaw is not None
+                             else "  **방향을 못 받았다** — 복귀가 방향을 못 맞춘다"))
                 key = (st.get("status"), st.get("message"))
                 if key != last:
                     last = key
@@ -104,6 +112,8 @@ def main():
     ap.add_argument("--speed", type=float, default=0.6, help="주행 속도 (m/s)")
     ap.add_argument("--pick-x", type=float, default=PICK_SPOT[0])
     ap.add_argument("--pick-y", type=float, default=PICK_SPOT[1])
+    ap.add_argument("--home-yaw", type=float, default=None,
+                    help="복귀해서 맞출 월드 yaw (도). 비우면 출발할 때 읽은 방향을 쓴다")
     ap.add_argument("--pick-yaw", type=float, default=PICK_YAW_DEG,
                     help="파지 자리에서 바라볼 월드 yaw (도)")
     ap.add_argument("--no-return", action="store_true", help="반납 뒤 복귀하지 않는다")
@@ -137,6 +147,7 @@ def main():
         # 건너뛴다 (2026-09-23 take2 에서 확인). 주행 보고는 움직일 때만 오므로
         # 새 노드는 이 값을 다시 받지 못한다.
         _home = c.home
+        _home_yaw = c.home_yaw
         c.destroy_node()
         rclpy.shutdown()
         import subprocess
@@ -150,6 +161,7 @@ def main():
         c.wait_for(c.nav_pub)
         if c.home is None:
             c.home = _home
+            c.home_yaw = _home_yaw
 
     if not a.no_return:
         print("=" * 60)
@@ -157,7 +169,12 @@ def main():
         if c.home is None:
             print("       출발 자리를 못 읽었다 — 복귀를 건너뛴다")
         else:
-            ok = c.drive_to(home[0], home[1], a.speed, "⑤ 복귀") and ok
+            # 자리만 맞추면 방향이 파지 때 각도로 남는다 — 출발 방향으로 되돌린다
+            _hy = a.home_yaw if a.home_yaw is not None else c.home_yaw
+            if _hy is None:
+                print("       출발 방향을 못 읽었다 — 자리만 맞추고 방향은 그대로 둔다 "
+                      "(주행 실행기가 pose 에 yaw 를 싣는지 볼 것)")
+            ok = c.drive_to(home[0], home[1], a.speed, "⑤ 복귀", yaw_deg=_hy) and ok
 
     print("=" * 60)
     print(f"{'**한 바퀴 끝**' if ok else '**중간에 실패했다**'}  ({time.time() - t0:.0f}초)")
