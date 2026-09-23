@@ -9,12 +9,13 @@ import os
 import sys
 
 import numpy as np
+
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "controllers"))
 
 from tray_delivery import (  # noqa: E402
-    deliver_from_to, drift_mm, TRAY_FROM_FALLBACK, TRAY_TO_XY)
+    TRAY_FROM_FALLBACK, TRAY_TO_XY, deliver_from_to, drift_mm)
 
 #: 2026-09-24 레벨의 트레이 원점 (데스크탑 실측)
 LEVEL = [5.817607391996635, -5.659500598907469, 0.333765]
