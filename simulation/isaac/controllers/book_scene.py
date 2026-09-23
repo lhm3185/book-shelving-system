@@ -99,6 +99,18 @@ USE_LEVEL_TRAY = os.environ.get("SIM_USE_LEVEL_TRAY", "1") != "0"
 JAM_CHECK = os.environ.get("SIM_JAM_CHECK", "1") != "0"
 #: 허용 침투 (m). 서가 책들끼리 이미 0.7~4.6 mm 겹쳐 있어서(9/23 실측) 그보다 낮출 수 없다.
 JAM_TOL = float(os.environ.get("SIM_JAM_TOL", "0.005"))
+#: 서가에 **빈칸을 만든다** — `SIM_SHELF_GAP="<시작 인덱스>,<목표 폭 mm>[,<층>]"`.
+#:
+#: 왜 폭 기준인가: 서가 책 두께가 7.7 mm(잡지)~44.8 mm(하드커버)로 **6배** 차이 난다
+#: (9/23 실측). "몇 권 빼기"로 정의하면 같은 지시가 전혀 다른 난이도가 된다 —
+#: 잡지 한 권을 빼면 7.7 mm 구멍, 하드커버 한 권을 빼면 44.8 mm 구멍이다.
+#: 그래서 **열고 싶은 폭**을 말하면 필요한 최소 권수를 알아서 뺀다.
+#:
+#: 층은 `secondFloor`(선반판 월드 z 1.042) 가 기본이다. 나란히 꽂혀 있고(이웃 간격
+#: −0.7~−4.6 mm) 팔이 꽂을 수 있는 판이라 시험에 쓸 수 있는 유일한 층이다.
+#: `thirdFloor` 는 책이 비스듬히 기대 있어(겹침 −0.29~−0.59 m) 칸을 정의할 수 없고
+#: 애초에 팔이 못 닿는 판이다.
+SHELF_GAP = os.environ.get("SIM_SHELF_GAP", "").strip()
 DECK_Z = BOT.deck_z         # 트레이가 놓이는 면의 월드 높이 (로봇별)
 # 링크가 이보다 낮으면 받침판을 뚫는 것으로 본다 (팔 베이스가 판 위에 바로 붙어 있다)
 # 팔이 받침판을 이만큼까지 파고드는 것은 눈감아 준다 (충돌 구가 근사값이라 여유가 필요하다)
@@ -282,6 +294,9 @@ class BookScene:
             f"경로검사={os.environ.get('SIM_PATH_AUDIT', '0')} 겹침검사={JAM_CHECK}")
         _resolve_kiosk_tray(st, say)
         self._cache = create_bbox_cache()
+        # 서가 빈칸은 **원래 없다** — 있어야 하면 우리가 낸다 (SIM_SHELF_GAP, 런타임 비활성)
+        self.shelf_gap = None
+        self.apply_shelf_gap()
 
         # 책 원본: 기본은 한 종류, --book-variants 를 주면 레벨 /World/books 의 여러 종류를 돌려 쓴다
         sources = []
@@ -2369,6 +2384,91 @@ class BookScene:
         if b in self.grasp_local:
             c = c + Rb @ np.asarray(self.grasp_local[b][0], float)
         return Rh.T @ (c - np.asarray(hp, float)), Rh.T @ Rb
+
+    def shelf_shelf_floor(self, name="secondFloor"):
+        """서가 한 층의 낱권 책을 **월드 x 순서로** 돌려준다: [(경로, aabb), …]"""
+        sc = self.stage.GetPrimAtPath(f"/World/books/{name}")
+        if not sc.IsValid():
+            return []
+        rows = []
+        for c in sc.GetChildren():
+            path = str(c.GetPath())
+            b = self.aabb(path)
+            if not np.all(np.isfinite(b)) or np.any(b[3:] - b[:3] <= 0):
+                continue
+            rows.append((path, b))
+        rows.sort(key=lambda r: float(r[1][0]))
+        return rows
+
+    def apply_shelf_gap(self):
+        """`SIM_SHELF_GAP` 대로 서가에 빈칸을 낸다. 레벨 파일은 건드리지 않는다.
+
+        **빈칸은 원래 없다.** `secondFloor` 43권은 빈틈 없이 꽂혀 있다 — 이웃 간격이
+        전부 음수(−0.7~−4.6 mm)로, 폭 1.267 m 에 두께 합 1.372 m 가 들어가 있다.
+        그러니 "빈칸을 스캔한다" 가 성립하려면 **우리가 책을 빼서 만들어야** 한다.
+
+        빼는 방법은 프림 비활성(`SetActive(False)`)이다. 런타임에만 꺼지고 레벨
+        파일에는 아무 흔적도 남지 않는다.
+
+        돌려주는 값: 정답지 dict (없으면 None)
+        """
+        if not SHELF_GAP:
+            return None
+        parts = [p.strip() for p in SHELF_GAP.split(",")]
+        try:
+            start = int(parts[0])
+            want = float(parts[1]) / 1000.0
+        except (IndexError, ValueError):
+            raise RuntimeError(
+                f"SIM_SHELF_GAP 형식이 잘못됐다: {SHELF_GAP!r} — "
+                f'"<시작 인덱스>,<목표 폭 mm>[,<층>]" 이어야 한다 (예: "12,55")')
+        floor = parts[2] if len(parts) > 2 else "secondFloor"
+        rows = self.shelf_shelf_floor(floor)
+        if not rows:
+            raise RuntimeError(f"서가 층 '{floor}' 에 낱권 책이 없다 — "
+                               f"이름이 맞는지 볼 것 (secondFloor / thirdFloor)")
+        if not 0 <= start < len(rows):
+            raise RuntimeError(f"시작 인덱스 {start} 가 범위 밖이다 (0~{len(rows)-1}, {floor} {len(rows)}권)")
+        removed, acc = [], 0.0
+        i = start
+        while i < len(rows) and acc < want:
+            path, b = rows[i]
+            acc += float(b[3] - b[0])
+            removed.append((i, path, b))
+            i += 1
+        for _i, path, _b in removed:
+            self.stage.GetPrimAtPath(path).SetActive(False)
+        # **실제로 열린 폭**은 뺀 책 두께의 합이 아니라 남은 이웃 사이 거리다
+        # (책들이 서로 겹쳐 있어서 두께 합보다 좁게 열린다).
+        left = rows[start - 1][1] if start > 0 else None
+        right = rows[i][1] if i < len(rows) else None
+        x_lo = float(left[3]) if left is not None else float(removed[0][2][0])
+        x_hi = float(right[0]) if right is not None else float(removed[-1][2][3])
+        opened = x_hi - x_lo
+        gt = {
+            "floor": floor,
+            "removed_index": [r[0] for r in removed],
+            "removed": [r[1].rsplit("/", 1)[-1] for r in removed],
+            "requested_width_m": round(want, 4),
+            "opened_width_m": round(opened, 4),
+            "gap_x_min_world": round(x_lo, 4),
+            "gap_x_max_world": round(x_hi, 4),
+            "gap_center_world": [round((x_lo + x_hi) / 2, 4),
+                                 round(float(removed[0][2][1] + removed[0][2][4]) / 2, 4),
+                                 round(float(removed[0][2][2] + removed[0][2][5]) / 2, 4)],
+            "neighbor_left": (rows[start - 1][1][3].round(4).tolist() if start > 0 else None),
+            "neighbor_right": (rows[i][1][0].round(4).tolist() if i < len(rows) else None),
+            "remaining": len(rows) - len(removed),
+        }
+        self.say(f"[빈칸] {floor} {len(rows)}권 중 {len(removed)}권을 뺐다 "
+                 f"(인덱스 {gt['removed_index']}) — 요청 {want*1000:.0f} mm, "
+                 f"**실제로 열린 폭 {opened*1000:.1f} mm** "
+                 f"(월드 x {x_lo:.4f}~{x_hi:.4f}). 레벨 파일은 그대로다")
+        if opened < want - 0.002:
+            self.say(f"[빈칸] 주의: 요청보다 {(want-opened)*1000:.1f} mm 좁게 열렸다 — "
+                     f"책들이 서로 겹쳐 있어 두께 합만큼 열리지 않는다")
+        self.shelf_gap = gt
+        return gt
 
     def shelf_book_boxes(self, board_z=None, tol=0.10):
         """서가에 꽂힌 **낱권 책**들의 월드 AABB. 우리 책은 빼고 본다.
