@@ -2675,9 +2675,19 @@ class BookScene:
             jam, who, axes = self.jam_report(bb, plan.get("floor_z"))
             checks["no_jam"] = jam <= JAM_TOL
             if jam > 0:
+                # **겹침을 왜 냈는지 한 줄로 가른다**: 책이 옆으로 밀린 것인가(중심 이동),
+                # 비뚤어진 것인가(폭 부풀음). 2026-09-24 +60 mm 판에서 x 검사(±15 mm)는
+                # 통과하는데 14 mm 겹친 일이 있었다 — 중심만 봐서는 못 가른다.
+                _T = plan.get("dims", (self.T, self.L, self.W))[0]
+                _span = float(bb[3] - bb[0])
+                _off = float((bb[0] + bb[3]) / 2 - plan["place_x"])
                 self.say(f"[겹침] 꽂은 책이 '{who}' 와 {jam*1000:.1f} mm 겹친다 "
                          f"(축별 {np.round(axes*1000, 1).tolist()} mm, 임계 {JAM_TOL*1000:.0f} mm) "
                          f"— 서가 책은 콜리전이 없어 물리로는 안 막힌다")
+                self.say(f"  까닭 가르기: 중심이 목표에서 {_off*1000:+.1f} mm · "
+                         f"x 폭 {_span*1000:.1f} mm (규격 두께 {_T*1000:.1f} mm, "
+                         f"부풀음 {(_span - _T)*1000:+.1f} mm) → "
+                         f"{'비뚤어짐' if (_span - _T) > abs(_off) else '옆으로 밀림'}")
             else:
                 n = len(self.shelf_book_boxes(plan.get("floor_z")))
                 self.say(f"[겹침] 옆 책과 겹치지 않음 (그 판의 서가 책 {n}권과 대조)")

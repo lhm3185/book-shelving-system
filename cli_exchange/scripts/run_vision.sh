@@ -7,6 +7,21 @@ ID=${1:?실행ID}; shift
 R=~/b1_arm
 D=$R/night/runs/$ID; mkdir -p "$D"
 cd $R
+
+# **앞 판이 끝난 뒤 충분히 띄우고 시작한다.** 2026-09-24 에 Isaac 이 기동 직후
+# 죽는 일이 5회 있었고 전부 **연속 실행 중**이었다 (앞 판 종료 직후 바로 다음 판).
+# 20초 이상 띄우면 재현되지 않는다. 10회 연속 기동 시험은 3~4초 간격에서 실패 0이었다.
+# 원인은 아직 모른다 — 알 때까지는 간격으로 피한다.
+BOOT_GAP=${SIM_BOOT_GAP:-20}
+STAMP=$R/night/runs/.last_end
+if [ -f "$STAMP" ]; then
+  _wait=$(( BOOT_GAP - ( $(date +%s) - $(cat "$STAMP") ) ))
+  if [ "$_wait" -gt 0 ]; then
+    echo "앞 판 종료 후 ${_wait}초 더 기다린다 (SIM_BOOT_GAP=$BOOT_GAP)"
+    sleep "$_wait"
+  fi
+fi
+
 bash night/cleanup_demo.sh > "$D/cleanup.txt" 2>&1
 
 export DISPLAY=${DISPLAY:-:1}
@@ -54,5 +69,6 @@ grep -q '준비 완료' "$D/sim.log" || { echo "시뮬 준비 실패"; tail -30 
 sleep 5
 kill -INT $(cat "$D/sim.pid") 2>/dev/null; sleep 8
 bash night/cleanup_demo.sh >> "$D/cleanup.txt" 2>&1
+date +%s > "$R/night/runs/.last_end"      # 다음 판이 이만큼 띄우고 시작한다
 grep -hE 'code=|error_code|RESULT|결과|성공|실패|rc=' "$D/cyc.log" | tail -8 | cut -c1-400
 grep -hE '### (스위치|\[403추적\]|\[스윙\]|\[경로검사\])' "$D/sim.log" | cut -c1-300 | tail -20
