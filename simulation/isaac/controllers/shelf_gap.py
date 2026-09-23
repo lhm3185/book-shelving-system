@@ -16,8 +16,39 @@
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
+
+
+def span_for(thickness: float, depth: float, skew_deg: float) -> float:
+    """비뚤게 선 책이 칸 방향(x)으로 차지하는 폭.
+
+    책을 칸 안에서 `skew_deg` 만큼 돌리면 AABB 가 **두께가 아니라 대각선**만큼
+    벌어진다. 두께 35 mm 짜리가 3.6° 만 돌아도 45 mm 를 먹는다 — 책등→앞마구리
+    치수(163 mm)가 지렛대이기 때문이다.
+    """
+    t = math.radians(float(skew_deg))
+    return float(thickness) * math.cos(t) + float(depth) * math.sin(t)
+
+
+def skew_deg_from_span(span: float, thickness: float, depth: float) -> float:
+    """찍힌 x 폭에서 기울기를 되돌린다 (0~90°). 못 풀면 0.
+
+    왜 필요한가: 겹침 로그는 "폭이 10.1 mm 부풀었다" 고 말하는데, 그것만으로는
+    얼마나 돌아간 것인지 감이 안 온다. 각도로 바꾸면 **삽입 yaw 허용치(0.10 rad
+    = 5.7°)와 같은 단위**가 되어 바로 견줄 수 있다 (2026-09-24).
+    """
+    lo, hi = 0.0, 90.0
+    if float(span) <= float(thickness):
+        return 0.0
+    for _ in range(60):
+        mid = (lo + hi) / 2.0
+        if span_for(thickness, depth, mid) < float(span):
+            lo = mid
+        else:
+            hi = mid
+    return lo
 
 
 @dataclass(frozen=True)
@@ -40,6 +71,23 @@ class Gap:
     def clearance(self, thickness: float) -> float:
         """한가운데 꽂았을 때 **한쪽** 여유 (m). 음수면 안 들어간다."""
         return (self.width - thickness) / 2.0
+
+    def max_skew_deg(self, thickness: float, depth: float) -> float:
+        """이 빈칸이 견디는 **최대 기울기** (도). 한가운데 꽂았다고 볼 때.
+
+        옆 여유를 각도로 바꾼 값이다. 여유가 12.3 mm 라도 책이 8° 넘게 돌면
+        들어가지 않는다 — 여유를 mm 로만 보면 이걸 놓친다.
+        """
+        lo, hi = 0.0, 90.0
+        if span_for(thickness, depth, 0.0) > self.width:
+            return 0.0
+        for _ in range(60):
+            mid = (lo + hi) / 2.0
+            if span_for(thickness, depth, mid) <= self.width:
+                lo = mid
+            else:
+                hi = mid
+        return lo
 
 
 def merge_boxes(boxes: Sequence[Tuple[str, float, float]],

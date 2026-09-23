@@ -4,6 +4,7 @@
 forthFloor(선반판 z 0.4976, 40권)에서 가져왔다.
 """
 
+import math
 import os
 import re
 import sys
@@ -12,7 +13,8 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "controllers"))
 
-from shelf_gap import choose_gap, gaps, merge_boxes  # noqa: E402
+from shelf_gap import (  # noqa: E402
+    choose_gap, gaps, merge_boxes, skew_deg_from_span, span_for)
 
 #: 우리 책 두께 (m)
 T = 0.0353
@@ -115,3 +117,39 @@ def test_touching_books_do_not_become_a_gap():
     """서로 −0.7~−4.6 mm 겹쳐 있는 책들 사이가 빈칸으로 잡히면 안 된다."""
     touching = [("a", 0.0, 0.10), ("b", 0.0975, 0.20), ("c", 0.2020, 0.30)]
     assert gaps(touching, join_below=0.005) == []
+
+
+# ------------------------------------------------------- 비뚤어짐 (2026-09-24 +60 mm 판)
+#
+#   [겹침] book20 과 13.0 mm · 중심 +1.5 mm · x 폭 45.3 mm (부풀음 +10.1 mm) → 비뚤어짐
+#
+# 중심은 맞는데 폭이 부풀었다. upright(z)·spine(y)·x(중심) 어느 것도 못 잡는다.
+
+DEPTH = 0.1631      # 책등→앞마구리
+
+
+def test_skew_is_recovered_from_the_logged_span():
+    """폭 45.3 mm 는 **3.6° 기울기**다 — 삽입 yaw 허용치 5.7° 안쪽이라 계획은 통과한다."""
+    deg = skew_deg_from_span(0.0453, 0.0352, DEPTH)
+    assert deg == pytest.approx(3.57, abs=0.05)
+    assert deg < math.degrees(0.10)          # yaw_tolerance 0.10 rad = 5.73°
+
+
+def test_a_thin_book_eats_a_lot_when_it_leans():
+    """두께 35 mm 가 3.6° 돌면 45 mm 를 먹는다 — 지렛대는 책등→앞마구리 163 mm 다."""
+    assert span_for(0.0352, DEPTH, 0.0) == pytest.approx(0.0352, abs=1e-9)
+    assert span_for(0.0352, DEPTH, 3.57) * 1000 == pytest.approx(45.3, abs=0.2)
+    # 두께만 보면 10 mm 여유가 넉넉해 보이지만 각도로는 3.5° 밖에 안 된다
+    assert skew_deg_from_span(0.0452, 0.0352, DEPTH) == pytest.approx(3.53, abs=0.05)
+
+
+def test_the_gap_tolerates_less_skew_than_it_looks():
+    """여유 12.3 mm 인 빈칸이 견디는 기울기는 8.9° 뿐이다 — mm 로만 보면 놓친다."""
+    g = [x for x in gaps(FORTH, *INNER) if abs(x.lo - 2.4665) < 1e-9][0]
+    assert g.clearance(0.0352) * 1000 == pytest.approx(12.35, abs=0.1)
+    assert g.max_skew_deg(0.0352, DEPTH) == pytest.approx(8.86, abs=0.05)
+    # 왼쪽 옆판 빈칸(여유 5.4 mm)은 **3.8° 까지**다. +60 mm 판에서 실제로 난 기울기가
+    # 3.57° 였으니 예비가 0.3° 뿐이다 — 이 칸은 사실상 기울기 예비가 없다
+    left = [x for x in gaps(FORTH, *INNER) if x.left == ""][0]
+    assert left.max_skew_deg(0.0352, DEPTH) == pytest.approx(3.82, abs=0.05)
+    assert left.max_skew_deg(0.0352, DEPTH) - 3.57 < 0.3
