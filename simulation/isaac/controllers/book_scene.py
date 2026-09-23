@@ -1780,6 +1780,24 @@ class BookScene:
             out["grasp_local_c"] = np.round(np.asarray(c_loc, float), 6).tolist()
             out["grasp_local_up"] = np.round(np.asarray(up_loc, float), 6).tolist()
             out["grasp_local_hz"] = round(float(hz), 6)
+        # **책이 트레이에서 이미 돌아 있는가.** 파지 자세는 상수(DOWN)라 책의 yaw 를
+        # 맞춰 주지 않는다 — 트레이에서 돌아 있으면 그대로 들려가 그대로 꽂힌다.
+        # 2026-09-24: 통과한 데모 판도 꽂힌 x 폭이 43.0 mm(기울기 2.8°)였고, 운반 중
+        # 회전은 0.2° 이하였다. 즉 **운반에서 생기는 각이 아니다.**
+        # span_pred 가 실제로 꽂힌 폭과 맞으면 원인이 여기로 확정된다.
+        _q = np.asarray(bq, float)
+        _byaw = math.degrees(math.atan2(2 * (_q[0] * _q[3] + _q[1] * _q[2]),
+                                        1 - 2 * (_q[2] ** 2 + _q[3] ** 2)))
+        _skew = (_byaw - math.degrees(self.tray_yaw) + 90.0) % 180.0 - 90.0
+        out["book_yaw_world_deg"] = round(float(_byaw), 4)
+        out["book_yaw_arm_deg"] = round(float(_skew), 4)
+        try:
+            from shelf_gap import span_for
+            _T, _Lb, _W = out["dims"]
+            out["span_pred_mm"] = round(span_for(_T, _W, abs(_skew)) * 1000, 2)
+            out["span_flat_mm"] = round(float(_T) * 1000, 2)
+        except Exception:      # noqa: BLE001 - 기록이 작업을 막으면 안 된다
+            pass
         return out
 
     def say_plan_inputs(self, book, place_center_world, tag=""):
