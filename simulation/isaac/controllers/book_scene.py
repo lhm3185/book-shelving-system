@@ -611,6 +611,27 @@ class BookScene:
         # `/World/bs_bookends` 에 큐브 한 쌍씩을 스폰했는데, 레벨에 없는 물체가
         # 장면에 끼어드는 것이라 협업에 방해가 된다. 서가는 레벨이 정답이다.
         floor_z = self.shelf_floor_z = SHELF_ROW_Z
+        # **선반 판 높이를 레벨에서 잰다** (`SIM_SHELF_ROW_MEASURE=1`, 기본 꺼짐).
+        #
+        # 기본값이 `0.355 * 1.4` 다 — 어디서 온 곱셈인지 코드에 없고, 레벨이 바뀌면
+        # 조용히 썩는다. 오늘 밤에만 같은 병이 여덟 번 나왔다(트레이 출발점, 꽂을 x,
+        # 스윕 기준점, 406 기준점, move_rig, 파지 벌림, 파지 정렬 기준자세, 그리고 이것).
+        #
+        # 재는 법: 서가 메시의 점들 중 지금 값 근처의 **수평면**을 찾는다. 이 메시는
+        # 92점짜리 저폴리라 판 윗면이 같은 z 에 8점씩 모여 있다 (2026-09-24 실측:
+        # z 0.4425 여덟 점 = 판 아랫면, z 0.4976 여덟 점 = 판 윗면).
+        #
+        # 주의: 이것은 **시각** 형상이다. 물리가 쓰는 콜라이더가 다르면 소용없다 —
+        # `SIM_SHELF_COLL=none` 과 **같이** 써야 둘이 맞는다. 따로 쓰면 오늘의 18 mm 가
+        # 그대로 남는다.
+        if os.environ.get("SIM_SHELF_ROW_MEASURE", "0") != "0":
+            _m = self.measure_shelf_board_z(SHELF_ROW_Z)
+            if _m is None:
+                say(f"[선반] 판 윗면을 못 쟀다 — 설정값 {SHELF_ROW_Z:.4f} 을 그대로 쓴다")
+            else:
+                say(f"[선반] 판 윗면 실측 {_m:.4f} (설정 {SHELF_ROW_Z:.4f}, "
+                    f"차이 {(_m - SHELF_ROW_Z)*1000:+.1f} mm) [SIM_SHELF_ROW_MEASURE]")
+                floor_z = self.shelf_floor_z = float(_m)
         self.bookends = {}      # 비워 둔다 — fit_bookends() 는 아무것도 하지 않는다
 
         # **서가 콜라이더 근사를 바꾼다** (`SIM_SHELF_COLL`, 기본 그대로 둠).
@@ -999,6 +1020,39 @@ class BookScene:
     def _prim_valid(self, p):
         # 확인할 수 없으면 **유효하지 않다**고 본다. 검사의 기본값이 '통과' 면 검사가 아니다
         return self.stage.GetPrimAtPath(p).IsValid() if getattr(self, "stage", None) else False
+
+    def measure_shelf_board_z(self, near_z, tol=0.08, min_pts=4):
+        """서가 메시에서 `near_z` 에 가장 가까운 **수평면**의 z (월드). 못 찾으면 None.
+
+        판 윗면은 같은 z 에 점이 여러 개 모인다. 그 뭉치들 중 지금 값에 가장 가까운
+        것을 고른다 — 아랫면(같은 판의 반대쪽)과 헷갈리지 않도록 `tol` 안만 본다.
+        """
+        root = self.stage.GetPrimAtPath(SHELF)
+        if not (root and root.IsValid()):
+            root = self.stage.GetPrimAtPath(SHELF.rsplit("/", 1)[0])
+        if not (root and root.IsValid()):
+            return None
+        from collections import Counter
+        zs = Counter()
+        for pr in Usd.PrimRange(root):
+            if not pr.IsA(UsdGeom.Mesh):
+                continue
+            try:
+                pts = UsdGeom.Mesh(pr).GetPointsAttr().Get()
+                if not pts:
+                    continue
+                M = UsdGeom.Xformable(pr).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+                for q in pts:
+                    w = M.Transform(Gf.Vec3d(float(q[0]), float(q[1]), float(q[2])))
+                    z = float(w[2])
+                    if abs(z - near_z) <= tol:
+                        zs[round(z, 4)] += 1
+            except Exception:      # noqa: BLE001 - 계측이 작업을 막으면 안 된다
+                continue
+        cand = [(abs(z - near_z), z, n) for z, n in zs.items() if n >= min_pts]
+        if not cand:
+            return None
+        return min(cand)[1]
 
     def aabb(self, p):
         self._cache.Clear()
