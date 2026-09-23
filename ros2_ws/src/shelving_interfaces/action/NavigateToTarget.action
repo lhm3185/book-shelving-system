@@ -1,9 +1,12 @@
 string job_id
 string target_type
 string target_id
+
+geometry_msgs/PoseStamped[] waypoints
 geometry_msgs/PoseStamped target_pose
-float32 position_tolerance
-float32 yaw_tolerance
+
+# Nav2 도착만 사용할지, 최종 정밀 정렬까지 수행할지 선택
+bool enable_fine_alignment
 ---
 bool success
 geometry_msgs/PoseStamped final_pose
@@ -12,6 +15,8 @@ int32 error_code
 string message
 ---
 string phase
+uint32 current_waypoint_index
+uint32 total_waypoints
 float32 remaining_distance
 float32 position_error
 float32 yaw_error

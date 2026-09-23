@@ -27,16 +27,12 @@ setup(
             os.path.join('share', package_name, 'maps'),
             glob('maps/*'),
         ),
-        (
-            os.path.join('share', package_name, 'rviz'),
-            glob('rviz/*.rviz'),
-        ),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='hymi',
     maintainer_email='lhm6582@gmail.com',
-    description='AMR navigation and docking for return-station and shelf targets.',
+    description='Ridgeback-Franka navigation for return-station and shelf targets.',
     license='Apache-2.0',
     extras_require={
         'test': [
@@ -45,13 +41,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            (
-                'navigation_node = shelving_navigation.navigation_node:main'
-            ),
-            (
-                'pointcloud_timestamp_relay = '
-                'shelving_navigation.pointcloud_timestamp_relay:main'
-            ),
+            ('navigation_node = shelving_navigation.navigation_node:main'),
         ],
     },
 )

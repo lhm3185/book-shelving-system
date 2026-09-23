@@ -25,7 +25,7 @@ amcl:
     recovery_alpha_fast: 0.0
     recovery_alpha_slow: 0.0
     resample_interval: 1
-    robot_model_type: nav2_amcl::DifferentialMotionModel
+    robot_model_type: nav2_amcl::OmniMotionModel
     save_pose_rate: 0.5
     sigma_hit: 0.2
     set_initial_pose: true
@@ -94,29 +94,27 @@ controller_server:
       batch_size: 2000
       ax_max: 0.5
       ax_min: -0.5
-      ay_max: 0.0
-      ay_min: 0.0
+      ay_max: 0.5
+      ay_min: -0.5
       az_max: 1.0
       vx_std: 0.2
       vy_std: 0.2
       wz_std: 0.4
       vx_max: 0.35
       vx_min: -0.2
-      vy_max: 0.0
+      vy_max: 0.35
       wz_max: 0.6
       iteration_count: 1
       prune_distance: 1.7
       transform_tolerance: 0.1
       temperature: 0.3
       gamma: 0.015
-      motion_model: DiffDrive
+      motion_model: Omni
       visualize: true
       regenerate_noises: true
       TrajectoryVisualizer:
         trajectory_step: 5
         time_step: 3
-      AckermannConstraints:
-        min_turning_r: 0.2
       critics:
       - ConstraintCritic
       - CostCritic
@@ -125,7 +123,6 @@ controller_server:
       - PathAlignCritic
       - PathFollowCritic
       - PathAngleCritic
-      - PreferForwardCritic
       ConstraintCritic:
         enabled: true
         cost_power: 1
@@ -139,11 +136,6 @@ controller_server:
         enabled: true
         cost_power: 1
         cost_weight: 3.0
-        threshold_to_consider: 0.5
-      PreferForwardCritic:
-        enabled: true
-        cost_power: 1
-        cost_weight: 5.0
         threshold_to_consider: 0.5
       CostCritic:
         enabled: true
@@ -208,7 +200,7 @@ local_costmap:
         mark_threshold: 0
         observation_sources: lidar_points
         lidar_points:
-          topic: /lidar/points_nav
+          topic: /point_cloud
           data_type: PointCloud2
           clearing: true
           marking: true
@@ -263,12 +255,6 @@ global_costmap:
       always_send_full_costmap: true
       footprint: '[[0.60, 0.50], [0.60, -0.50], [-0.60, -0.50], [-0.60, 0.50]]'
       footprint_padding: 0.05
-map_saver:
-  ros__parameters:
-    save_map_timeout: 5.0
-    free_thresh_default: 0.25
-    occupied_thresh_default: 0.65
-    map_subscribe_transient_local: true
 planner_server:
   ros__parameters:
     expected_planner_frequency: 20.0
@@ -280,15 +266,6 @@ planner_server:
       tolerance: 0.5
       use_astar: false
       allow_unknown: true
-smoother_server:
-  ros__parameters:
-    smoother_plugins:
-    - simple_smoother
-    simple_smoother:
-      plugin: nav2_smoother::SimpleSmoother
-      tolerance: 1.0e-10
-      max_its: 1000
-      do_refinement: true
 behavior_server:
   ros__parameters:
     local_costmap_topic: local_costmap/costmap_raw
@@ -299,19 +276,13 @@ behavior_server:
     behavior_plugins:
     - spin
     - backup
-    - drive_on_heading
-    - assisted_teleop
     - wait
     spin:
       plugin: nav2_behaviors::Spin
     backup:
       plugin: nav2_behaviors::BackUp
-    drive_on_heading:
-      plugin: nav2_behaviors::DriveOnHeading
     wait:
       plugin: nav2_behaviors::Wait
-    assisted_teleop:
-      plugin: nav2_behaviors::AssistedTeleop
     local_frame: odom
     global_frame: map
     robot_base_frame: base_link
@@ -320,39 +291,6 @@ behavior_server:
     max_rotational_vel: 1.0
     min_rotational_vel: 0.4
     rotational_acc_lim: 3.2
-waypoint_follower:
-  ros__parameters:
-    loop_rate: 20
-    stop_on_failure: false
-    action_server_result_timeout: 900.0
-    waypoint_task_executor_plugin: wait_at_waypoint
-    wait_at_waypoint:
-      plugin: nav2_waypoint_follower::WaitAtWaypoint
-      enabled: true
-      waypoint_pause_duration: 200
-route_server:
-  ros__parameters:
-    boundary_radius_to_achieve_node: 1.0
-    radius_to_achieve_node: 2.0
-    smooth_corners: true
-    operations:
-    - AdjustSpeedLimit
-    - ReroutingService
-    - CollisionMonitor
-    ReroutingService:
-      plugin: nav2_route::ReroutingService
-    AdjustSpeedLimit:
-      plugin: nav2_route::AdjustSpeedLimit
-    CollisionMonitor:
-      plugin: nav2_route::CollisionMonitor
-      max_collision_dist: 3.0
-    edge_cost_functions:
-    - DistanceScorer
-    - CostmapScorer
-    DistanceScorer:
-      plugin: nav2_route::DistanceScorer
-    CostmapScorer:
-      plugin: nav2_route::CostmapScorer
 velocity_smoother:
   ros__parameters:
     smoothing_frequency: 20.0
@@ -361,19 +299,19 @@ velocity_smoother:
     feedback: OPEN_LOOP
     max_velocity:
     - 0.35
-    - 0.0
+    - 0.35
     - 0.6
     min_velocity:
     - -0.2
-    - 0.0
+    - -0.35
     - -0.6
     max_accel:
     - 0.5
-    - 0.0
+    - 0.5
     - 1.0
     max_decel:
     - -0.5
-    - 0.0
+    - -0.5
     - -1.0
     odom_topic: /odom
     odom_duration: 0.1
@@ -412,57 +350,3 @@ collision_monitor:
       min_height: 0.15
       max_height: 2.0
       enabled: true
-docking_server:
-  ros__parameters:
-    controller_frequency: 50.0
-    initial_perception_timeout: 5.0
-    wait_charge_timeout: 5.0
-    dock_approach_timeout: 30.0
-    undock_linear_tolerance: 0.05
-    undock_angular_tolerance: 0.1
-    max_retries: 3
-    base_frame: base_link
-    fixed_frame: odom
-    dock_backwards: false
-    dock_prestaging_tolerance: 0.5
-    dock_plugins:
-    - simple_charging_dock
-    simple_charging_dock:
-      plugin: opennav_docking::SimpleChargingDock
-      docking_threshold: 0.05
-      staging_x_offset: -0.7
-      use_external_detection_pose: true
-      use_battery_status: false
-      use_stall_detection: false
-      external_detection_timeout: 1.0
-      external_detection_translation_x: -0.18
-      external_detection_translation_y: 0.0
-      external_detection_rotation_roll: -1.57
-      external_detection_rotation_pitch: -1.57
-      external_detection_rotation_yaw: 0.0
-      filter_coef: 0.1
-    controller:
-      k_phi: 3.0
-      k_delta: 2.0
-      v_linear_min: 0.15
-      v_linear_max: 0.15
-      use_collision_detection: true
-      costmap_topic: local_costmap/costmap_raw
-      footprint_topic: local_costmap/published_footprint
-      transform_tolerance: 0.1
-      projection_time: 5.0
-      simulation_step: 0.1
-      dock_collision_threshold: 0.3
-loopback_simulator:
-  ros__parameters:
-    base_frame_id: base_link
-    odom_frame_id: odom
-    map_frame_id: map
-    scan_frame_id: base_scan
-    update_duration: 0.02
-    scan_range_min: 0.05
-    scan_range_max: 30.0
-    scan_angle_min: -3.1415
-    scan_angle_max: 3.1415
-    scan_angle_increment: 0.02617
-    scan_use_inf: true

@@ -6,6 +6,7 @@ import rclpy
 from ament_index_python.packages import (
     get_package_share_directory,
 )
+from geometry_msgs.msg import PoseStamped
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.qos import (
@@ -68,14 +69,7 @@ class TaskManagerNode(Node):
             "navigation_server_timeout_sec",
             5.0,
         )
-        self.declare_parameter(
-            "position_tolerance",
-            0.1,
-        )
-        self.declare_parameter(
-            "yaw_tolerance",
-            0.1,
-        )
+
         self.declare_parameter(
             "shelf_map_path",
             str(default_config_dir / "shelf_map.yaml"),
@@ -284,8 +278,12 @@ class TaskManagerNode(Node):
         self._send_navigation_goal(
             target_type="return_station",
             target_id="return_station",
-            frame_id=str(self._current_plan.return_station_pose['frame_id']),
+            frame_id=str(
+                self._current_plan.return_station_pose["frame_id"]
+            ),
             target_pose=self._current_plan.return_station_pose,
+            waypoints=[],
+            enable_fine_alignment=True,
         )
 
     def _send_navigation_to_shelf(self) -> None:
@@ -315,6 +313,8 @@ class TaskManagerNode(Node):
             target_id=task.shelf_id,
             frame_id=task.shelf_frame_id,
             target_pose=task.shelf_observation_pose,
+            waypoints=[],
+            enable_fine_alignment=True,
         )
 
     def _send_navigation_home(self) -> None:
@@ -333,14 +333,18 @@ class TaskManagerNode(Node):
                 self._current_plan.home_pose["frame_id"]
             ),
             target_pose=self._current_plan.home_pose,
+            waypoints=[],
+            enable_fine_alignment=True,
         )
 
     def _send_navigation_goal(
         self,
         target_type: str,
         target_id: str,
-        frame_id:str,
+        frame_id: str,
         target_pose: dict,
+        waypoints: list[PoseStamped],
+        enable_fine_alignment: bool,
     ) -> None:
         """Send one navigation goal to the AMR."""
         timeout_sec = float(
@@ -369,6 +373,8 @@ class TaskManagerNode(Node):
         goal.job_id = self._active_job_id
         goal.target_type = target_type
         goal.target_id = target_id
+        goal.waypoints = list(waypoints)
+        goal.enable_fine_alignment = bool(enable_fine_alignment)
 
         position = target_pose["position"]
         orientation = target_pose["orientation"]
@@ -401,17 +407,6 @@ class TaskManagerNode(Node):
             orientation["w"]
         )
 
-        goal.position_tolerance = float(
-            self.get_parameter(
-                "position_tolerance"
-            ).value
-        )
-        goal.yaw_tolerance = float(
-            self.get_parameter(
-                "yaw_tolerance"
-            ).value
-        )
-
         self._active_navigation_target_type = target_type
         self._active_navigation_target_id = target_id
 
@@ -420,6 +415,8 @@ class TaskManagerNode(Node):
             f"job_id={goal.job_id}, "
             f"target_type={goal.target_type}, "
             f"target_id={goal.target_id}, "
+            f"waypoints={len(goal.waypoints)}, "
+            f"fine_alignment={goal.enable_fine_alignment}, "
             f"x={goal.target_pose.pose.position.x:.2f}, "
             f"y={goal.target_pose.pose.position.y:.2f}"
         )
@@ -481,10 +478,20 @@ class TaskManagerNode(Node):
         """Handle navigation progress feedback."""
         feedback = feedback_message.feedback
 
+        if feedback.total_waypoints > 0:
+            waypoint_status = (
+                f", waypoint="
+                f"{feedback.current_waypoint_index + 1}"
+                f"/{feedback.total_waypoints}"
+            )
+        else:
+            waypoint_status = ""
+
         self._status_message = (
             f"Navigating to "
             f"'{self._active_navigation_target_id}': "
-            f"phase={feedback.phase}, "
+            f"phase={feedback.phase}"
+            f"{waypoint_status}, "
             f"remaining={feedback.remaining_distance:.2f} m"
         )
         self._publish_status()
@@ -493,7 +500,8 @@ class TaskManagerNode(Node):
             "Navigation feedback: "
             f"target_id="
             f"{self._active_navigation_target_id}, "
-            f"phase={feedback.phase}, "
+            f"phase={feedback.phase}"
+            f"{waypoint_status}, "
             f"remaining_distance="
             f"{feedback.remaining_distance:.2f}, "
             f"position_error="

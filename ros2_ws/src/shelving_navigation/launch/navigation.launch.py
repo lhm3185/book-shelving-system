@@ -5,7 +5,6 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
-from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -31,31 +30,25 @@ def generate_launch_description():
         "config",
         "pointcloud_to_laserscan.yaml",
     )
-    default_waypoints = os.path.join(
+    default_navigation_params = os.path.join(
         package_share,
         "config",
-        "waypoints.yaml",
+        "navigation.yaml",
     )
-    default_rviz = os.path.join(
-        package_share,
-        "rviz",
-        "navigation.rviz",
-    )
-
     map_file = LaunchConfiguration("map")
     params_file = LaunchConfiguration("params_file")
     lidar_params_file = LaunchConfiguration("lidar_params_file")
-    waypoints_file = LaunchConfiguration("waypoints_file")
+    navigation_params_file = LaunchConfiguration(
+        "navigation_params_file"
+    )
     use_sim_time = LaunchConfiguration("use_sim_time")
-    start_rviz = LaunchConfiguration("start_rviz")
-    pointcloud_source_topic = LaunchConfiguration("pointcloud_source_topic")
     pointcloud_topic = LaunchConfiguration("pointcloud_topic")
     scan_topic = LaunchConfiguration("scan_topic")
 
-    nav2_launch = os.path.join(
+    localization_launch = os.path.join(
         nav2_share,
         "launch",
-        "bringup_launch.py",
+        "localization_launch.py",
     )
 
     return LaunchDescription([
@@ -75,9 +68,9 @@ def generate_launch_description():
             description="PointCloud2 to LaserScan parameter file.",
         ),
         DeclareLaunchArgument(
-            "waypoints_file",
-            default_value=default_waypoints,
-            description="Shelving navigation waypoint file.",
+            "navigation_params_file",
+            default_value=default_navigation_params,
+            description="Shelving navigation node parameter file.",
         ),
         DeclareLaunchArgument(
             "use_sim_time",
@@ -85,36 +78,14 @@ def generate_launch_description():
             description="Use Isaac Sim clock.",
         ),
         DeclareLaunchArgument(
-            "start_rviz",
-            default_value="true",
-            description="Start RViz.",
-        ),
-        DeclareLaunchArgument(
-            "pointcloud_source_topic",
-            default_value="/lidar/points_raw",
-            description="Raw Ridgeback LiDAR PointCloud2 topic from Isaac.",
-        ),
-        DeclareLaunchArgument(
             "pointcloud_topic",
-            default_value="/lidar/points_nav",
-            description="Clock-corrected LiDAR PointCloud2 topic for Nav2.",
+            default_value="/point_cloud",
+            description="Ridgeback LiDAR PointCloud2 topic from Isaac Sim.",
         ),
         DeclareLaunchArgument(
             "scan_topic",
             default_value="/scan",
             description="Generated LaserScan topic.",
-        ),
-
-        Node(
-            package="shelving_navigation",
-            executable="pointcloud_timestamp_relay",
-            name="pointcloud_timestamp_relay",
-            output="screen",
-            parameters=[{
-                "input_topic": pointcloud_source_topic,
-                "output_topic": pointcloud_topic,
-                "use_sim_time": use_sim_time,
-            }],
         ),
 
         Node(
@@ -133,7 +104,7 @@ def generate_launch_description():
         ),
 
         IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(nav2_launch),
+            PythonLaunchDescriptionSource(localization_launch),
             launch_arguments={
                 "map": map_file,
                 "params_file": params_file,
@@ -144,27 +115,85 @@ def generate_launch_description():
         ),
 
         Node(
-            package="shelving_navigation",
-            executable="navigation_node",
-            name="navigation_node",
+            package="nav2_controller",
+            executable="controller_server",
+            name="controller_server",
+            output="screen",
+            parameters=[params_file, {"use_sim_time": use_sim_time}],
+            remappings=[("cmd_vel", "cmd_vel_nav")],
+        ),
+
+        Node(
+            package="nav2_planner",
+            executable="planner_server",
+            name="planner_server",
+            output="screen",
+            parameters=[params_file, {"use_sim_time": use_sim_time}],
+        ),
+
+        Node(
+            package="nav2_behaviors",
+            executable="behavior_server",
+            name="behavior_server",
+            output="screen",
+            parameters=[params_file, {"use_sim_time": use_sim_time}],
+            remappings=[("cmd_vel", "cmd_vel_nav")],
+        ),
+
+        Node(
+            package="nav2_bt_navigator",
+            executable="bt_navigator",
+            name="bt_navigator",
+            output="screen",
+            parameters=[params_file, {"use_sim_time": use_sim_time}],
+        ),
+
+        Node(
+            package="nav2_velocity_smoother",
+            executable="velocity_smoother",
+            name="velocity_smoother",
+            output="screen",
+            parameters=[params_file, {"use_sim_time": use_sim_time}],
+            remappings=[("cmd_vel", "cmd_vel_nav")],
+        ),
+
+        Node(
+            package="nav2_collision_monitor",
+            executable="collision_monitor",
+            name="collision_monitor",
+            output="screen",
+            parameters=[params_file, {"use_sim_time": use_sim_time}],
+        ),
+
+        Node(
+            package="nav2_lifecycle_manager",
+            executable="lifecycle_manager",
+            name="lifecycle_manager_navigation",
             output="screen",
             parameters=[{
-                "action_name": "/navigate_to_target",
-                "nav2_action_name": "/navigate_to_pose",
-                "waypoints_path": waypoints_file,
-                "frame_id": "map",
-                "nav2_server_timeout_sec": 10.0,
                 "use_sim_time": use_sim_time,
+                "autostart": True,
+                "node_names": [
+                    "controller_server",
+                    "planner_server",
+                    "behavior_server",
+                    "velocity_smoother",
+                    "collision_monitor",
+                    "bt_navigator",
+                ],
             }],
         ),
 
         Node(
-            package="rviz2",
-            executable="rviz2",
-            name="rviz2",
+            package="shelving_navigation",
+            executable="navigation_node",
+            name="navigation_node",
             output="screen",
-            arguments=["-d", default_rviz],
-            parameters=[{"use_sim_time": use_sim_time}],
-            condition=IfCondition(start_rviz),
+            parameters=[
+                navigation_params_file,
+                {
+                    "use_sim_time": use_sim_time,
+                },
+            ],
         ),
     ])

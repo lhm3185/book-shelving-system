@@ -1,21 +1,33 @@
-# nav_manager 파라미터.
-# 실행: ros2 run shelving_navigation nav_manager --ros-args --params-file <이 파일>
-nav_manager:
+navigation_node:
   ros__parameters:
-    target_action: /navigate_to_target
-    nav2_action: /navigate_to_pose
-    navigation_timeout_sec: 300.0
-    default_frame_id: map
+    # task_manager가 요청을 보내는 shelving action
+    action_name: /navigate_to_target
 
-    # isaac_map 지도 파일. 비우면 패키지 config/waypoints.yaml
-    waypoints_file: ""
+    # 경유점이 없는 단일 목적지 주행
+    nav2_action_name: /navigate_to_pose
 
-    # moving_planner 서가 수평 주차 보정
-    parking_distance: 1.2
-    keep_lateral: true
-    correct_yaw: true
-    clamp_side: true
+    # 하나 이상의 경유점을 포함한 경로 주행
+    nav2_route_action_name: /navigate_through_poses
 
-    # task_manager 가 허용오차를 0 으로 보내면 사용하는 기본값
-    position_tolerance: 0.10
-    yaw_tolerance: 0.10
+    # Nav2 action server 연결 대기 시간
+    nav2_server_timeout_sec: 10.0
+
+    # 목표점에서 이 거리 안으로 진입하면 Nav2를 취소하고
+    # 저속 정밀 정렬로 전환한다.
+    approach_radius: 0.25
+
+    # 최종 성공 판정 기준
+    position_tolerance: 0.05
+    yaw_tolerance: 0.08
+
+    # 정밀 정렬 속도 제한
+    fine_alignment_linear_speed: 0.08
+    fine_alignment_angular_speed: 0.15
+
+    # Nav2 controller와 같은 입력 경로를 사용한다. velocity_smoother와
+    # collision_monitor를 거친 최종 명령만 /cmd_vel로 나간다.
+    cmd_vel_topic: /cmd_vel_nav
+
+    # 현재 로봇 위치 조회에 사용하는 TF frame
+    global_frame: map
+    robot_base_frame: base_link
