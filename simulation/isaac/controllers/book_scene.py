@@ -2464,6 +2464,18 @@ class BookScene:
                          f"(문턱 {math.degrees(UPRIGHT_SNAP_RAD):.0f}°)")
         hp, hq = SingleXFormPrim(HAND_LINK).get_world_pose(); bp, bq = SingleXFormPrim(book).get_world_pose()
         Rh = R_from_quat(hq); rel_p = Rh.T @ (np.asarray(bp) - np.asarray(hp)); rel_q = quat_from_R(Rh.T @ R_from_quat(bq))
+        # **정렬이 손에 닿았는가.** 위의 `[파지]` 줄은 책의 **월드** 기울기라, 손을
+        # 돌려도 그대로다 — 2026-09-24 에 그 줄로 SIM_GRASP_ALIGN 이 먹었는지 보려다
+        # 못 갈랐다. 여기서는 **손이 기준자세에서 얼마나 돌아 있는지**를 찍는다.
+        # 정렬을 켰는데 이 값이 0 에 가까우면 명령이 손까지 못 갔다는 뜻이고,
+        # 정렬한 각과 같으면 손은 돌았는데 효과가 없었다는 뜻이다. 둘은 고칠 곳이 다르다.
+        try:
+            _hand_tilt = quat_angle(np.asarray(hq, float), np.asarray(self.DOWN, float))
+            self.say(f"[파지] 손이 기준자세(DOWN)에서 {math.degrees(_hand_tilt):.2f}° 돌아 있다 · "
+                     f"손 기준 책 자세 {np.round(np.asarray(rel_q, float), 4).tolist()} "
+                     f"— **꽂힐 때의 기울기는 이 상대 자세가 정한다**")
+        except Exception as _exc:      # noqa: BLE001 - 계측이 작업을 막으면 안 된다
+            self.say(f"[파지] 손 기울기 계산 실패: {type(_exc).__name__}: {_exc}")
         if GRASP_KINEMATIC:
             # **책을 키네마틱으로 만들어 손에 붙여 옮긴다.**
             # 고정 조인트는 만들어지긴 하는데 접촉력에 밀린다 — 들어 올리는 0.7초 동안
