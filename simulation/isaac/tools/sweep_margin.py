@@ -291,6 +291,13 @@ for book in picks:
           # 이 gy 가 대응하는 베이스 월드 y (짝 규칙의 역)
           base_y = REF_PICK_Y - (gy - REF_GY)
           place_w = scene.to_world(np.array([a.goal_x, gy, gz]))
+          if done == 1 and (os.environ.get("SIM_PLAN_INPUTS", "")
+                            or os.environ.get("SIM_SAY_PLAN_INPUTS", "0") != "0"):
+              # **첫 점에서 한 번만.** 실제 판의 같은 블록과 한 줄씩 견주라고 있는 것이다
+              try:
+                  scene.say_plan_inputs(book, place_w, tag="스윕")
+              except Exception as _exc:                  # noqa: BLE001
+                  tell(f"[계획입력] 실패 {type(_exc).__name__}: {_exc}")
           try:
               plan, code, err = scene.plan_job(book, place_w)
           except Exception as exc:                       # noqa: BLE001

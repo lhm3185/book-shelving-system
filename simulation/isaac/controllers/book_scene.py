@@ -1745,6 +1745,59 @@ class BookScene:
         return viol
 
     # ---------------------------------------------------------------- 계획
+    def plan_inputs(self, book, place_center_world):
+        """`plan_job` 의 결과를 **완전히 결정하는 것 전부**. 두 판을 견줄 때 쓴다.
+
+        왜: 2026-09-24 에 "같은 조합" 이라고 믿은 스윕과 실제 판이 다른 답을 냈고,
+        무엇이 달랐는지 찾는 데 몇 시간을 썼다. `plan_job` 은 결정적이다 — 아래 값이
+        같으면 결과가 같아야 한다. 그러니 **다르면 아래 어딘가가 다르다.**
+        추측하지 말고 두 벌을 찍어 한 줄씩 견준다.
+        """
+        bb = self.aabb(book)
+        bp, bq = SingleXFormPrim(book).get_world_pose()
+        out = {
+            "book": book,
+            "book_pos_world": np.round(np.asarray(bp, float), 6).tolist(),
+            "book_quat_world": np.round(np.asarray(bq, float), 6).tolist(),
+            "book_center_arm": np.round(self.yaw_to_arm((bb[:3] + bb[3:]) / 2), 6).tolist(),
+            "book_top_arm": np.round(self.yaw_to_arm(
+                [(bb[0] + bb[3]) / 2, (bb[1] + bb[4]) / 2, bb[5]]), 6).tolist(),
+            "arm_base_world": np.round(np.asarray(self.l0p, float), 6).tolist(),
+            "arm_yaw_deg": round(math.degrees(self.tray_yaw), 4),
+            "q_home": np.round(np.asarray(self.q_home, float), 6).tolist(),
+            "place_center_world": np.round(np.asarray(place_center_world, float), 6).tolist(),
+            "place_center_arm": np.round(self.yaw_to_arm(place_center_world), 6).tolist(),
+            "shelf_floor_z": round(float(self.shelf_floor_z), 6),
+            "dims": [round(float(v), 6) for v in self.dims.get(book, (self.T, self.L, self.W))],
+            "pre_lift_m": float(self.conf["grasp"].get("pre_lift_m", 0.13)),
+            "carry_lift_m": float(self.conf["grasp"].get("carry_lift_m", 0.17)),
+            "env": {k: os.environ.get(k, "") for k in (
+                "SIM_CARRY_MODE", "SIM_RETURN_MODE", "SIM_SWING_CLEAR_M", "SIM_JOINT_SEGS",
+                "SIM_MAX_STEP", "SIM_HOME_Q", "SIM_GRIP_ROT90", "SIM_GRASP_KINEMATIC")},
+        }
+        if book in self.grasp_local:
+            c_loc, up_loc, hz = self.grasp_local[book]
+            out["grasp_local_c"] = np.round(np.asarray(c_loc, float), 6).tolist()
+            out["grasp_local_up"] = np.round(np.asarray(up_loc, float), 6).tolist()
+            out["grasp_local_hz"] = round(float(hz), 6)
+        return out
+
+    def say_plan_inputs(self, book, place_center_world, tag=""):
+        """`plan_inputs` 를 한 줄씩 찍는다. `SIM_PLAN_INPUTS=<경로>` 면 JSON 으로도 쓴다."""
+        d = self.plan_inputs(book, place_center_world)
+        self.say(f"[계획입력]{(' ' + tag) if tag else ''} — 두 판을 견줄 때 이 블록을 통째로 비교할 것")
+        for k, v in d.items():
+            self.say(f"    {k:<20} {v}")
+        _path = os.environ.get("SIM_PLAN_INPUTS", "").strip()
+        if _path:
+            try:
+                import json
+                with open(_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps({"tag": tag, **d}, ensure_ascii=False) + "\n")
+            except Exception as exc:      # noqa: BLE001 - 기록이 작업을 막으면 안 된다
+                self.say(f"[계획입력] 파일로 못 썼다 {_path}: {type(exc).__name__}: {exc}")
+        return d
+
     def plan_job(self, book, place_center_world):
         """책 하나를 집어, 꽂힌 뒤 AABB 중심이 place_center_world 가 되도록 꽂는 경로. 홈 → 홈"""
         moved = self.refresh_base()

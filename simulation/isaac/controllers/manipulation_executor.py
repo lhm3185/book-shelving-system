@@ -180,6 +180,8 @@ class ManipulationExecutor:
             return self.finish(SIM_FAILED, error_code=411,
                                message=f"트레이 칸 {cmd['pick'].get('tray_slot')} 에 책 없음 "
                                        f"(가장 가까운 것 {near[0][0]*100:.1f}cm)")
+        if os.environ.get("SIM_PLAN_INPUTS", "") or os.environ.get("SIM_SAY_PLAN_INPUTS", "0") != "0":
+            scene.say_plan_inputs(book, place_w, tag="실행")
         plan, code, err = scene.plan_job(book, place_w)
         if plan is None:
             return self.finish(SIM_FAILED, error_code=code, message=f"계획 실패 {err}")
