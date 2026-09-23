@@ -816,6 +816,23 @@ class BookScene:
         # **월드 방위각**을 넣고 있어 뒤집힌 가지(joint_1 ≈ +3.26 rad)로 풀렸다.
         # 그 해는 가지 경계 위라 베이스가 1~2mm 흔들릴 때마다 갈아탔다 (402, 2.9 rad).
         self.q_home = np.asarray(conf["poses"]["home"], float)
+        # **홈 관절각을 밖에서 갈아 끼울 수 있게 한다** (`SIM_HOME_Q`, 쉼표로 7개).
+        # 왜: 전 구간 최소 여유 0.128 rad 의 뿌리가 이 자세다. yaml 의 홈은 관절1 이
+        # 2.811 rad 이라 한계 ±2.9671 에서 0.156 밖에 안 떨어져 있고, 파지 해는 홈에서
+        # 가장 가까운 것을 고르므로 그 좁은 가지에 묶인다 (파지 여유 0.162).
+        # 같은 **손 자세**를 내면서 여유가 훨씬 큰 관절 조합이 따로 있다 (2026-09-23 실측:
+        # 홈 0.707 · 접근 0.389 · 파지 0.282, 홈→파지 거리는 오히려 더 짧다).
+        # 스윙 경로가 q_home[0] 을 기준으로 삼으므로 바꾸면 동선도 달라진다 —
+        # 그래서 yaml 을 건드리지 않고 **스위치로** 두어 한 판씩 견줄 수 있게 한다.
+        _hq = os.environ.get("SIM_HOME_Q", "").strip()
+        if _hq:
+            _v = [float(x) for x in _hq.replace(" ", "").split(",") if x]
+            if len(_v) != len(self.q_home):
+                raise RuntimeError(f"SIM_HOME_Q 는 관절 {len(self.q_home)}개여야 한다 "
+                                   f"(받은 것 {len(_v)}개): {_hq}")
+            say(f"**홈 자세를 바꿔 끼웠다** {np.round(self.q_home, 3).tolist()} → "
+                f"{np.round(np.asarray(_v), 3).tolist()} [SIM_HOME_Q]")
+            self.q_home = np.asarray(_v, float)
         _hp, _hR = self.lula.compute_forward_kinematics(BOT.ee_frame, self.q_home)
         self.home_tip = np.asarray(_hp, float)
         self.HOME_ORI = quat_from_R(np.asarray(_hR, float))
