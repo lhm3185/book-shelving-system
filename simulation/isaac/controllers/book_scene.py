@@ -1106,6 +1106,28 @@ class BookScene:
         import scan_planner as _sp
 
         self.refresh_base()
+
+        # **전제 검사 — 어긋나면 거부한다.** 자세표는 서 있는 자리에 대한 가정 위에
+        # 서 있는데, 그 가정이 주석으로만 있어서 비전팀이 주차 자리에서 스캔을 돌리고도
+        # "성공" 을 받았다 (2026-09-23). 이건 합격 문턱을 올리는 것이 아니라 **전제**다 —
+        # 넣으면 성공 보고가 줄어든다(무의미한 스캔이 거부로 바뀐다).
+        try:
+            _bb = self.aabb(SHELF)
+            _lo, _hi = self.to_arm(_bb[:3]), self.to_arm(_bb[3:])
+            _aabb_arm = [min(_lo[0], _hi[0]), min(_lo[1], _hi[1]), min(_lo[2], _hi[2]),
+                         max(_lo[0], _hi[0]), max(_lo[1], _hi[1]), max(_lo[2], _hi[2])]
+            _why = _sp.check_assumptions(_aabb_arm)
+            self.say(f"[스캔] 서가 팔기준 뒷면 y {_aabb_arm[4]:+.3f} · 좌우중심 x "
+                     f"{(_aabb_arm[0] + _aabb_arm[3]) / 2:+.3f} "
+                     f"(표 전제 {_sp.SCAN_TABLE_ASSUMES['shelf_back_y_arm']:+.3f} / "
+                     f"{_sp.SCAN_TABLE_ASSUMES['shelf_x_center_arm']:+.3f})")
+            if _why:
+                self.say(f"[스캔] **거부** — {_why}")
+                return []
+        except Exception as _exc:      # noqa: BLE001 — 검사가 못 돌면 그렇다고 말한다
+            self.say(f"[스캔] 전제 검사를 못 했다: {type(_exc).__name__}: {_exc} — "
+                     f"이 판의 스캔은 전제가 확인되지 않은 것이다")
+
         _sp_home = np.asarray(self.q_home if home is None else home, float)
         q_prev = _sp_home
         out = []
@@ -1113,18 +1135,13 @@ class BookScene:
                                                  arm_base_z=float(self.l0p[2])):
             wp = self.to_world(hp)
             wq = quat_from_R(self.Rl0 @ hR)
-            cands = []
-            for seed in _sp.seeds_for(q_prev, _sp_home):
-                act, ok = self.lula.compute_inverse_kinematics(
-                    frame_name=BOT.hand_link, warm_start=np.asarray(seed, float),
-                    target_position=wp, target_orientation=wq)
-                if not ok:
-                    continue
-                q = np.asarray(getattr(act, "joint_positions", act), float)
-                if not any(float(np.max(np.abs(q - o))) < 1e-3 for o in cands):
-                    cands.append(q)
-            q = _sp.pick_closest(cands, q_prev)
-            if q is None:
+            # **가드를 거친다.** 예전에는 여기서 Lula 를 직접 불러 `_arm_limits`·
+            # `_branch_ok`·`_above_deck` 가 전부 빠졌고, 그 결과 도달 불가 해(j6 3.225,
+            # 실제 한계 3.0)를 향해 관절 6 을 3.03 rad 감으며 데크와 트레이를 쓸고
+            # 지나가다 404 로 죽었다 (2026-09-23 비전팀 실측).
+            q, _ok = self.ik_joints(wp, wq, q_prev, frame=BOT.hand_link)
+            cands = [q] if _ok else []
+            if not _ok:
                 self.say(f"[스캔] {name} 해 없음 — 건너뛴다")
                 continue
             step = _sp.step_size(q_prev, q)
@@ -1359,7 +1376,7 @@ class BookScene:
                      f"— 거르지 않는다")
         return self._al_cache
 
-    def ik_joints(self, target, ori, seed):
+    def ik_joints(self, target, ori, seed, frame=None):
         """IK 해를 구하되 **씨앗 자세에서 너무 먼 해는 버린다.**
 
         6축에서는 같은 손끝 자세에 팔을 통째로 뒤로 돌린 해가 같이 존재한다. 그 해를
@@ -1373,8 +1390,14 @@ class BookScene:
         # 홈을 마지막 씨앗으로 둔다 — 흔들기로 못 찾으면 팔꿈치↑ 홈에서 다시 푼다
         _seeds = [seed] + [seed + d for d in self._ik_nudges] + [np.asarray(self.q_home, float)]
         for k, s0 in enumerate(_seeds):
+            # **원시 Lula 호출은 저장소 안에서 여기 한 곳뿐이어야 한다.**
+            # 가드(`_branch_ok`·`_arm_limits`·`_above_deck`)를 우회하는 경로가 생기면
+            # 스캔이 겪은 일이 그대로 재발한다 — Lula 가 거짓 한계(j6 3.75, 실제 3.0)로
+            # 도달 불가 해를 돌려주고 팔이 한계에 붙은 채 404 로 죽는다 (2026-09-23).
+            # 회귀 점검 (주석까지 세지 않게 호출 형태로):
+            #   grep -rc 'self[.]lula[.]compute_inverse_kinematics(' controllers/ → **1**
             q, ok = self.lula.compute_inverse_kinematics(
-                BOT.ee_frame, np.asarray(target, float), np.asarray(ori, float),
+                frame or BOT.ee_frame, np.asarray(target, float), np.asarray(ori, float),
                 np.asarray(s0, float), 0.004, 0.05)
             if not ok:
                 continue

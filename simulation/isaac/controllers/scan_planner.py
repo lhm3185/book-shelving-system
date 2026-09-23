@@ -44,9 +44,76 @@ R_HAND_CAM = np.array([[0.0, 1.0, 0.0],
                        [1.0, 0.0, 0.0],
                        [0.0, 0.0, -1.0]])
 
-SHELF_FACE_Y = 0.749        # 팔 기준 서가 앞면 (검증된 파지 위치에서)
+#: **팔 기준 서가 뒷면** 까지의 거리 (m). 이름이 오래 `SHELF_FACE_Y` 였는데 **틀린
+#: 이름이었다** — 앞면이 아니라 뒷면이다. 그 이름을 믿고 비전팀이 로봇을 0.29 m
+#: 과도하게 뒤로 물렸다 (2026-09-23).
+#:
+#: 내력으로 갈랐다. 0.749 는 `7a1dc65`(09-22 15:26)에 들어왔고, 깨진 파지 자리
+#: `−3.324` 는 `6254948`(09-22 22:43)에 처음 생겼다 — **7시간 뒤**다. 그 시점
+#: 저장소에는 `−3.324` 가 존재하지 않았고 검증된 베이스는 `−3.019` 였다:
+#:
+#:     서가 앞면 world y −2.5745 · 뒷면 −2.2695 · 베이스 −3.019
+#:       → 앞면까지 0.4445 · **뒷면까지 0.7495**   ← 0.749 와 0.5 mm 일치
+#:
+#: 앞면 기준 해석도 산술로는 똑같이 맞는다(베이스 −3.324 에서 앞면이 0.7495). 두
+#: 해석이 겹치는 이유는 **파지 자리 보정량 0.305 와 서가 깊이 0.305 가 정확히
+#: 같기 때문**이다. 그래서 숫자로는 영영 안 갈리고 내력으로만 갈린다.
+#:
+#: **이 상수는 오래 두지 말 것.** 두 움직이는 것(서가·팔 베이스) 사이의 *관계*를
+#: 상수로 박은 형태이고, 베이스는 오늘만 −3.324 → −3.019 → −3.0695 로 세 번 바뀌었다.
+#: `measure_shelf_back_y()` 로 실측에서 파생시키는 쪽이 옳다.
+SHELF_BACK_Y = 0.749
+SHELF_FACE_Y = SHELF_BACK_Y   # 옛 이름 (호환). 새 코드는 쓰지 말 것 — 앞면이 아니다
 BOOK_CENTER_H = 0.12        # 선반판 위 책 중심 높이 (대략)
 ARM_BASE_Z = 0.28           # 팔 베이스 월드 높이 — 선반판 z 를 팔 기준으로 바꿀 때 쓴다
+
+#: 자세표가 **서 있는 자리에 대해 무엇을 가정하는가.** 주석이 아니라 자료로 둔다 —
+#: 표를 다시 만들 때 이 값도 같이 고치게 되므로 가정이 표와 함께 이동한다.
+#: `check_assumptions()` 가 시작 전에 실측과 대조하고, 어긋나면 **거부**한다.
+SCAN_TABLE_ASSUMES = {
+    "shelf_back_y_arm": 0.749,   # 팔 기준 서가 **뒷면**
+    "shelf_x_center_arm": 0.0,   # 서가 좌우 중심이 팔 x=0
+    "tol_y": 0.05,
+    "tol_x": 0.15,
+    "frame": "arm_base_link",
+    "valid_at": "검증된 파지 자리(베이스 world y −3.019 계열). 주차 자리에서는 무효",
+}
+
+
+def measure_shelf_back_y(shelf_aabb_arm):
+    """실측 서가 AABB(팔 기준)에서 뒷면 y 를 뽑는다 — 상수 대신 이걸 쓸 것.
+
+    `shelf_aabb_arm` 은 `[xmin, ymin, zmin, xmax, ymax, zmax]` (팔 기준).
+    서가는 팔 앞(+Y)에 있으므로 **뒷면 = ymax** 다.
+    """
+    import numpy as _np
+    b = _np.asarray(shelf_aabb_arm, float)
+    return float(b[4])
+
+
+def check_assumptions(shelf_aabb_arm, assumes=None):
+    """자세표의 전제가 지금 자리에서 성립하는가. 어긋나면 **사유 문자열**을 돌려준다.
+
+    이건 **합격 문턱이 아니라 전제 조건**이다. 넣으면 '성공' 보고가 **줄어든다**
+    (지금 성공으로 세어지던 무의미한 스캔이 거부로 바뀐다). 그래서 "문턱을 올려
+    통과시키지 않는다" 와 같은 편이다.
+    """
+    import numpy as _np
+    a = dict(SCAN_TABLE_ASSUMES if assumes is None else assumes)
+    b = _np.asarray(shelf_aabb_arm, float)
+    back = float(b[4])
+    xc = (float(b[0]) + float(b[3])) / 2.0
+    bad = []
+    if abs(back - a["shelf_back_y_arm"]) > a["tol_y"]:
+        bad.append(f"서가 뒷면 팔기준 y {back:+.3f} (표 전제 {a['shelf_back_y_arm']:+.3f} "
+                   f"± {a['tol_y']:.3f}) — {abs(back - a['shelf_back_y_arm'])*100:.1f} cm 어긋남")
+    if abs(xc - a["shelf_x_center_arm"]) > a["tol_x"]:
+        bad.append(f"서가 좌우 중심 팔기준 x {xc:+.3f} (표 전제 {a['shelf_x_center_arm']:+.3f} "
+                   f"± {a['tol_x']:.3f}) — {abs(xc - a['shelf_x_center_arm'])*100:.1f} cm 어긋남")
+    if not bad:
+        return ""
+    return ("스캔 자세표의 전제가 지금 자리에서 성립하지 않는다: " + " / ".join(bad)
+            + f". 표는 '{a['valid_at']}' 에서만 유효하다")
 
 #: 판별 스캔 자세. (선반판 월드 z, 좌우 위치 cx, 카메라–목표 거리 d, 위로 드는 각 deg)
 #: 전부 **IK 해가 있는 것으로 실측된 조합**이다 (2026-09-22).
@@ -102,13 +169,13 @@ def camera_rotation(tilt_rad):
 def camera_pose(board_z, cx, distance, tilt_deg, arm_base_z=ARM_BASE_Z):
     """스캔 한 자세의 **카메라** 위치·회전 (팔 기준).
 
-    목표점은 선반 앞면(`SHELF_FACE_Y`)의 책 중심 높이다. 카메라는 그 점에서
+    목표점은 선반 **뒷면**(`SHELF_BACK_Y`)의 책 중심 높이다. 카메라는 그 점에서
     시선 방향으로 `distance` 만큼 물러난 자리에 놓는다.
     """
     tilt = math.radians(tilt_deg)
     target_z = board_z + BOOK_CENTER_H - arm_base_z
     view = np.array([0.0, math.cos(tilt), math.sin(tilt)])   # 시선 (팔 기준)
-    pos = np.array([cx, SHELF_FACE_Y, target_z]) - distance * view
+    pos = np.array([cx, SHELF_BACK_Y, target_z]) - distance * view
     return pos, camera_rotation(tilt)
 
 
