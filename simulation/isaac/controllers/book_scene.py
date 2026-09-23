@@ -2442,6 +2442,35 @@ class BookScene:
             c = c + Rb @ np.asarray(self.grasp_local[b][0], float)
         return Rh.T @ (c - np.asarray(hp, float)), Rh.T @ Rb
 
+    def book_in_hand_grip(self, b):
+        """손 기준 **쥔 점**(윗면 중심)의 위치. 406 판정에 쓰라고 만든 것.
+
+        원점 기준도 형상중심 기준도 **미끄러짐을 재지 않는다.** 둘 다 책이 손 안에서
+        조금 돌면 지렛대만큼 증폭된다 — 이 레벨의 책은 원점이 형상에서 75~177 cm
+        떨어져 있어서(2026-09-22 실측), 0.3° 만 돌아도 1.7 m × 0.0052 rad ≈ 9 mm 가
+        찍힌다. 2026-09-24 마찰 파지 판이 그것이다: 회전 0.3°, 원점 기준 0.1 cm,
+        형상중심 기준 1.0 cm — **같은 상태를 재는 세 자가 10배씩 다르다.**
+
+        미끄러짐이란 **손가락이 닿은 자리가 책 위에서 옮겨가는 것**이다. 그러니
+        손가락이 잡은 그 점을 손 기준으로 보면 된다. 안 미끄러지면 안 움직인다.
+        지렛대가 없으므로 회전에 증폭되지 않는다.
+        """
+        hp, hq = SingleXFormPrim(HAND_LINK).get_world_pose()
+        Rh = R_from_quat(np.asarray(hq, float))
+        bp, bq = SingleXFormPrim(b).get_world_pose()
+        Rb = R_from_quat(np.asarray(bq, float))
+        g = np.asarray(bp, float)
+        if b in self.grasp_local:
+            c_loc, up_loc, hz = self.grasp_local[b]
+            g = g + Rb @ (np.asarray(c_loc, float) + np.asarray(up_loc, float) * float(hz))
+        return Rh.T @ (g - np.asarray(hp, float))
+
+    def book_origin_lever(self, b):
+        """책 원점에서 형상 중심까지의 거리 (m) — **406 증폭 배율**이 곧 이 값이다."""
+        if b not in self.grasp_local:
+            return 0.0
+        return float(np.linalg.norm(np.asarray(self.grasp_local[b][0], float)))
+
     def shelf_shelf_floor(self, name="secondFloor"):
         """서가 한 층의 낱권 책을 **월드 x 순서로** 돌려준다: [(경로, aabb), …]"""
         sc = self.stage.GetPrimAtPath(f"/World/books/{name}")

@@ -335,9 +335,18 @@ class ManipulationExecutor:
                              "매 스텝 책을 손에 맞춰 다시 써 넣는다. 이 신호는 "
                              "마찰 파지(SIM_GRASP_KINEMATIC=0)에서만 의미가 있다")
                 if os.environ.get("SIM_DRIFT_LOG", "0") != "0" or \
-                        os.environ.get("SIM_DRIFT_METRIC", "center") == "center":
+                        os.environ.get("SIM_DRIFT_METRIC", "center") in ("center", "grip"):
                     try:
                         job.watch["relc0"] = scene.book_in_hand_center(book)
+                        job.watch["relg0"] = scene.book_in_hand_grip(book)
+                        # **증폭 배율을 먼저 말한다.** 원점·형상중심 기준의 어긋남은
+                        # 회전 × 이 지렛대다 — 값을 보기 전에 얼마나 뻥튀기되는지 알아야
+                        # 한다 (2026-09-24: 0.3° × 1.7 m ≈ 9 mm 가 '미끄러짐' 으로 찍혔다).
+                        _lev = scene.book_origin_lever(book)
+                        self.say(f"[어긋남] 지렛대(책 원점↔형상중심) {_lev*100:.1f} cm — "
+                                 f"손 안에서 1° 돌면 원점·형상중심 기준이 "
+                                 f"{_lev*math.radians(1)*1000:.1f} mm 움직인 것으로 찍힌다. "
+                                 f"쥔점 기준은 이 증폭이 없다 (SIM_DRIFT_METRIC=grip)")
                     except Exception as _exc:      # noqa: BLE001 - 기록이 작업을 막으면 안 된다
                         self.say(f"[어긋남] 형상중심 기준을 못 잡았다: {type(_exc).__name__}: {_exc}")
             if name == "carry_rotate" and "z0" in job.watch and "rise" not in job.watch:
@@ -413,12 +422,16 @@ class ManipulationExecutor:
                 # 돌아도 cm 단위로 벌어진다. 키네마틱 파지 + 충돌 끄기로 물리적으로
                 # 빠질 수 없는 상태에서도 3.9 cm 가 찍혀 작업이 취소됐다.
                 # 형상중심 기준 (SIM_DRIFT_LOG=1 기록 / SIM_DRIFT_METRIC=center 판정 전환, NIGHTLY 1-1·1-2)
-                _dc = _ang = None
+                _dc = _ang = _dg = None
                 if "relc0" in job.watch:
                     try:
                         _c, _Rr = scene.book_in_hand_center(book)
                         _c0, _R0 = job.watch["relc0"]
                         _dc = float(np.linalg.norm(_c - _c0))
+                        if "relg0" in job.watch:
+                            _dg = float(np.linalg.norm(
+                                scene.book_in_hand_grip(book) - job.watch["relg0"]))
+                            job.watch["dg_max"] = max(job.watch.get("dg_max", 0.0), _dg)
                         _cos = (float(np.trace(_R0.T @ _Rr)) - 1.0) / 2.0
                         _ang = float(np.degrees(np.arccos(min(1.0, max(-1.0, _cos)))))
                         job.watch["dc_max"] = max(job.watch.get("dc_max", 0.0), _dc)
@@ -427,8 +440,11 @@ class ManipulationExecutor:
                         job.watch["n_drift"] = job.watch.get("n_drift", 0) + 1
                         if os.environ.get("SIM_DRIFT_LOG", "0") != "0" and job.watch["n_drift"] % 30 == 1:
                             self.say(f"[어긋남] step {job.steps} phase={name}  원점기준 {dev * 100:.2f} cm | "
-                                     f"형상중심기준 {_dc * 100:.2f} cm | 손기준 회전 {_ang:.1f}°  "
-                                     f"(최대 {job.watch['dev_max'] * 100:.2f} / {job.watch['dc_max'] * 100:.2f} cm / "
+                                     f"형상중심기준 {_dc * 100:.2f} cm | "
+                                     f"쥔점기준 {'--' if _dg is None else f'{_dg * 100:.2f}'} cm | "
+                                     f"손기준 회전 {_ang:.1f}°  "
+                                     f"(최대 {job.watch['dev_max'] * 100:.2f} / {job.watch['dc_max'] * 100:.2f} / "
+                                     f"{job.watch.get('dg_max', 0.0) * 100:.2f} cm / "
                                      f"{job.watch['ang_max']:.1f}°)")
                     except Exception as _exc:      # noqa: BLE001 - 기록이 작업을 막으면 안 된다
                         _dc = _ang = None
@@ -442,7 +458,14 @@ class ManipulationExecutor:
                 # 통과시키는 일이다. 틀린 자로 재면서 자를 늘릴 게 아니라 자를 바꾼다.
                 # `SIM_DRIFT_METRIC=origin` 으로 옛 판정으로 되돌릴 수 있다.
                 _metric = os.environ.get("SIM_DRIFT_METRIC", "center")
-                if _metric == "center" and _dc is not None:
+                if _metric == "grip" and _dg is not None:
+                    # **쥔 점이 움직였는가.** 미끄러짐의 정의 그대로다 — 손가락이 닿은
+                    # 자리가 책 위에서 옮겨가는 것. 지렛대가 없어 회전에 증폭되지 않는다.
+                    _bad = (_dg > float(os.environ.get("SIM_DRIFT_GRIP_M", "0.005"))
+                            or _ang > float(os.environ.get("SIM_DRIFT_ROT_DEG", "5")))
+                    _msg = (f"운반 중 손 안에서 쥔점 {_dg * 100:.2f}cm · 회전 {_ang:.1f}° 어긋남 "
+                            f"(형상중심 {_dc * 100:.1f}cm, 원점 {dev * 100:.1f}cm)")
+                elif _metric == "center" and _dc is not None:
                     _bad = (_dc > float(os.environ.get("SIM_DRIFT_CENTER_M", "0.01"))
                             or _ang > float(os.environ.get("SIM_DRIFT_ROT_DEG", "5")))
                     _msg = f"운반 중 손 안에서 책 형상중심 {_dc * 100:.1f}cm · 회전 {_ang:.1f}° 어긋남 (원점기준 {dev * 100:.1f}cm)"
