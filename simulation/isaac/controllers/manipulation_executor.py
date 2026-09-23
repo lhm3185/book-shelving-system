@@ -97,8 +97,16 @@ class ManipulationExecutor:
         if "grip_w0" in getattr(self.job, "watch", {}):
             _w0 = self.job.watch["grip_w0"]
             _wm = self.job.watch.get("grip_w_min", _w0)
-            self.say(f"[JUDGE] width_hold={'ok' if _w0 - _wm <= 0.002 else 'ng'} "
-                     f"({_w0*1000:.1f} → 최소 {_wm*1000:.1f} mm)")
+            # 운반 중에 폭이 줄었나 = 책이 빠져나갔나. **차이**라서 단위 혼동은 없다.
+            # 다만 키네마틱 파지에서는 손가락이 지령에 고정돼 있어 늘 0 이 나온다 —
+            # 그때는 '통과' 가 아니라 '못 가림' 이다.
+            try:
+                from book_scene import GRASP_KINEMATIC as _KIN
+            except Exception:      # noqa: BLE001
+                _KIN = False
+            _verdict = "판별불가[키네마틱]" if _KIN else ("ok" if _w0 - _wm <= 0.002 else "ng")
+            self.say(f"[JUDGE] width_hold={_verdict} "
+                     f"({_w0*1000:.1f} → 최소 {_wm*1000:.1f} mm, 한쪽 기준)")
         if os.environ.get("SIM_DIAG_M406") == "1":
             # **작업 중에 루트를 몇 번 옮겼나** (가설 H-a). 0 이 아니면 손 안의 책이
             # 밀릴 수 있다 — 주행 실행기의 _write_root 가 센다
@@ -312,7 +320,7 @@ class ManipulationExecutor:
                 job.watch["z0"] = scene.center(book)[2]
                 job.watch["rel0"] = scene.book_in_hand(book)
                 if os.environ.get("SIM_DRIFT_LOG", "0") != "0" or \
-                        os.environ.get("SIM_DRIFT_METRIC", "origin") == "center":
+                        os.environ.get("SIM_DRIFT_METRIC", "center") == "center":
                     try:
                         job.watch["relc0"] = scene.book_in_hand_center(book)
                     except Exception as _exc:      # noqa: BLE001 - 기록이 작업을 막으면 안 된다
@@ -334,14 +342,35 @@ class ManipulationExecutor:
                 # 나란히 적어 두고, 두 판정이 몇 판에서 일치하는지 나중에 센다.
                 # 책의 월드 자세는 실물에서 못 읽으므로 지금 기준은 시뮬 전용이다
                 try:
-                    _w = scene.grip_width()
+                    from book_scene import GRASP_KINEMATIC as _KIN
+                    _w = scene.grip_width()          # **한쪽 손가락** 기준이다 (전체 벌림의 절반)
                     _t = float(job.book_thickness) if getattr(job, "book_thickness", 0) else \
                         float(scene.dims.get(book, (0, 0, 0))[0])
-                    _ok = "ok" if _t > 0 and abs(_w - _t) <= 0.003 else "ng"
+                    # `grip` 단계에서 실제로 명령한 폭 — book_scene.job_sequence 와 같은 식
+                    _cmd = max(0.0, _t / 2 - min(0.004, 0.15 * _t)) if _t > 0 else 0.0
                     job.watch["grip_w0"] = _w
                     job.watch["grip_w_min"] = _w
-                    self.say(f"[JUDGE] rise={job.watch['rise']*100:.1f}cm(ok) "
-                             f"width={_w*1000:.1f}mm (book {_t*1000:.1f}±3 → {_ok})")
+                    # 예전에는 **한쪽 폭을 책 전체 두께와** 견줘서 늘 'ng' 가 나왔다
+                    # (2026-09-22: 13.6 mm vs 35.2 mm). 13.6 은 지령값 그대로다.
+                    if _t <= 0:
+                        self.say(f"[JUDGE] width={_w*1000:.1f}mm — 책 두께를 몰라 판단 못 함")
+                    elif _KIN:
+                        # 키네마틱 파지는 운반 동안 책 충돌을 끈다. 그래서 손가락은 책이
+                        # 있든 없든 지령까지 닫힌다 — **이 신호에는 판별력이 없다.**
+                        # 통과시키려고 문턱을 낮추는 대신, 못 가린다고 적는다.
+                        self.say(f"[JUDGE] rise={job.watch['rise']*100:.1f}cm(ok) "
+                                 f"width={_w*1000:.1f}mm = 지령 {_cmd*1000:.1f}mm "
+                                 f"(책 반두께 {_t/2*1000:.1f}) → **판별불가** "
+                                 f"[키네마틱 파지라 빈손이어도 같은 값이 나온다]")
+                    else:
+                        # 마찰 파지면 책이 손가락을 막아 **반두께에서 멈춘다**.
+                        # 지령값까지 닫혔으면 사이에 아무것도 없었다는 뜻이다.
+                        _half = _t / 2
+                        _ok = ("ok" if _w >= _half - 0.002
+                               else "ng(헛쥠)" if _w <= _cmd + 0.001 else "ng")
+                        self.say(f"[JUDGE] rise={job.watch['rise']*100:.1f}cm(ok) "
+                                 f"width={_w*1000:.1f}mm (책 반두께 {_half*1000:.1f}−2 이상이어야 "
+                                 f"쥔 것, 지령 {_cmd*1000:.1f} 까지 닫혔으면 헛쥠 → {_ok})")
                 except Exception as _exc:      # noqa: BLE001 - 기록이 작업을 막으면 안 된다
                     self.say(f"[JUDGE] 폭을 못 읽었다: {type(_exc).__name__}: {_exc}")
             # 추적할 때는 lift 구간도 잰다 — 어긋남이 **거기서** 생기는지 보기 위함이다
@@ -391,13 +420,25 @@ class ManipulationExecutor:
                         if not job.watch.get("drift_err"):
                             job.watch["drift_err"] = True
                             self.say(f"[어긋남] 형상중심 계산 실패: {type(_exc).__name__}: {_exc}")
-                if os.environ.get("SIM_DRIFT_METRIC", "origin") == "center" and _dc is not None:
+                # **기본을 형상중심으로 바꿨다** (2026-09-23). 원점 기준은 재는 대상이
+                # 틀렸다 — 이 레벨 책들은 원점이 형상에서 75~177 cm 떨어져 있어 손이
+                # 1° 만 돌아도 cm 가 찍힌다. 그걸 막으려고 문턱을 3 cm → 25 cm 로 올려
+                # 쓰고 있었는데(검증 조합의 SIM_HAND_DRIFT_M=0.25), 그건 문턱을 올려
+                # 통과시키는 일이다. 틀린 자로 재면서 자를 늘릴 게 아니라 자를 바꾼다.
+                # `SIM_DRIFT_METRIC=origin` 으로 옛 판정으로 되돌릴 수 있다.
+                _metric = os.environ.get("SIM_DRIFT_METRIC", "center")
+                if _metric == "center" and _dc is not None:
                     _bad = (_dc > float(os.environ.get("SIM_DRIFT_CENTER_M", "0.01"))
                             or _ang > float(os.environ.get("SIM_DRIFT_ROT_DEG", "5")))
                     _msg = f"운반 중 손 안에서 책 형상중심 {_dc * 100:.1f}cm · 회전 {_ang:.1f}° 어긋남 (원점기준 {dev * 100:.1f}cm)"
                 else:
+                    if _metric == "center" and not job.watch.get("drift_fallback"):
+                        # 중심 기준을 쓰기로 했는데 못 쟀다 — 조용히 옛 자로 돌아가지 않는다
+                        job.watch["drift_fallback"] = True
+                        self.say("[어긋남] 형상중심을 못 재서 **원점 기준으로 되돌아간다** "
+                                 "— 이 판의 406 판정은 믿지 말 것")
                     _bad = dev > float(os.environ.get("SIM_HAND_DRIFT_M", "0.03"))
-                    _msg = f"운반 중 손 안에서 책 {dev * 100:.1f}cm 어긋남"
+                    _msg = f"운반 중 손 안에서 책 {dev * 100:.1f}cm 어긋남 [원점기준]"
                 if _bad and name != "lift":
                     arm.cancel()
                     self.finish(SIM_FAILED, error_code=406, message=_msg)

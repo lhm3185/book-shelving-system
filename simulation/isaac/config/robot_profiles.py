@@ -80,15 +80,23 @@ class RobotProfile:
 
     # 상위 코드는 그리퍼를 **폭(m)** 으로 다룬다 (SetGripper). Franka 는 손가락 관절이 곧 폭이라
     # 그대로지만, RG2 는 **각도**이고 좌우 부호가 반대다. 변환을 여기서만 한다.
+    #: **한쪽 손가락**이 중심에서 벌어질 수 있는 최대 거리 (m).
+    #: 전체 벌림이 아니다 — Franka 의 전체 벌림은 0.08 m 이고 이 값은 그 절반이다.
+    #: 저장소 전체가 이 '한쪽' 단위로 되어 있다 (`grip_open_width = 두께/2 + 여유`,
+    #: 로그도 `폭(한쪽)`). 한 번 이것을 책 **전체 두께**와 견줘서 JUDGE 가 늘 'ng' 를
+    #: 냈다 (2026-09-22: 13.6 mm vs 35.2 mm). 단위를 바꾸지 말고 비교 대상을 맞출 것.
     GRIP_MAX_M = 0.04
 
     def grip_targets(self, width_m):
-        """폭(m) → 각 그리퍼 관절의 지령값"""
+        """**한쪽** 폭(m) → 각 그리퍼 관절의 지령값"""
         f = min(max(float(width_m) / self.GRIP_MAX_M, 0.0), 1.0)
         return [c + (o - c) * f for c, o in zip(self.grip_close, self.grip_open)]
 
     def grip_width(self, positions):
-        """그리퍼 관절 현재값 → 폭(m). 대표 관절 하나로 역산한다"""
+        """그리퍼 관절 현재값 → **한쪽** 폭(m). 대표 관절 하나로 역산한다.
+
+        전체 벌림이 아니다 (`GRIP_MAX_M` 머리말 참조).
+        """
         c, o = self.grip_close[0], self.grip_open[0]
         if abs(o - c) < 1e-9:
             return 0.0
