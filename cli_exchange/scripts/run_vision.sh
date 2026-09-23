@@ -67,8 +67,8 @@ grep -q '준비 완료' "$D/sim.log" || { echo "시뮬 준비 실패"; tail -30 
   ros2 run tf2_ros static_transform_publisher --frame-id Camera_OmniVision_OV9782_Color --child-frame-id sim_camera --ros-args -p use_sim_time:=true > "$D/tf2.log" 2>&1 &
   P=ros2_ws/src/shelving_perception/resource
   ros2 run shelving_perception vision_manager --ros-args --params-file ros2_ws/src/shelving_perception/config/perception.yaml \
-    -p model_path:=$P/book_tray_best.pt -p shelf_model_path:=$P/best.pt -p confidence_threshold:=0.75 > "$D/vis.log" 2>&1 &
-  ros2 run shelving_manipulation manipulation_node --ros-args --params-file ros2_ws/src/shelving_manipulation/config/manipulation.yaml -p executor:=sim > "$D/man.log" 2>&1 &
+    -p model_path:=$P/book_tray_best.pt -p shelf_model_path:=$P/best.pt -p confidence_threshold:=0.75 ${VIS_EXTRA:-} > "$D/vis.log" 2>&1 &
+  ros2 run shelving_manipulation manipulation_node --ros-args --params-file ros2_ws/src/shelving_manipulation/config/manipulation.yaml -p executor:=sim ${MAN_EXTRA:-} > "$D/man.log" 2>&1 &
   sleep 10
   timeout 300 ros2 topic pub -r 1 /perception/detect_request std_msgs/Bool "{data: true}" > /dev/null 2>&1 &
   sleep 5
