@@ -613,6 +613,40 @@ class BookScene:
         floor_z = self.shelf_floor_z = SHELF_ROW_Z
         self.bookends = {}      # 비워 둔다 — fit_bookends() 는 아무것도 하지 않는다
 
+        # **서가 콜라이더 근사를 바꾼다** (`SIM_SHELF_COLL`, 기본 그대로 둠).
+        #
+        # 2026-09-24 실측: 놓은 책이 **18 mm 떠오른 자리(z 0.5155)에 앉는다.** 네 판이
+        # 모두 같은 자리다. 그런데 선반 판의 **시각** 윗면은 0.4976 이다 (메시 점에서
+        # 직접 읽음, 8점). 계획은 SHELF_ROW_Z(0.497)를 겨누므로, 책은 쿠킹된 콜라이더
+        # 속 18 mm 아래로 들어갔다가 놓는 순간 밀려 나온다. 그 튕김 뒤의 자유 낙하가
+        # 매번 다르게 기울어 꽂힌 기울기가 0.5~3.1° 로 흔들린다.
+        #
+        # 서가 전체에 콜라이더가 **하나**뿐이고 근사가 `convexDecomposition` 이다.
+        # 2.5 m 짜리 통짜 메시를 VHACD 로 복셀 근사하면 얇은 선반 판에는 복셀 한 겹이
+        # 그대로 두께로 붙는다 — 그 한 겹이 18 mm 다.
+        #
+        # 서가는 **정적**이므로 `none`(삼각망 그대로)이 합법이고, 그러면 판 윗면이
+        # 시각 형상과 같아진다. 동적 강체에 `none` 을 주면 PhysX 가 조용히 볼록 껍질로
+        # 갈아치운다 — 위 트레이 주석의 그 함정이라 **정적인 것만** 바꾼다.
+        _shelf_coll = os.environ.get("SIM_SHELF_COLL", "").strip()
+        if _shelf_coll:
+            _root = st.GetPrimAtPath(os.environ.get(
+                "SIM_SHELF_COLL_ROOT", SHELF.rsplit("/", 1)[0]))
+            _n, _skip = 0, 0
+            if _root and _root.IsValid():
+                for _p in Usd.PrimRange(_root):
+                    if not _p.HasAPI(UsdPhysics.CollisionAPI):
+                        continue
+                    if _p.HasAPI(UsdPhysics.RigidBodyAPI):
+                        _skip += 1        # 동적이면 건드리지 않는다 (조용히 갈아치워진다)
+                        continue
+                    UsdPhysics.MeshCollisionAPI.Apply(_p).CreateApproximationAttr().Set(_shelf_coll)
+                    _n += 1
+                    say(f"[서가콜리전] {str(_p.GetPath()).rsplit('/', 1)[-1]} → {_shelf_coll}")
+            say(f"[서가콜리전] {_n}개를 '{_shelf_coll}' 로 바꿨다"
+                + (f" (동적이라 건너뛴 것 {_skip}개)" if _skip else "")
+                + " [SIM_SHELF_COLL]")
+
         # 팔 구동 게인 — **옛** 에셋(강성 40~1135)은 위치 지령을 못 따라가서 올려야 했다.
         # 지금 받은 에셋은 기본값이 2.3e3~6.5e4 라 덮어쓸 이유가 줄었고, 덮어쓰면 USD 의 도(°)
         # 단위가 라디안으로 환산되며 57배가 되어 감쇠가 5.7e6 까지 올라간다 (2026-09-20 실측).

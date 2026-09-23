@@ -10,9 +10,17 @@
 안 된다 — 이 밤에 그 실수를 여러 번 했다.
 
     python3 measure_collider.py <레벨.usdc> --root /World/bookshelves
-    python3 measure_collider.py <레벨.usdc> --root /World/bookshelves --near-z 0.51
 
-`--near-z` 를 주면 그 높이 근처의 **윗면**만 골라 보여 준다 (선반 한 단을 찾을 때).
+`usd-core` 가 없으면 (시스템에도 Isaac python 에도 기본으로는 없다):
+
+    python3 -m venv /tmp/usdenv && /tmp/usdenv/bin/pip install usd-core
+    /tmp/usdenv/bin/python measure_collider.py ...
+
+`--near-z` 는 AABB 로 거르는데, **콜라이더가 통짜면 안 걸린다** — 2026-09-24 의 서가가
+그랬다(AABB 0~2.52 하나). 거르지 말고 **전체를 먼저 보는 것**이 안전하다.
+
+그리고 재기 전에 **어느 사본을 재고 있는지** 확인할 것. 같은 이름의 레벨이 여러 벌
+있으면 낡은 것을 재고 "콜리전이 없다" 고 단정하게 된다 (같은 날 실제로 그랬다).
 """
 import argparse
 import sys
