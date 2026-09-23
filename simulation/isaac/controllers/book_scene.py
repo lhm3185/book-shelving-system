@@ -1788,15 +1788,36 @@ class BookScene:
         _q = np.asarray(bq, float)
         _byaw = math.degrees(math.atan2(2 * (_q[0] * _q[3] + _q[1] * _q[2]),
                                         1 - 2 * (_q[2] ** 2 + _q[3] ** 2)))
-        _skew = (_byaw - math.degrees(self.tray_yaw) + 90.0) % 180.0 - 90.0
+        _rel = _byaw - math.degrees(self.tray_yaw)
+        # **직각 배수에서 얼마나 벗어났는가**로 잰다. 트레이에 선 책과 서가에 꽂힌 책은
+        # 90° 돌아 있어서, 그냥 빼면 89.68° 같은 값이 나온다 (2026-09-24 실측).
+        # 우리가 알고 싶은 것은 그 89.68 이 아니라 **−0.32** 다.
+        _skew = (_rel + 45.0) % 90.0 - 45.0
         out["book_yaw_world_deg"] = round(float(_byaw), 4)
-        out["book_yaw_arm_deg"] = round(float(_skew), 4)
+        out["book_yaw_arm_deg"] = round(float(_rel), 4)
+        out["book_skew_deg"] = round(float(_skew), 4)      # ← 이 값을 본다
         try:
             from shelf_gap import span_for
             _T, _Lb, _W = out["dims"]
             out["span_pred_mm"] = round(span_for(_T, _W, abs(_skew)) * 1000, 2)
             out["span_flat_mm"] = round(float(_T) * 1000, 2)
         except Exception:      # noqa: BLE001 - 기록이 작업을 막으면 안 된다
+            pass
+        # **트레이 책에 콜리전이 붙어 있는가.** 레벨 트레이를 쓰면 위 561~564 의
+        # 콜리전 부여 루프가 통째로 건너뛴다 (`range(0 if self.use_level_tray ...)`).
+        # 그러면 손가락이 책을 뚫고 지나가고, 마찰 파지는 쥘 대상이 없다.
+        try:
+            _nc = sum(1 for _m in Usd.PrimRange(self.stage.GetPrimAtPath(book))
+                      if _m.HasAPI(UsdPhysics.CollisionAPI))
+            _nr = sum(1 for _m in Usd.PrimRange(self.stage.GetPrimAtPath(book))
+                      if _m.HasAPI(UsdPhysics.RigidBodyAPI))
+            out["book_collision_prims"] = _nc
+            out["book_rigidbody_prims"] = _nr
+            if _nc == 0:
+                out["book_collision_warning"] = (
+                    "콜리전 없음 — 손가락이 뚫고 지나간다. 마찰 파지는 성립하지 않고 "
+                    "헛쥠 판정도 무의미하다 (레벨 트레이를 쓰면 콜리전 부여를 건너뛴다)")
+        except Exception:      # noqa: BLE001
             pass
         return out
 
