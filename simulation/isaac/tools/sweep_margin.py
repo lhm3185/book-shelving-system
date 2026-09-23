@@ -69,6 +69,10 @@ ap.add_argument("--pick-spot", type=float, nargs=3, default=[2.535, -3.049, 0.0]
                 help="이송 뒤 로봇을 여기로 통째로 옮긴다 (검증 실행의 주행 도착 지점). "
                      "빈 값 대신 --no-move 로 끌 것")
 ap.add_argument("--no-move", action="store_true", help="로봇을 옮기지 않고 레벨 시작 자세 그대로 잰다")
+ap.add_argument("--gy-ref", type=float, default=0.600,
+                help="도착 오차 0 으로 볼 기준 gy. 검증 조합(SIM_PICK_Y=-3.0695)의 짝 규칙 값. "
+                     "결과의 base_dy_mm 은 이 기준에서의 **상대** 도착 오차다 — 절대 월드 y 는 "
+                     "베이스가 요청대로 안 서면 틀리므로 상대값을 본다")
 ap.add_argument("--settle", type=float, default=12.0, help="이송+정착에 줄 시간(초)")
 a = ap.parse_args()
 
@@ -164,10 +168,29 @@ def move_rig(target_xy, target_yaw_deg):
          f"루트 [{p0[0]:.3f},{p0[1]:.3f}] → [{target_xy[0]:.3f},{target_xy[1]:.3f}] · 프림 {n}개")
 
 
+# **옮기기 전후로 팔 베이스를 잰다.** 루트 Xform 을 옮긴다고 팔 베이스가 그만큼
+# 따라오지 않는다 — 관절이 달린 물리 바디라서 솔버가 되돌린다. 2026-09-24 에 스윕이
+# 요청보다 **21 mm 앞에 선 채로** 도착 오차를 재고 있었다. ±30 mm 를 묻는 도구가
+# 21 mm 오차를 갖고 있었던 것이다. 그래서 믿지 않고 잰다.
+scene.refresh_base()
+_base_before = np.asarray(scene.l0p, float).copy()
 if not a.no_move:
+    from isaacsim.core.prims import SingleXFormPrim as _SXP
+    _root_before = np.asarray(_SXP(BOT.root).get_world_pose()[0], float).copy()
     move_rig(a.pick_spot[:2], a.pick_spot[2])
     for _ in range(120):                    # 짧게 정착 (강체 이동이라 크게 흔들릴 일은 없다)
         world.step(render=False)
+    scene.refresh_base()
+    _want = np.asarray([a.pick_spot[0], a.pick_spot[1]], float) - _root_before[:2]
+    _got = np.asarray(scene.l0p, float)[:2] - _base_before[:2]
+    _err = _got - _want
+    tell(f"팔 베이스 이동: 요청 {np.round(_want*1000, 1).tolist()} mm  "
+         f"실제 {np.round(_got*1000, 1).tolist()} mm  차이 {np.round(_err*1000, 1).tolist()} mm")
+    if float(np.max(np.abs(_err))) > 0.002:
+        tell(f"[경고] **루트를 옮겼는데 팔 베이스가 그만큼 안 따라왔다** "
+             f"({float(np.max(np.abs(_err)))*1000:.1f} mm). 이 판의 절대 base_y 는 믿지 말 것 — "
+             f"base_dy_mm(기준 gy {a.gy_ref:.4f} 에서의 상대 오차)로 읽어라. "
+             f"--no-move 로 돌리면 이 오차가 없다")
 
 scene.refresh_base()
 tell(f"이송 상태 _deliver={bool(getattr(scene, '_deliver', None))} "
@@ -274,9 +297,12 @@ out = open(a.out, "w")
 # q1_lift·q1_end 를 넣는 이유: 스윙(`SIM_CARRY_MODE=swing`)의 성패는 **들어올린
 # 순간의 관절1 값 하나**로 갈린다 — 거기서 Δφ 를 더해 한계를 넘으면 401 이다.
 # 이 값이 없으면 "스윕은 401 인데 실제 판은 됐다" 를 볼 방법이 없다 (2026-09-24).
+# base_dy_mm: **기준 gy 에서의 상대 도착 오차** (양수 = 서가에서 멀어짐).
+# base_y_equiv_world 는 상수에서 나오므로 베이스가 요청대로 안 서면 틀린다 —
+# 도착 오차를 읽을 때는 **상대값** 쪽을 본다 (2026-09-24).
 out.write("book,board_z_world,gz_arm,gy_arm,base_y_equiv_world,code,err,"
           "min_all,min_all_seg,min_all_joint,min_insert,min_insert_seg,min_insert_joint,"
-          "q1_lift,q1_end,"
+          "q1_lift,q1_end,base_dy_mm,"
           + ",".join(f"m_{s}" for s in SEGS) + ",branch_down\n")
 out.flush()
 
@@ -304,7 +330,8 @@ for book in picks:
               plan, code, err = None, -1, f"{type(exc).__name__}: {exc}"
           if plan is None:
               out.write(f"{bname},{board:.3f},{gz:.4f},{gy:.4f},{base_y:.4f},{code},"
-                        f"\"{str(err)[:120]}\"," + ",".join([""] * (8 + len(SEGS) + 1)) + "\n")
+                        f"\"{str(err)[:120]}\",,,,,,,," + f"{-(gy - a.gy_ref)*1000:+.1f},"
+                        + ",".join([""] * (len(SEGS) + 1)) + "\n")
               out.flush()
               if done % 10 == 0 or code != 401:
                   tell(f"[{done}] {bname} 판 {board:.3f} gy {gy:.4f} → 실패 {code} {str(err)[:70]}")
@@ -320,7 +347,8 @@ for book in picks:
           _q1e = f"{float(_rot[-1][0]):+.4f}" if len(_rot) else ""
           row = [bname, f"{board:.3f}", f"{gz:.4f}", f"{gy:.4f}", f"{base_y:.4f}", "0", "\"\"",
                  f"{allm[1][0]:.4f}", allm[0], str(allm[1][1]),
-                 f"{insm[1][0]:.4f}", insm[0], str(insm[1][1]), _q1l, _q1e]
+                 f"{insm[1][0]:.4f}", insm[0], str(insm[1][1]), _q1l, _q1e,
+                 f"{-(gy - a.gy_ref)*1000:+.1f}"]
           row += [f"{m[s][0]:.4f}" if s in m else "" for s in SEGS]
           row.append("1" if bd else "0")
           out.write(",".join(row) + "\n")
