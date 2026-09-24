@@ -73,3 +73,63 @@ def test_margin_is_reported_so_thin_plans_are_visible():
     """
     p = ak.plan_board_sweep(PRESET_DEMO.q_home, FACE, _arm_z(1.042), X_FROM, X_TO, POINTS)
     assert hasattr(p, "min_margin") and p.min_margin == pytest.approx(p.min_margin)
+
+
+# ------------------- 홈이 둘이다 (2026-09-24 SW3 에서 밝혀짐)
+#
+#   `[스윕] 시작 자세 q=[-2.3634, …]` — 로그가 알려 준 실제 값이다.
+#   그때까지 나는 `config.py` 의 yaml 홈(2.811…)을 실제 값으로 알고 오프라인
+#   재현을 했고, **실제와 다른 답을 얻고 그것을 근거로 단언했다.**
+#
+#   두 홈은 서로 반대 방향으로 좋다:
+#     yaml 홈     파지 여유 작다 · **아래 판 스윕이 풀린다**
+#     SIM_HOME_Q  파지 여유 크다 · **아래 판 스윕이 안 풀린다**
+
+from config import PRESET_DEMO as _P  # noqa: E402
+
+
+def test_the_two_homes_are_different_poses():
+    """**하나를 '그 홈' 이라고 부르면 틀린다.** 둘 다 실제로 쓰인다."""
+    assert tuple(_P.q_home) != tuple(_P.q_home_sim)
+
+
+def test_the_yaml_home_solves_the_lower_board():
+    p = ak.plan_board_sweep(_P.q_home, FACE, _arm_z(0.498), X_FROM, X_TO, POINTS)
+    assert len(p.hold_idx) == POINTS, p.reason
+
+
+def test_the_runtime_home_does_not_and_that_is_the_whole_story():
+    """**이 한 줄이 오늘의 스캔 사달을 설명한다.**
+
+    실제 판이 쓰는 홈에서는 아래 판이 3/5 로 멈춘다. 그래서 스윕을 버리고
+    자세 표로 갈아탔고, 도윤님이 화면에서 그 차이를 잡으셨다.
+    """
+    p = ak.plan_board_sweep(_P.q_home_sim, FACE, _arm_z(0.498), X_FROM, X_TO, POINTS)
+    assert len(p.hold_idx) < POINTS
+    assert "IK 실패" in (p.reason or "")
+
+
+def test_the_upper_board_solves_from_either_home():
+    """위 판은 어느 홈에서도 풀린다 — 막히는 것은 아래 판뿐이다."""
+    for q in (_P.q_home, _P.q_home_sim):
+        p = ak.plan_board_sweep(q, FACE, _arm_z(1.042), X_FROM, X_TO, POINTS)
+        assert len(p.hold_idx) == POINTS, p.reason
+
+
+def test_the_reproduction_matches_the_real_log():
+    """실제 로그와 **숫자까지** 맞는지 — 재현이 재현인지 확인한다.
+
+    로그(SW3 의 `이어가기`): `아래 판 … 3/5 여유 0.100 … 경유점 8/9 … 한계 여유 0.059`
+
+    **사슬을 그대로 재현해야 이 숫자가 나온다.** 홈에서 바로 아래 판을 풀면
+    `3/5 여유 0.118 · 경유점 7/9 · 한계 여유 0.080` 으로 **다른 값**이다 —
+    같은 "3/5" 라도 온 길이 다르면 다른 판이다.
+    """
+    up = ak.plan_board_sweep(_P.q_home_sim, FACE, _arm_z(1.042), X_FROM, X_TO, POINTS)
+    assert len(up.hold_idx) == POINTS
+    assert up.min_margin == pytest.approx(0.210, abs=0.002)      # 로그: 여유 0.210
+    chained = up.qs[up.hold_idx[-1]]
+    down = ak.plan_board_sweep(chained, FACE, _arm_z(0.498), X_FROM, X_TO, POINTS)
+    assert len(down.hold_idx) == 3
+    assert down.min_margin == pytest.approx(0.100, abs=0.002)
+    assert "8/9" in (down.reason or "") and "0.059" in (down.reason or "")

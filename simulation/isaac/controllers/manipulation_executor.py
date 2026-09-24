@@ -346,8 +346,16 @@ class ManipulationExecutor:
             steps, holds, q = [], 0, q_now
             from sweep_retry import (attempts as _attempts, plan_full as _plan_full,
                                      plan_reachable as _plan_reachable)
+            # **두 홈을 다 시드로 써 본다.** `SIM_HOME_Q` 로 갈아 낀 홈은 파지 여유가
+            # 크지만(0.707 vs 0.128) **아래 판 스윕이 그 자세에서 안 풀린다**
+            # (2026-09-24 실측: 아래 판 3/5 여유 0.118 vs 원래 홈 5/5 여유 0.166).
+            # 하나를 고를 일이 아니라 **둘 다 해 보면 된다.**
             _home = np.asarray(getattr(self.scene, "q_home", None), float) \
                 if getattr(self.scene, "q_home", None) is not None else None
+            _home2 = getattr(self.scene, "q_home_conf", None)
+            _home2 = np.asarray(_home2, float) if _home2 is not None else None
+            if _home2 is not None and _home is not None and np.allclose(_home2, _home):
+                _home2 = None          # 갈아 끼우지 않았으면 같은 것을 두 번 안 한다
             for bz in boards:
                 z_arm = bz - float(self.scene.l0p[2])
 
@@ -358,7 +366,11 @@ class ManipulationExecutor:
                 # 3/5 로만 풀렸는데 그대로 갔고, 못 간 구간에서 404 시간 초과가 났다.
                 # 방향을 뒤집어 보고, 그래도 안 되면 앞 판의 IK 가지를 버리고 홈에서
                 # 다시 푼다. **`points` 를 줄이거나 문턱을 낮추지는 않는다.**
-                plan, how, tried = _plan_full(_fn, _attempts(q, _home, x_from, x_to), points)
+                _cands = _attempts(q, _home, x_from, x_to)
+                if _home2 is not None:
+                    _cands += [("원래 홈에서", _home2, x_from, x_to),
+                               ("원래 홈에서 되돌아", _home2, x_to, x_from)]
+                plan, how, tried = _plan_full(_fn, _cands, points)
                 _span = (x_from, x_to)
                 if plan is None:
                     # **판을 통째로 건너뛰기 전에, 닿는 만큼이라도 훑는다.**
