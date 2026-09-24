@@ -13,3 +13,9 @@ scripts/demo/demo_local.env
 # 웹 클로드 왕복 등 팀 내부 소통 문서 — 공개 저장소에 두지 않는다 (로컬에는 남긴다)
 docs/doyoon-kim/web_claude/
 night/
+
+# colcon 을 저장소 루트에서 돌리면 여기에 생긴다 (2026-09-24 실제로 생겼다).
+# 올바른 자리는 ros2_ws 안이지만, 잘못 돌린 것이 커밋되지는 않게 한다.
+/build/
+/install/
+/log/

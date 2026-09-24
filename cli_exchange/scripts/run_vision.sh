@@ -68,6 +68,11 @@ for _try in $(seq 1 $(( ${SIM_BOOT_RETRY:-2} + 1 ))); do
   [ "$_try" -gt 1 ] && {
     echo "**기동 실패 — 다시 띄운다 ($_try/$(( ${SIM_BOOT_RETRY:-2} + 1 )))**"
     mv "$D/sim.log" "$D/sim.boot$(( _try - 1 )).log" 2>/dev/null
+    # **아는 PID 부터 죽인다.** 재시도에서 죽일 것은 방금 띄운 시뮬 하나뿐인데,
+    # 패턴으로 훑는 cleanup 을 부르면 **자기를 띄운 셸까지 잡을 수 있다**
+    # (2026-09-24: 그 탓에 재시도가 한 번도 못 돌았다). 패턴 정리는 마지막 수단이다.
+    [ -f "$D/sim.pid" ] && { kill -INT "$(cat "$D/sim.pid")" 2>/dev/null; sleep 5; \
+                             kill -KILL "$(cat "$D/sim.pid")" 2>/dev/null; }
     bash night/cleanup_demo.sh > /dev/null 2>&1; sleep 10
   }
   _t0=$(date +%s)
