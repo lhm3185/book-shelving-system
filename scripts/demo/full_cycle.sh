@@ -35,9 +35,31 @@ set -u
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # 2026-09-23 18:08 사용자가 고친 레벨 — 카트 시작 자세가 레벨에 고정돼 있다 (루트 (4.986,-5.607) yaw 90°, 팔 베이스 (4.986,-5.307))
 LEVEL="${SIM_LEVEL:-/home/rokey/env_v5/Collected_ing_library_env_v5/ing_library_env_v5.usd}"
+# **레벨이 그 자리에 없으면 이 PC 의 자리를 본다.** 아침에 도윤님이 환경변수 없이
+# 이 스크립트 한 줄로 띄울 수 있어야 한다 — 검증된 값이 실행 셸에만 살아 있으면
+# 안 된다는 것을 2026-09-24 밤에 여섯 번 겪었다. 원래 경로가 있으면 그대로 쓴다.
+[ -f "$LEVEL" ] || for _c in "$HOME/levels/Final_Level_Library/Final_Level_Library.usdc"; do
+    [ -f "$_c" ] && { LEVEL="$_c"; echo "레벨 대체: $LEVEL"; break; }
+done
 CAM=/World/ridgeback_franka/panda_hand/rsd455/RSD455/Camera_OmniVision_OV9782_Color
 # 책 원본: 레벨이 평탄화돼 참조가 없으므로 저장소의 책 USD 를 직접 준다 (book.usd 는 1바이트 깨진 파일)
 BOOKS="${SIM_BOOKS:-/home/rokey/b1_work/simulation/assets/book_dataset/usd_v2/decorative_book_set_01_2k__book_softcover_01_cover14.usdc,/home/rokey/b1_work/simulation/assets/book_dataset/usd_v2/decorative_book_set_01_2k__book_hardcover_01_cover62.usdc,/home/rokey/b1_work/simulation/assets/book_dataset/usd_v2/decorative_book_set_01_2k__book_softcover_01_cover59.usdc,/home/rokey/b1_work/simulation/assets/book_dataset/usd_v2/decorative_book_set_01_2k__book_hardcover_01_cover87.usdc}"
+# 책도 같은 이유로 — 원본이 없으면 **이 저장소의 usd_v2** 에서 같은 네 권을 쓴다
+if ! [ -f "${BOOKS%%,*}" ]; then
+    _bd="$REPO/simulation/assets/book_dataset/usd_v2"
+    _b=""
+    for _n in decorative_book_set_01_2k__book_softcover_01_cover14 \
+              decorative_book_set_01_2k__book_hardcover_01_cover62 \
+              decorative_book_set_01_2k__book_softcover_01_cover59 \
+              decorative_book_set_01_2k__book_hardcover_01_cover87; do
+        [ -f "$_bd/$_n.usdc" ] && _b="${_b:+$_b,}$_bd/$_n.usdc"
+    done
+    [ -n "$_b" ] && { BOOKS="$_b"; echo "책 대체: 저장소 usd_v2 4권"; }
+fi
+# 트레이 출발/도착 — 이 레벨의 실측값. 출발은 레벨의 트레이 자리, 도착은 데크 위
+# 같은 z. 예전 기본값(4.907,-5.782)은 다른 레벨 것이라 이 레벨에서 트레이가 카트를 민다.
+export SIM_TRAY_FROM="${SIM_TRAY_FROM:-5.817607391996635,-5.659500598907469,0.333765}"
+export SIM_TRAY_TO="${SIM_TRAY_TO:-4.993110179901123,-5.659414291381836,0.333765}"
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-129}"
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 export FASTRTPS_DEFAULT_PROFILES_FILE="${FASTRTPS_DEFAULT_PROFILES_FILE-$REPO/config/fastdds_local.xml}"
@@ -81,6 +103,7 @@ sleep 1
 echo "[1/4] Isaac 시작 (약 3~4분) — 레벨 $(basename "$LEVEL")  $(date +%T)"
 spawn env SIM_USD="$LEVEL" SIM_FIX_BASE="${SIM_FIX_BASE:-0}" SIM_GRIP_ROT90="${SIM_GRIP_ROT90:-1}" SIM_GRASP_KINEMATIC="${SIM_GRASP_KINEMATIC:-1}" SIM_HOME_J7_DEG="${SIM_HOME_J7_DEG:-90}" SIM_HOME_SHIFT="${SIM_HOME_SHIFT:-0,0,0.10}" SIM_ROBOT_YAW="${SIM_ROBOT_YAW:-}" SIM_TRAY_TO="${SIM_TRAY_TO:-4.907,-5.782,0.3365}" \
     SIM_SPEED_SCALE="${SIM_SPEED_SCALE:-0.5}" SIM_MAX_STEP="${SIM_MAX_STEP:-0.12}" \
+    SIM_CARRY_MODE="${SIM_CARRY_MODE:-swing}" \
     "$REPO/scripts/run_isaac_sim.sh" --gui --camera-prim "$CAM" --amr-test-overrides \
     --drive-speed "$SPEED" --record-dir "$LOG/rec" --record-every "${REC_EVERY:-30}" > "$LOG/isaac.log" 2>&1
 echo -n "      준비 대기"

@@ -1060,9 +1060,17 @@ class BookScene:
         self.say(f"홈: 관절각 {np.round(self.q_home, 4).tolist()} → "
                  f"손끝(팔기준) {np.round(self._home_tip_arm, 4).tolist()}  "
                  f"가지 **팔꿈치{'↑' if _br == 'up' else '↓' if _br == 'down' else '?'}**")
-        if BRANCH_GUARD and _br != "up":
-            self.say("[경고] 홈이 팔꿈치↑ 가 아니다 — 가지 가드가 모든 IK 를 거절할 수 있다. "
+        if BRANCH_GUARD and _br == "down":
+            self.say("[경고] 홈이 팔꿈치↓ 다 — 가지 가드가 모든 IK 를 거절한다. "
                      "arm_<로봇>.yaml 의 poses.home 을 확인할 것")
+        elif BRANCH_GUARD and _br is None:
+            # **이건 경고가 아니다.** `elbow_branch` 는 link_2/3/5 로 판정하는데 Franka 에는
+            # 그 프레임이 없어 늘 None 이고, `_branch_ok` 는 None 이면 통과시킨다 — 가지
+            # 가드는 6축용이지 이 팔에는 걸리지 않는다. 예전 문구가 "모든 IK 를 거절할 수
+            # 있다" 였던 탓에 2026-09-24 밤 내내 401 의 용의자로 세 번 지목됐다.
+            # 실제로 그 판들에서 가드는 한 해도 버리지 않았다 (`_arm_limits` 로그 0회).
+            self.say("홈의 가지를 판정하지 않는다 (link_2/3/5 프레임이 없다) — "
+                     "가지 가드는 이 팔에서 아무것도 거르지 않는다. 6축에서만 쓰인다")
         self.open_tray = self.T_max / 2 + GRIP_CLEAR
         # 트레이 추종은 **__init__ 맨 마지막**에 설정한다. 그리퍼 축 계산보다 앞에 두었더니
         # ee_frame 과 hand_link 가 같은 자리로 나와 '접근축 를 못 구한다' 로 죽었다 (2026-09-21 실측).
