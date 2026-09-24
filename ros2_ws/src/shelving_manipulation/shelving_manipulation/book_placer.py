@@ -157,6 +157,27 @@ def cancel_command(token: str, job_id: str) -> dict:
     return {'type': COMMAND_CANCEL, 'token': token, 'job_id': job_id}
 
 
+def pick_cancel(inbox, token):
+    """대기 중인 명령들에서 **내 토큰의 취소만** 꺼낸다.
+
+    `(남은 명령들, 취소가 있었나)` 를 돌려준다. 다른 명령은 건드리지 않는다 —
+    꺼내 버리면 제 차례에 처리될 것이 사라진다.
+
+    왜 필요한가: 시뮬 실행기의 긴 동작(회전·자리 맞추기)은 스스로 수백 스텝을
+    돌린다. 그동안 평소 명령을 받는 루프가 돌아오지 않아 **취소가 받아지지도
+    않는다.** 조작 노드가 30 초에 포기하고 취소를 보내도 시뮬은 끝까지 돈다
+    (2026-09-24 VD2: 418 초). 그래서 긴 동작이 중간에 직접 이걸 부른다.
+    """
+    keep, hit = [], False
+    for text in inbox:
+        cmd = decode(text)
+        if cmd and cmd.get('type') == COMMAND_CANCEL and cmd.get('token') == token:
+            hit = True
+            continue
+        keep.append(text)
+    return keep, hit
+
+
 # ------------------------------------------------------------------ 실행 추적
 
 @dataclass

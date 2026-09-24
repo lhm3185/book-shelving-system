@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from std_msgs.msg import Bool, String
 
 from shelving_manipulation.book_placer import (
-    COMMAND_CANCEL, COMMAND_PLACE, COMMAND_ROTATE_BASE, COMMAND_SCAN, COMMAND_SWEEP, decode, encode, SIM_CANCELLED, SIM_FAILED,
+    COMMAND_CANCEL, COMMAND_PLACE, COMMAND_ROTATE_BASE, COMMAND_SCAN, COMMAND_SWEEP, decode, encode, pick_cancel, SIM_CANCELLED, SIM_FAILED,
     SIM_IDLE, SIM_RUNNING, SIM_SUCCEEDED)
 
 from arm_primitives import Status
@@ -40,6 +40,10 @@ class Job:
         self.started = time.time()
         self.steps = 0
         self.render_steps = 0
+
+
+class _RotateCancelled(Exception):
+    """회전을 취소하라는 말을 **회전 도중에** 들었다. 실패와 가른다."""
 
 
 class ManipulationExecutor:
@@ -429,6 +433,8 @@ class ManipulationExecutor:
                                 np.array([cw * tq0[0] - sz * tq0[3], cw * tq0[1] - sz * tq0[2],
                                           cw * tq0[2] + sz * tq0[1], cw * tq0[3] + sz * tq0[0]], float))
                     self.world.step(render=self.need_render())
+                    if i % 10 == 0 and self._cancel_pending(token):
+                        raise _RotateCancelled("회전 중 취소")
                 for _ in range(30):
                     self.world.step(render=self.need_render())
             self.scene.refresh_base()
@@ -472,6 +478,8 @@ class ManipulationExecutor:
                         SingleXFormPrim(ROOT).set_world_pose(p0 + move * u, np.asarray(q0, float))
                         _carry_tray(tp1 + move * u, tq1)
                         self.world.step(render=self.need_render())
+                        if i % 10 == 0 and self._cancel_pending(token):
+                            raise _RotateCancelled("자리 맞추기 중 취소")
                     for _ in range(20):
                         self.world.step(render=self.need_render())
                     self.scene.refresh_base()
@@ -485,6 +493,12 @@ class ManipulationExecutor:
             moved = float(np.linalg.norm(np.asarray(pv2, float) - pv)) * 1000.0
             self.say(f"베이스 회전 완료: yaw {math.degrees(now):+.1f}°, 팔 베이스 이동 {moved:.1f}mm")
             self.finish(SIM_SUCCEEDED, phase="rotate_base", message=f"베이스 {yaw_deg:+.0f}° 회전 완료")
+        except _RotateCancelled as exc:
+            # **취소는 실패가 아니다.** 그 자리에 세우고 그렇게 보고한다 — 둘을 섞으면
+            # 완주율 표에서 "사고" 와 "그만두라고 해서 그만둠" 이 한 칸에 들어간다.
+            self.say(f"베이스 회전 취소: {exc} (그 자리 정지)")
+            self.scene.refresh_base()
+            self.finish(SIM_CANCELLED, phase="rotate_base", message=f"베이스 회전 취소: {exc}")
         except Exception as exc:      # noqa: BLE001 - 회전 실패가 시뮬 전체를 죽이면 안 된다
             self.say(f"베이스 회전 실패 {type(exc).__name__}: {exc}")
             self.finish(SIM_FAILED, phase="rotate_base", error_code=410,
@@ -500,6 +514,23 @@ class ManipulationExecutor:
         siny = 2.0 * (q[3] * q[2] + q[0] * q[1])
         cosy = 1.0 - 2.0 * (q[1] * q[1] + q[2] * q[2])
         return math.atan2(siny, cosy), p
+
+    def _cancel_pending(self, token):
+        """긴 블로킹 동작 **중에** 취소를 들을 수 있게 한다.
+
+        `handle()` 은 `spin()` 안에서 불리는데, `start_rotate_base` 는 그 안에서
+        수백 스텝을 직접 돌린다. 그동안 `spin()` 이 돌아오지 않으니 `rclpy.spin_once`
+        도 안 돌고 `inbox` 도 안 비워진다 — **취소 메시지는 받아지지도 않는다.**
+        조작 노드가 30 초에 포기하고 취소를 보내도 시뮬은 끝까지 돈다.
+        2026-09-24 VD2 가 그래서 418 초를 먹었다.
+
+        여기서 직접 한 번 퍼 올리고, 내 토큰의 취소만 꺼낸다. 다른 명령은 그대로
+        둔다 — `spin()` 이 돌아가면 제 차례에 처리된다.
+        """
+        import rclpy
+        rclpy.spin_once(self.node, timeout_sec=0.0)
+        self.inbox[:], hit = pick_cancel(self.inbox, token)
+        return hit
 
     def handle(self, text):
         cmd = decode(text)
