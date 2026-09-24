@@ -29,8 +29,9 @@ VERIFIED = [
      '검출 x 흔들림 280 mm 가 그대로 목표가 된다 — 옆 책을 파고든다'),
     ('slot_y_from_shelf_front', True, False,
      '빈칸 깊이 관측(+42~263 mm 뒤)이 그대로 삽입 깊이가 된다'),
-    ('scan_command', 'scan_shelf', 'scan_sweep',
-     '아래 판 스캔이 404 로 죽는다 (관절 6 여유 0.100 rad)'),
+    # `scan_command` 는 목록에서 뺐다 — **코드 기본(`scan_sweep`)이 비전팀이 구현한
+    # 동작이고, 그것이 맞다.** 9/24 에 `scan_shelf` 로 바꿨다가 되돌렸다.
+    # 이 목록은 "코드 기본과 달라야 하는 것" 만 담는다.
     ('enable_perception_bridge', True, False,
      '/detect_target_slot 액션 자체가 안 뜬다 — 빈칸 검출 경로가 사라진다'),
     ('align_base_before_work', True, False,
