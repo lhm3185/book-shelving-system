@@ -53,3 +53,21 @@ def test_한계여유_필터를_0_으로_주면_한계_근처_해도_해다():
     loose = ak.ik(p, R, q, min_margin=0.0)
     assert not strict.ok and strict.limit_margin < ak.LIMIT_MARGIN
     assert loose.ok and np.linalg.norm(ak.fk(loose.q)[0] - p) < 0.003
+
+
+def test_도구_프레임으로_풀면_손끝_오차가_손끝에서_잰_값이다():
+    """compare 판의 6.97 mm — 손에서 0.05 rad 허용이 0.1 m 지렛대로 손끝 5 mm 가 됐다.
+    tool 을 주면 오차를 손끝에서 재므로 손끝이 pos_tol 안에 든다."""
+    tool = (T_TOOL, R_TOOL)
+    p_tip, R_tip = ak.fk_tool(HOME, tool)
+    r = ak.ik(p_tip + np.array([0.02, -0.01, 0.015]), R_tip, HOME + 0.1,
+              pos_tol=0.002, rot_tol=0.01, min_margin=0.0, tool=tool)
+    assert r.ok
+    p_back, _ = ak.fk_tool(r.q, tool)
+    assert np.linalg.norm(p_back - (p_tip + np.array([0.02, -0.01, 0.015]))) < 0.002
+
+
+def test_tool_없으면_fk_와_같다():
+    p, R = ak.fk(HOME)
+    p2, R2 = ak.fk_tool(HOME, None)
+    assert np.allclose(p, p2) and np.allclose(R, R2)

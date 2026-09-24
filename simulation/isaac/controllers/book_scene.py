@@ -1440,6 +1440,7 @@ class BookScene:
             # 데크와 트레이를 지나가다 404 로 죽었다 (2026-09-23 비전팀 실측).
             # 다중 씨앗은 비전 브랜치에서 온 개선이라 살린다 — **가드를 거쳐서** 쓴다.
             cands = []
+            self._ik_phase = "scan"        # [IK대조] 단계별 집계용
             for seed in _sp.seeds_for(q_prev, _sp_home):
                 q_c, ok_c = self.ik_joints(wp, wq, np.asarray(seed, float),
                                            frame=BOT.hand_link)
@@ -1766,13 +1767,15 @@ class BookScene:
                 and (frame == BOT.hand_link or getattr(self, "_ak_tool", None) is not None))
 
     def _ak_target(self, frame, target_w, ori_w):
-        """월드 목표(손끝 또는 손) → `arm_kinematics` 가 받는 팔 기준·손(panda_hand) 목표."""
-        import arm_kinematics as _ak
+        """월드 목표 → `arm_kinematics` 가 받는 팔 기준 목표 `(p, R, tool)`.
+
+        손끝(ee_frame) 목표는 손 자세로 바꾸지 않고 **tool 로 넘겨 오차를 손끝에서 재게** 한다.
+        손 자세로 바꿔 손에서 0.05 rad 를 허용하면 손끝은 0.1 m 지렛대로 5 mm 어긋난다 —
+        compare 판(2026-09-25 02:20)에서 `되돌린 손끝 오차 6.97 mm` 가 그것이었다.
+        """
         p = self.to_arm(np.asarray(target_w, float))
         Rm = self.Rl0.T @ R_from_quat(np.asarray(ori_w, float))
-        if frame == BOT.ee_frame:
-            p, Rm = _ak.hand_pose_for_tool(p, Rm, *self._ak_tool)
-        return p, Rm
+        return p, Rm, (self._ak_tool if frame == BOT.ee_frame else None)
 
     def _ak_rescue_seeds(self, frame, target_w, ori_w, seed):
         """Lula 가 씨앗 전부에서 못 풀었을 때 **씨앗으로 다시 넣을 해**를 `arm_kinematics` 로.
@@ -1786,8 +1789,9 @@ class BookScene:
         if not self._ak_capable(frame, seed):
             return []
         import arm_kinematics as _ak
-        p, Rm = self._ak_target(frame, target_w, ori_w)
-        out = _ak.rescue_seeds(p, Rm, np.asarray(seed, float), pos_tol=0.004, rot_tol=0.05, min_margin=0.0)
+        p, Rm, tool = self._ak_target(frame, target_w, ori_w)
+        out = _ak.rescue_seeds(p, Rm, np.asarray(seed, float), pos_tol=0.004, rot_tol=0.05,
+                               min_margin=0.0, tool=tool)
         self._ak_rescued = getattr(self, "_ak_rescued", 0) + 1
         if self._ak_rescued in (1, 10, 100):
             self.say(f"[IK] 씨앗 구조 ({self._ak_rescued}번째): Lula 가 씨앗 전부에서 못 풀어 "
@@ -1827,13 +1831,16 @@ class BookScene:
             if mode != "compare" or not capable:
                 return q_l, ok_l
         import arm_kinematics as _ak
-        p, Rm = self._ak_target(frame, target_w, ori_w)
-        r = _ak.ik(p, Rm, seed, pos_tol=0.004, rot_tol=0.05, min_margin=0.0)
+        p, Rm, tool = self._ak_target(frame, target_w, ori_w)
+        r = _ak.ik(p, Rm, seed, pos_tol=0.004, rot_tol=0.05, min_margin=0.0, tool=tool)
         if mode == "1":
             return (np.asarray(r.q, float), True) if r.ok else (seed, False)
-        # compare — 세기만 한다. 쓰는 해는 Lula 다
+        # compare — 세기만 한다. 쓰는 해는 Lula 다. **단계별로** 센다 (2026-09-25 02:20 판에서
+        # Lula만 105 가 100~500번 한 구간에 몰렸는데 어느 단계인지 못 셌다).
+        ph = getattr(self, "_ik_phase", "?")
         st = self._ak_stats
-        st["n"] += 1
+        ps = st.setdefault("단계", {}).setdefault(ph, {"n": 0, "Lula만": 0, "다중도못": 0})
+        st["n"] += 1; ps["n"] += 1
         if ok_l and r.ok:
             st["둘다"] += 1
             st["dq"] = max(st["dq"], float(np.max(np.abs(np.asarray(r.q, float) - np.asarray(q_l, float)))))
@@ -1843,15 +1850,23 @@ class BookScene:
             except Exception:      # noqa: BLE001
                 pass
         elif ok_l:
-            st["Lula만"] += 1
+            # 이 씨앗 하나에서 ak 가 못 푼 것이다. 실제 `SIM_IK_AK=1` 은 ik_joints 가 씨앗을
+            # 여럿 돌리므로, **여러 씨앗에서도 못 푸는지**를 따로 센다 — 그게 진짜 차이다
+            st["Lula만"] += 1; ps["Lula만"] += 1
+            if not _ak.rescue_seeds(p, Rm, seed, k=1, pos_tol=0.004, rot_tol=0.05, min_margin=0.0, tool=tool):
+                st["다중도못"] = st.get("다중도못", 0) + 1; ps["다중도못"] += 1
         elif r.ok:
             st["ak만"] += 1
         else:
             st["둘다못"] += 1
         if st["n"] in (1, 20, 100, 500, 2000, 5000):
-            self.say(f"[IK대조] {st['n']}번: 둘다 {st['둘다']} · Lula만 {st['Lula만']} · ak만 {st['ak만']} "
+            by = " · ".join(f"{k} {v['n']}(Lula만 {v['Lula만']}, 다중도못 {v['다중도못']})"
+                            for k, v in st["단계"].items())
+            self.say(f"[IK대조] {st['n']}번: 둘다 {st['둘다']} · Lula만 {st['Lula만']} "
+                     f"(다중 씨앗도 못 품 {st.get('다중도못', 0)}) · ak만 {st['ak만']} "
                      f"· 둘다못 {st['둘다못']} · 해 차이 최대 {st['dq']:.3f} rad · "
-                     f"ak 해를 Lula FK 로 되돌린 손끝 오차 최대 {st['mm']:.2f} mm")
+                     f"ak 해를 Lula FK 로 되돌린 손끝 오차 최대 {st['mm']:.2f} mm\n"
+                     f"[IK대조]   단계별: {by}")
         return q_l, ok_l
 
     def ik_joints(self, target, ori, seed, frame=None):
@@ -2514,6 +2529,7 @@ class BookScene:
         self._swing = None
         segs = {}; q = self.q_home
         for name, wps in order:
+            self._ik_phase = name          # [IK대조] 단계별 집계용
             if name == "carry_rotate" and CARRY_MODE == "swing":
                 qs, worst, err = self._plan_swing_carry(lift, transfer, pre_ins, DOWN, HORIZ, q)
             elif name == "return" and RETURN_MODE == "swing":

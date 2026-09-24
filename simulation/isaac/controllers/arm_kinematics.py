@@ -87,14 +87,27 @@ def _rot_error(R_now: np.ndarray, R_goal: np.ndarray) -> np.ndarray:
     return axis * ang
 
 
-def _jacobian(q: np.ndarray, eps: float = 1e-6) -> np.ndarray:
+def fk_tool(q: Sequence[float], tool=None) -> Tuple[np.ndarray, np.ndarray]:
+    """손(panda_hand) FK 에 손 기준 고정 변환 `tool = (T_hand_tool, R_hand_tool)` 을 붙인 프레임.
+
+    `tool` 이 None 이면 `fk` 와 같다. 손끝(right_gripper, 손 z 로 0.1 m)을 목표로 받을 때
+    **오차를 손끝에서 재기 위해** 쓴다 — 손에서 0.05 rad 를 허용하면 손끝은 5 mm 어긋난다.
+    """
+    p, R = fk(q)
+    if tool is None:
+        return p, R
+    T, Rt = tool
+    return p + R @ np.asarray(T, float), R @ np.asarray(Rt, float)
+
+
+def _jacobian(q: np.ndarray, eps: float = 1e-6, tool=None) -> np.ndarray:
     """수치 야코비안 6×7 (위치 3 + 회전 3). 속도보다 단순함을 택했다 — 계획 단계에서만 쓴다."""
-    p0, R0 = fk(q)
+    p0, R0 = fk_tool(q, tool)
     J = np.zeros((6, 7))
     for i in range(7):
         dq = np.zeros(7)
         dq[i] = eps
-        p1, R1 = fk(q + dq)
+        p1, R1 = fk_tool(q + dq, tool)
         J[:3, i] = (p1 - p0) / eps
         J[3:, i] = _rot_error(R0, R1) / eps
     return J
@@ -121,7 +134,7 @@ def limit_margin(q: Sequence[float]) -> float:
 def ik(p_goal: Sequence[float], R_goal: np.ndarray, q_seed: Sequence[float],
        pos_tol: float = 0.002, rot_tol: float = 0.01, max_iter: int = 300,
        damping: float = 0.05, seed_weight: float = 0.02,
-       min_margin: float = LIMIT_MARGIN) -> IKResult:
+       min_margin: float = LIMIT_MARGIN, tool=None) -> IKResult:
     """댐핑 최소자승 IK. **시드에 가까운 해**를 찾는다 (영공간에서 시드 쪽으로 당김) — 그래서
     이전 경유점의 해를 시드로 주면 경로가 연속이 되고 가지가 바뀌지 않는다.
     관절 한계는 매 반복 클램프하고, 한계 여유가 `min_margin` 미만이면 해로 치지 않는다
@@ -132,7 +145,7 @@ def ik(p_goal: Sequence[float], R_goal: np.ndarray, q_seed: Sequence[float],
     p_goal = np.asarray(p_goal, float)
     best = None
     for it in range(1, max_iter + 1):
-        p, R = fk(q)
+        p, R = fk_tool(q, tool)          # tool 을 주면 목표·오차가 그 프레임(손끝)이다
         e = np.concatenate([p_goal - p, _rot_error(R, R_goal)])
         pe, re = float(np.linalg.norm(e[:3])), float(np.linalg.norm(e[3:]))
         if best is None or pe + 0.1 * re < best[0]:
@@ -140,7 +153,7 @@ def ik(p_goal: Sequence[float], R_goal: np.ndarray, q_seed: Sequence[float],
         if pe < pos_tol and re < rot_tol:
             m = limit_margin(q)
             return IKResult(q if m >= min_margin else None, pe, re, it, m)
-        J = _jacobian(q)
+        J = _jacobian(q, tool=tool)
         JJt = J @ J.T + (damping ** 2) * np.eye(6)
         dq = J.T @ np.linalg.solve(JJt, e)
         # 영공간: 시드 쪽으로 살짝 (한계 근처 관절을 가운데로 데려오는 효과도 있다)
