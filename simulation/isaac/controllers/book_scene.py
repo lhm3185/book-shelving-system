@@ -1033,6 +1033,19 @@ class BookScene:
                 self.check_ak_model()
             except Exception as _exc:      # noqa: BLE001 - 대조 실패가 기동을 막지 않게
                 self.say(f"[모델대조] 못 쟀다 {type(_exc).__name__}: {_exc}")
+        # ② — `arm_kinematics` 는 손(panda_hand)을 모형화하고 IK 목표는 ee_frame(right_gripper)
+        # 으로 온다. 둘 사이 고정 변환을 **Lula 에서 한 번 재서** 둔다. 손으로 적지 않는다.
+        self._ak_tool = None
+        try:
+            _ph, _Rh = self.lula.compute_forward_kinematics(BOT.hand_link, self.q_home)
+            _pe, _Re = self.lula.compute_forward_kinematics(BOT.ee_frame, self.q_home)
+            _Rh = np.asarray(_Rh, float); _Re = np.asarray(_Re, float)
+            self._ak_tool = (_Rh.T @ (np.asarray(_pe, float) - np.asarray(_ph, float)), _Rh.T @ _Re)
+            self.say(f"[IK] 손→{BOT.ee_frame} 고정 변환(손 기준) "
+                     f"{np.round(self._ak_tool[0] * 1000, 1).tolist()} mm")
+        except Exception as _exc:      # noqa: BLE001
+            self.say(f"[IK] 손→ee 변환을 못 쟀다 — SIM_IK_AK 는 Lula 로 되돌아간다: {_exc}")
+        self._ak_stats = {"n": 0, "둘다": 0, "Lula만": 0, "ak만": 0, "둘다못": 0, "dq": 0.0, "mm": 0.0}
         _hp, _hR = self.lula.compute_forward_kinematics(BOT.ee_frame, self.q_home)
         self.home_tip = np.asarray(_hp, float)
         self.HOME_ORI = quat_from_R(np.asarray(_hR, float))
@@ -1454,7 +1467,9 @@ class BookScene:
                 rows.append(f"  q{i}: 관절 {len(q)}개 — ak 는 7축(Franka) 전용이라 건너뜀")
                 continue
             try:
-                lp = np.asarray(self.lula.compute_forward_kinematics(BOT.ee_frame, q)[0], float)
+                # **손(hand_link)과 견준다.** `ak.fk` 는 panda_hand 다. ee_frame(right_gripper)과
+                # 견주면 손끝 오프셋(약 10 cm)이 "모델이 다르다" 로 잘못 읽힌다.
+                lp = np.asarray(self.lula.compute_forward_kinematics(BOT.hand_link, q)[0], float)
             except Exception as exc:      # noqa: BLE001
                 rows.append(f"  q{i}: Lula FK 실패 {type(exc).__name__}")
                 continue
@@ -1466,7 +1481,7 @@ class BookScene:
                         f"{np.round(aw, 4).tolist()} · 차이 **{d:.2f} mm**")
         verdict = ("두 모델이 같다 — IK 를 옮겨도 된다" if worst <= tol_mm
                    else f"**{tol_mm:.1f} mm 를 넘는다 — IK 를 옮기기 전에 모델을 먼저 맞춰야 한다**")
-        self.say("[모델대조] arm_kinematics vs Lula (손끝 위치)\n" + "\n".join(rows)
+        self.say(f"[모델대조] arm_kinematics vs Lula ({BOT.hand_link} 위치)\n" + "\n".join(rows)
                  + f"\n  최대 차이 {worst:.2f} mm → {verdict}")
         return worst
 
@@ -1692,6 +1707,69 @@ class BookScene:
                      f"— 거르지 않는다")
         return self._al_cache
 
+    def _solve_ik(self, frame, target_w, ori_w, seed):
+        """IK 한 번 — **어느 풀이기로 풀지 여기서만 고른다.** 돌려주는 값은 Lula 와 같은 `(q, ok)`.
+
+        `SIM_IK_AK` (②, 로봇팔 구동을 `arm_kinematics` 호출로):
+          0        Lula 만 (기본, 지금까지의 동작)
+          compare  Lula 로 풀어 **그대로 쓰고**, 같은 목표를 ak 로도 풀어 차이만 센다 — 위험 0
+          1        ak 로 풀어 쓴다. ak 가 못 푸는 프레임(손·손끝 밖)은 Lula 로 되돌아간다
+
+        ak 는 팔 기준·손(panda_hand) 기준이다. 월드 목표를 `to_arm` 으로, 손끝(ee_frame) 목표를
+        기동 때 잰 `_ak_tool` 로 손 자세로 바꿔 넣는다. 허용 오차는 Lula 호출과 같은 값
+        (0.004 m · 0.05 rad)이고 한계 여유 필터는 0 이다 — 한계 검사는 `ik_joints` 의 가드
+        `_arm_limits` 가 두 풀이기에 똑같이 건다. 그래서 compare 에서 나는 차이는 풀이기 차이
+        이지 기준 차이가 아니다.
+
+        **원시 Lula IK 호출은 저장소 안에서 여기 한 곳뿐이어야 한다.** 회귀 점검:
+          grep -rc 'self[.]lula[.]compute_inverse_kinematics(' controllers/ → **1**
+        """
+        mode = os.environ.get("SIM_IK_AK", "0").strip()
+        target_w = np.asarray(target_w, float); ori_w = np.asarray(ori_w, float)
+        seed = np.asarray(seed, float)
+        capable = (len(seed) == 7 and frame in (BOT.ee_frame, BOT.hand_link)
+                   and (frame == BOT.hand_link or self._ak_tool is not None))
+        if mode == "1" and not capable:
+            self._ak_fallback = getattr(self, "_ak_fallback", 0) + 1
+            if self._ak_fallback in (1, 50):
+                self.say(f"[IK] ak 가 못 푸는 프레임 {frame} — Lula 로 되돌아간다 ({self._ak_fallback}번째)")
+            mode = "0"
+        q_l = ok_l = None
+        if mode != "1":
+            q_l, ok_l = self.lula.compute_inverse_kinematics(frame, target_w, ori_w, seed, 0.004, 0.05)
+            if mode != "compare" or not capable:
+                return q_l, ok_l
+        import arm_kinematics as _ak
+        p = self.to_arm(target_w)
+        Rm = self.Rl0.T @ R_from_quat(ori_w)
+        if frame == BOT.ee_frame:
+            p, Rm = _ak.hand_pose_for_tool(p, Rm, *self._ak_tool)
+        r = _ak.ik(p, Rm, seed, pos_tol=0.004, rot_tol=0.05, min_margin=0.0)
+        if mode == "1":
+            return (np.asarray(r.q, float), True) if r.ok else (seed, False)
+        # compare — 세기만 한다. 쓰는 해는 Lula 다
+        st = self._ak_stats
+        st["n"] += 1
+        if ok_l and r.ok:
+            st["둘다"] += 1
+            st["dq"] = max(st["dq"], float(np.max(np.abs(np.asarray(r.q, float) - np.asarray(q_l, float)))))
+            try:
+                pa = np.asarray(self.lula.compute_forward_kinematics(frame, np.asarray(r.q, float))[0], float)
+                st["mm"] = max(st["mm"], float(np.linalg.norm(pa - target_w)) * 1000.0)
+            except Exception:      # noqa: BLE001
+                pass
+        elif ok_l:
+            st["Lula만"] += 1
+        elif r.ok:
+            st["ak만"] += 1
+        else:
+            st["둘다못"] += 1
+        if st["n"] in (1, 20, 100, 500, 2000, 5000):
+            self.say(f"[IK대조] {st['n']}번: 둘다 {st['둘다']} · Lula만 {st['Lula만']} · ak만 {st['ak만']} "
+                     f"· 둘다못 {st['둘다못']} · 해 차이 최대 {st['dq']:.3f} rad · "
+                     f"ak 해를 Lula FK 로 되돌린 손끝 오차 최대 {st['mm']:.2f} mm")
+        return q_l, ok_l
+
     def ik_joints(self, target, ori, seed, frame=None):
         """IK 해를 구하되 **씨앗 자세에서 너무 먼 해는 버린다.**
 
@@ -1706,15 +1784,10 @@ class BookScene:
         # 홈을 마지막 씨앗으로 둔다 — 흔들기로 못 찾으면 팔꿈치↑ 홈에서 다시 푼다
         _seeds = [seed] + [seed + d for d in self._ik_nudges] + [np.asarray(self.q_home, float)]
         for k, s0 in enumerate(_seeds):
-            # **원시 Lula 호출은 저장소 안에서 여기 한 곳뿐이어야 한다.**
-            # 가드(`_branch_ok`·`_arm_limits`·`_above_deck`)를 우회하는 경로가 생기면
-            # 스캔이 겪은 일이 그대로 재발한다 — Lula 가 거짓 한계(j6 3.75, 실제 3.0)로
-            # 도달 불가 해를 돌려주고 팔이 한계에 붙은 채 404 로 죽는다 (2026-09-23).
-            # 회귀 점검 (주석까지 세지 않게 호출 형태로):
-            #   grep -rc 'self[.]lula[.]compute_inverse_kinematics(' controllers/ → **1**
-            q, ok = self.lula.compute_inverse_kinematics(
-                frame or BOT.ee_frame, np.asarray(target, float), np.asarray(ori, float),
-                np.asarray(s0, float), 0.004, 0.05)
+            # 풀이기는 `_solve_ik` 한 곳이 고른다 (Lula / arm_kinematics). 가드는 **아래에서
+            # 풀이기와 무관하게** 걸린다 — 가드를 우회하는 경로가 생기면 스캔이 겪은 일이
+            # 그대로 재발한다 (Lula 거짓 한계 j6 3.75 로 팔이 한계에 붙은 채 404, 2026-09-23).
+            q, ok = self._solve_ik(frame or BOT.ee_frame, target, ori, s0)
             if not ok:
                 continue
             q = np.asarray(q, float)

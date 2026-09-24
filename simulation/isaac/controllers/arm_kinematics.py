@@ -120,10 +120,13 @@ def limit_margin(q: Sequence[float]) -> float:
 
 def ik(p_goal: Sequence[float], R_goal: np.ndarray, q_seed: Sequence[float],
        pos_tol: float = 0.002, rot_tol: float = 0.01, max_iter: int = 300,
-       damping: float = 0.05, seed_weight: float = 0.02) -> IKResult:
+       damping: float = 0.05, seed_weight: float = 0.02,
+       min_margin: float = LIMIT_MARGIN) -> IKResult:
     """댐핑 최소자승 IK. **시드에 가까운 해**를 찾는다 (영공간에서 시드 쪽으로 당김) — 그래서
     이전 경유점의 해를 시드로 주면 경로가 연속이 되고 가지가 바뀌지 않는다.
-    관절 한계는 매 반복 클램프하고, 한계 여유가 LIMIT_MARGIN 미만이면 해로 치지 않는다."""
+    관절 한계는 매 반복 클램프하고, 한계 여유가 `min_margin` 미만이면 해로 치지 않는다
+    (기본 LIMIT_MARGIN. 시뮬의 `ik_joints` 는 0 을 준다 — 자기 가드 `_arm_limits` 가 따로 있어
+    Lula 경로와 같은 기준으로 거르기 위해서다)."""
     q = np.clip(np.asarray(q_seed, float).copy(), Q_MIN, Q_MAX)
     seed = q.copy()
     p_goal = np.asarray(p_goal, float)
@@ -136,7 +139,7 @@ def ik(p_goal: Sequence[float], R_goal: np.ndarray, q_seed: Sequence[float],
             best = (pe + 0.1 * re, q.copy(), pe, re, it)
         if pe < pos_tol and re < rot_tol:
             m = limit_margin(q)
-            return IKResult(q if m >= LIMIT_MARGIN else None, pe, re, it, m)
+            return IKResult(q if m >= min_margin else None, pe, re, it, m)
         J = _jacobian(q)
         JJt = J @ J.T + (damping ** 2) * np.eye(6)
         dq = J.T @ np.linalg.solve(JJt, e)
@@ -238,10 +241,21 @@ def camera_rotation(tilt_deg: float = 0.0) -> np.ndarray:
                      [0.0, c, -s]])
 
 
+def hand_pose_for_tool(tool_p: Sequence[float], R_arm_tool: np.ndarray,
+                       T_hand_tool: Sequence[float], R_hand_tool: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """손에 붙은 프레임(도구·카메라·손끝)을 저기 두려면 **손(panda_hand)** 은 어디여야 하나.
+
+    `fk`/`ik` 는 panda_hand 를 모형화한다. Lula 의 `right_gripper` 같은 손끝 프레임을 목표로
+    받으면 손 기준 고정 변환 `(T_hand_tool, R_hand_tool)` 으로 손 자세로 바꿔 푼다.
+    이 변환은 로봇을 띄운 뒤 Lula FK 두 프레임에서 **한 번 재서** 쓴다 — 손으로 적지 않는다.
+    """
+    R_arm_hand = np.asarray(R_arm_tool, float) @ np.asarray(R_hand_tool, float).T
+    return np.asarray(tool_p, float) - R_arm_hand @ np.asarray(T_hand_tool, float), R_arm_hand
+
+
 def hand_pose_for_camera(cam_p: Sequence[float], R_arm_cam: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """카메라를 여기 두고 저기를 보게 하려면 손은 어디여야 하나."""
-    R_arm_hand = R_arm_cam @ R_HAND_CAM.T
-    return np.asarray(cam_p, float) - R_arm_hand @ T_HAND_CAM, R_arm_hand
+    return hand_pose_for_tool(cam_p, R_arm_cam, T_HAND_CAM, R_HAND_CAM)
 
 
 @dataclass
