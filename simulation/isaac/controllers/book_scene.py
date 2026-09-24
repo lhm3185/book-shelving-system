@@ -1986,6 +1986,16 @@ class BookScene:
         return viol
 
     # ---------------------------------------------------------------- 계획
+    def _arm_pt(self, p_world):
+        """`yaw_to_arm` 과 같되 **z 도 베이스 기준으로 내린다** — 덤프 전용.
+
+        `yaw_to_arm` 이 z 를 월드로 두는 데는 이유가 있다(삽입 높이에 베이스 기울기가
+        새지 않게). 다만 그 값을 `_arm` 이라 부르면 `to_arm` 과 규약이 갈려서, 두 값을
+        그대로 빼는 사람이 나온다. 덤프에서는 이름과 내용을 맞춘다.
+        """
+        q = self.yaw_to_arm(p_world)
+        return np.array([q[0], q[1], q[2] - float(self.l0p[2])])
+
     def plan_inputs(self, book, place_center_world):
         """`plan_job` 의 결과를 **완전히 결정하는 것 전부**. 두 판을 견줄 때 쓴다.
 
@@ -2000,14 +2010,19 @@ class BookScene:
             "book": book,
             "book_pos_world": np.round(np.asarray(bp, float), 6).tolist(),
             "book_quat_world": np.round(np.asarray(bq, float), 6).tolist(),
-            "book_center_arm": np.round(self.yaw_to_arm((bb[:3] + bb[3:]) / 2), 6).tolist(),
-            "book_top_arm": np.round(self.yaw_to_arm(
+            # **z 도 베이스 기준으로 내린다.** `yaw_to_arm` 은 x·y 만 원점을 옮기고
+            # z 는 월드 그대로 돌려준다(높이에 베이스 기울기가 새지 않게 한 것이다).
+            # 그런데 그 값을 `_arm` 이라 부르면 `to_arm`(z 까지 내린다)과 규약이 갈리고,
+            # 2026-09-24 에 그것 때문에 양쪽이 각각 한 번씩 틀린 비교를 했다.
+            # **이름이 `_arm` 이면 z 도 팔 기준이어야 한다.**
+            "book_center_arm": np.round(self._arm_pt((bb[:3] + bb[3:]) / 2), 6).tolist(),
+            "book_top_arm": np.round(self._arm_pt(
                 [(bb[0] + bb[3]) / 2, (bb[1] + bb[4]) / 2, bb[5]]), 6).tolist(),
             "arm_base_world": np.round(np.asarray(self.l0p, float), 6).tolist(),
             "arm_yaw_deg": round(math.degrees(self.tray_yaw), 4),
             "q_home": np.round(np.asarray(self.q_home, float), 6).tolist(),
             "place_center_world": np.round(np.asarray(place_center_world, float), 6).tolist(),
-            "place_center_arm": np.round(self.yaw_to_arm(place_center_world), 6).tolist(),
+            "place_center_arm": np.round(self._arm_pt(place_center_world), 6).tolist(),
             "shelf_floor_z": round(float(self.shelf_floor_z), 6),
             "dims": [round(float(v), 6) for v in self.dims.get(book, (self.T, self.L, self.W))],
             "pre_lift_m": float(self.conf["grasp"].get("pre_lift_m", 0.13)),
