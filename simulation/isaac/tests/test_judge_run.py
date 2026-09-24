@@ -108,3 +108,38 @@ def test_a_rotate_that_finished_is_not_a_hang(tmp_path):
     d = _run(tmp_path, sim__log=OK_SIM + "베이스 회전 명령 전송 90도\n베이스 회전 완료\n",
              cyc__log="code=0\ncycle rc=0\n")
     assert incidents(load(d))[0] == []
+
+
+# ------------------------------------- 회전이 두 번이라는 것 (2026-09-24 VD2)
+#
+#   한 판에 회전이 **두 번** 있다 — 스캔 전, 꽂기 전. "완료가 하나도 없는가" 로
+#   보면 첫 번째만 완료된 판이 통과한다. VD2 가 그래서 배치 실패로 잘못 찍혔다.
+
+VD2_MAN = "베이스 회전 명령 전송 0도\n" * 2
+VD2_SIM = ("베이스 회전 완료\n"
+           "베이스 회전 시작: 현재 +90.0° → 목표 +0.0° "
+           "(차이 -90.0°, 축 = 팔 베이스 [4.804, -5.282])\n주행 시간 초과\n")
+
+
+def test_a_second_rotation_that_hung_is_still_a_hang(tmp_path):
+    """첫 회전이 완료돼도 둘째가 멈췄으면 멈춘 것이다 — **수를 맞춰 본다.**"""
+    d = _run(tmp_path, sim__log=OK_SIM + VD2_SIM, man__log=VD2_MAN, cyc__log="cycle rc=124\n")
+    inc, note = incidents(load(d))
+    assert "rotate_hang" in inc
+    assert note["rotate_counts"] == (2, 1)
+
+
+def test_the_hang_report_says_where_it_stopped(tmp_path):
+    """**어디서 멈췄는지 같이 들고 나온다.** VD2 는 느린 게 아니라 엉뚱한 자리였다 —
+    키오스크 [4.804, −5.282] 에서 90° 를 통째로 돌라는 명령이었다 (다른 판은 0°)."""
+    d = _run(tmp_path, sim__log=OK_SIM + VD2_SIM, man__log=VD2_MAN, cyc__log="cycle rc=124\n")
+    g = read(d)
+    _ok, bad, _warn = verdict(g)
+    assert any("4.804" in b and "-90.0" in b for b in bad), bad
+
+
+def test_matched_rotations_are_not_a_hang(tmp_path):
+    """명령 둘에 완료 둘이면 멈춘 게 아니다 — 정상 판을 사고로 세지 않는다."""
+    d = _run(tmp_path, sim__log=OK_SIM + "베이스 회전 완료\n" * 2,
+             man__log="베이스 회전 명령 전송 0도\n" * 2, cyc__log="code=0\ncycle rc=0\n")
+    assert incidents(load(d))[0] == []

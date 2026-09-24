@@ -94,10 +94,22 @@ def incidents(logs):
         if "cycle rc=0" not in cyc:
             inc.append("node_died")
 
-    # rotate_base 무응답 — 명령은 갔는데 완료가 안 온다 (VD2 는 418초 멈췄다)
+    # rotate_base 무응답 — 명령은 갔는데 완료가 안 온다 (VD2 는 418초 멈췄다).
+    #
+    # **"완료가 하나도 없는가" 로 보면 안 된다.** 한 판에 회전이 **두 번** 있다
+    # (스캔 전·꽂기 전). VD2 는 첫 번째가 완료되고 두 번째가 멈췄는데, 그 조건으로는
+    # "완료가 있으니 괜찮다" 가 되어 배치 실패로 잘못 찍혔다. **수를 맞춰 본다.**
     all_txt = "".join(v for k, v in logs.items() if isinstance(v, str))
-    if "베이스 회전 명령 전송" in all_txt and "베이스 회전 완료" not in all_txt:
+    cmd_n = all_txt.count("베이스 회전 명령 전송")
+    done_n = all_txt.count("베이스 회전 완료")
+    if cmd_n > done_n:
         inc.append("rotate_hang")
+        note["rotate_counts"] = (cmd_n, done_n)
+        # **어디서 멈췄는지 같이 들고 나온다.** VD2 는 느려서 멈춘 게 아니라
+        # 키오스크 자리에서 90° 를 통째로 돌라는 명령을 받았다 — 다른 판은 0° 다.
+        starts = re.findall(r"베이스 회전 시작:[^\n]*", all_txt)
+        if starts:
+            note["rotate_last"] = starts[-1].strip()[:160]
     return sorted(set(inc)), note
 
 
@@ -193,6 +205,8 @@ def verdict(g):
     # 통과해도 얇으면 말한다
     if mm is not None and MIN_MARGIN <= mm < MIN_MARGIN + THIN_MARGIN:
         warn.append(f"min_margin {mm:.3f} — 합격선에서 {mm - MIN_MARGIN:.3f} 뿐")
+    if g.get("rotate_last"):
+        bad.append(f"멈춘 자리: {g['rotate_last']}")
     if g.get("boot_retry"):
         warn.append(f"기동이 {g['boot_retry']}번째 시도에 떴다 — 감싸서 넘겼지만 한 번에 뜬 것은 아니다")
     if g.get("tilt_deg") is not None and abs(g["tilt_deg"]) > 1.0:
