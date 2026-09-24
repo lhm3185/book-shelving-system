@@ -122,8 +122,16 @@ sleep 10
 spawn ros2 run rqt_image_view rqt_image_view /perception/debug_image > "$LOG/rqt_debug.log" 2>&1
 spawn ros2 run rqt_image_view rqt_image_view /perception/depth_debug_image > "$LOG/rqt_depth.log" 2>&1
 echo "[3/4] 반납 작업 1건 투입 (${JOB_DELAY}s 뒤)  $(date +%T)"
+# **두 권.** 기본 `book_ids` 가 `['book_001']` 한 건이라 한 권 꽂고 복귀했다.
+# FSM 은 이미 반복할 줄 안다 (`_current_task_index += 1` → SELECT_BOOK 부터 다시).
+# 분류코드는 **둘 다 0~4 로 시작**해야 한다 — shelf_map 에서 그 범위만 shelf_01 이고,
+# 5~9 를 주면 shelf_02 로 가는데 그 observation_pose 는 아직 자리표시자(3.0, +1.0)다.
 spawn ros2 run shelving_system return_machine_node --ros-args -p auto_publish:=true \
-    -p publish_delay_sec:="$JOB_DELAY" > "$LOG/return_machine.log" 2>&1
+    -p publish_delay_sec:="$JOB_DELAY" \
+    -p book_ids:="${SIM_BOOK_IDS:-['book_001','book_002']}" \
+    -p rfid_tags:="${SIM_RFID_TAGS:-['rfid_001','rfid_002']}" \
+    -p classification_codes:="${SIM_CLASS_CODES:-['005.7','006.3']}" \
+    > "$LOG/return_machine.log" 2>&1
 
 echo "[4/4] 진행 상태 — 검출 좌표·단계 전이를 실시간으로 (같은 내용이 $LOG/detections.log 에 남는다)  $(date +%T)"
 python3 - "$LOG" <<'PY'
