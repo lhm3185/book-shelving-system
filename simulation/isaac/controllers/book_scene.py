@@ -1931,32 +1931,61 @@ class BookScene:
         # 같은 값이다. 합치면 d 의 관절공간 되돌림이 사라져 손목 특이점을 넘길 수단이
         # 없어진다. 되던 것까지 망가뜨리므로 쓰지 않는다.
         part, _w, err = self.plan_path([(p_sw, O_sw), (np.asarray(transfer, float), O_sw)], qs[-1])
-        if part is None:
-            return None, 0.0, f"스윙 c(reach): {err}"
-        qs.extend(part[1:])
-        n_c = len(part) - 1
         q_b_end = np.asarray(q_sw, float).copy()
-        q_c_path = [np.asarray(v, float).copy() for v in part]      # q_sw … q_transfer
-        # d. reorient — transfer → pre_ins (손 자세 → HORIZ). 직교가 안 되면 관절공간
-        how = "직교"
-        wps_d = [(np.asarray(transfer, float), O_sw), (np.asarray(pre_ins, float), HORIZ)]
-        part, _w, err = self.plan_path(wps_d, qs[-1])
-        if part is None:
-            part, _w, err2 = self.plan_joint_path(wps_d, qs[-1])
+        pre_ins_arm = self.yaw_to_arm(np.asarray(pre_ins, float))
+        if part is not None:
+            qs.extend(part[1:])
+            n_c = len(part) - 1
+            how_c = "직교"
+            q_c_path = [np.asarray(v, float).copy() for v in part]      # q_sw … q_transfer
+            # d. reorient — transfer → pre_ins (손 자세 → HORIZ). 직교가 안 되면 관절공간
+            how = "직교"
+            wps_d = [(np.asarray(transfer, float), O_sw), (np.asarray(pre_ins, float), HORIZ)]
+            part, _w, err = self.plan_path(wps_d, qs[-1])
             if part is None:
-                return None, 0.0, f"스윙 d(reorient): 직교 {err} / 관절 {err2}"
-            how = f"관절공간(직교 실패: {err})"
-            self.say(f"[스윙] d(reorient) 직교 실패 → 관절공간으로 — {err}")
-        qs.extend(part[1:])
+                part, _w, err2 = self.plan_joint_path(wps_d, qs[-1])
+                if part is None:
+                    return None, 0.0, f"스윙 d(reorient): 직교 {err} / 관절 {err2}"
+                how = f"관절공간(직교 실패: {err})"
+                self.say(f"[스윙] d(reorient) 직교 실패 → 관절공간으로 — {err}")
+            qs.extend(part[1:])
+            n_d = len(part) - 1
+        else:
+            # **되돌림 — 손목을 먼저 돌리고 HORIZ 로 올라간다. c 가 안 풀릴 때만.**
+            #
+            # 위 판에서 `transfer@O_sw` 는 존재하지 않는다: DOWN 계열 손 자세는 팔기준 z
+            # 0.84~0.95 띠에 해가 없고 HORIZ 만 풀린다 (2026-09-25 00:00 오프라인 표,
+            # `arm_planning.carry_ladder` 주석). 그래서 낮은 데(p_sw, 스윙 끝)에서 손목을
+            # O_sw → HORIZ 로 **관절공간**으로 돌리고 — d 가 매 판 그렇게 손목 특이점을
+            # 넘기고 있었다 — 거기서 pre_ins 까지 HORIZ 를 유지한 채 직선으로 간다.
+            # transfer 는 안 들르고 d 는 필요 없다(이미 HORIZ 로 도착한다).
+            # c 가 풀리는 판(아래 판)은 이 분기에 오지 않는다 — 한 점도 안 바뀐다.
+            wps_r = [(p_sw, O_sw), (p_sw, HORIZ)]
+            part, _w, err_r = self.plan_joint_path(wps_r, qs[-1])
+            if part is None:
+                return None, 0.0, f"스윙 c(reach): 직교 {err} / 손목 먼저: {err_r}"
+            n_r = len(part) - 1
+            q_c_path = [np.asarray(v, float).copy() for v in part]
+            qs.extend(part[1:])
+            part, _w, err_l = self.plan_path([(p_sw, HORIZ), (np.asarray(pre_ins, float), HORIZ)], qs[-1])
+            if part is None:
+                return None, 0.0, f"스윙 c(reach): 직교 {err} / 손목 먼저 뒤 HORIZ 직선: {err_l}"
+            q_c_path.extend(np.asarray(v, float).copy() for v in part[1:])   # … q_pre_ins
+            qs.extend(part[1:])
+            n_c = len(part) - 1
+            n_d = 0
+            how = "없음"
+            how_c = f"되돌림: 손목 먼저 {n_r}점(관절) → HORIZ 직선 (직교 실패: {err})"
+            self.say(f"[스윙] c(reach) 직교 실패 → 손목 먼저 돌리고 HORIZ 로 올라간다 — {err}")
         self._swing = {"dphi": dphi, "p_sw": p_sw, "O_sw": O_sw, "p_clear": p_clear,
                        "q_b_start": np.asarray(qs[n_a], float).copy(), "q_b_end": q_b_end,
-                       "q_c_path": q_c_path}
+                       "q_c_path": q_c_path}       # q_sw … 운반 끝. return 이 거꾸로 되짚는다
         arr = np.asarray(qs, float)
         worst = float(np.max(np.abs(np.diff(arr, axis=0)))) if len(arr) > 1 else 0.0
         self.say(f"[스윙] carry_rotate: a clear {clear_h:.3f} m ({n_a}점) · b j1 Δφ "
-                 f"{math.degrees(dphi):+.1f}° ({n_b}점) · c reach {n_c}점 · d reorient "
-                 f"{len(part) - 1}점 [{how}] · 최대걸음 {worst:.3f} rad · 스윙 끝 손끝 "
-                 f"{np.round(p_sw, 3).tolist()}")
+                 f"{math.degrees(dphi):+.1f}° ({n_b}점) · c reach {n_c}점 [{how_c}] · d reorient "
+                 f"{n_d}점 [{how}] · 최대걸음 {worst:.3f} rad · 스윙 끝 손끝(월드) "
+                 f"{np.round(p_sw, 3).tolist()} · pre_ins(팔기준) {np.round(pre_ins_arm, 4).tolist()}")
         return qs, worst, ""
 
     def _plan_swing_return(self, retreat, HORIZ, q_retreat, transfer, lift, DOWN, q_lift):
