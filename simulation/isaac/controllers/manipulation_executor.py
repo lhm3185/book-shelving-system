@@ -279,7 +279,18 @@ class ManipulationExecutor:
         token = cmd.get("token") or uuid.uuid4().hex
         job_id = cmd.get("job_id", "sweep")
         dwell = float(cmd.get("dwell_s", 1.0))
-        boards = [float(b) for b in cmd.get("boards", [1.042, 0.498])]
+        # **훑을 판을 밖에서 고를 수 있게 한다** (`SIM_SWEEP_BOARDS="1.042"`).
+        # 2026-09-24: 아래 판(월드 0.498 = 팔기준 0.168)에서만 404 가 난다.
+        # 위 판은 5/5 로 완주하고 아래 판은 3/5 에서 멈춘다 — 여유가 0.210 vs
+        # **0.100 rad** 이고, 계획 단계에서 이미 `경유점 8/9 IK 실패` 가 뜬다.
+        # 아래 판을 빼면 스캔이 완주하므로 빈칸 좌표를 먼저 볼 수 있다.
+        # (조작 노드는 `boards` 를 안 실어 보낸다 — 그래서 여기 기본값이 쓰인다)
+        _env_boards = os.environ.get("SIM_SWEEP_BOARDS", "").strip()
+        _default = ([float(b) for b in _env_boards.replace(" ", "").split(",") if b]
+                    if _env_boards else [1.042, 0.498])
+        boards = [float(b) for b in cmd.get("boards", _default)]
+        if _env_boards:
+            self.say(f"[스윕] 판을 {boards} 로 골랐다 [SIM_SWEEP_BOARDS]")
         x_from, x_to = float(cmd.get("x_from", -0.35)), float(cmd.get("x_to", 0.35))
         points = int(cmd.get("points", 5))
         try:
