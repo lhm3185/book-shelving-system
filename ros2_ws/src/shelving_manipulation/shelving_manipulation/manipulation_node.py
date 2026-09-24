@@ -74,6 +74,7 @@ class ManipulationNode(Node):
         self.slot_x_snap_to_gap = bool(p('slot_x_snap_to_gap', False).value)
         # 가장 가까운 실측 빈칸이 이보다 멀면 **손대지 않는다** (어느 칸인지 알 수 없다)
         self.slot_x_snap_max_m = float(p('slot_x_snap_max_m', 0.12).value)
+        self._slot_reject = None     # 맞춤이 거절한 사유 (결과 메시지로 올린다)
         # 스캔 명령: scan_sweep(수평 스윕, 기본) / scan_shelf(예전 자세 표)
         self.scan_command = str(p('scan_command', 'scan_sweep').value)
         # 작업 전 차체 정렬(회전·서가 중앙·거리). 시뮬 실행기(rotate_base)가 있어야 한다 — 코드 기본은 끔이라
@@ -470,17 +471,30 @@ class ManipulationNode(Node):
         if self.slot_x_snap_to_gap and self._shelf_gaps:
             cands = [((lo + hi) / 2.0, hi - lo) for lo, hi in self._shelf_gaps]
             gx, gw = min(cands, key=lambda c: abs(c[0] - x))
-            if abs(gx - x) <= self.slot_x_snap_max_m:
+            # **빈칸이 하나뿐이면 거리를 안 본다.** 한계를 두는 이유는 "어느 칸을 본
+            # 것인지 모르겠다" 인데, 갈 곳이 하나면 그 물음이 성립하지 않는다. 그때
+            # 검출이 멀다는 것은 **검출이 틀렸다**는 뜻이지 다른 칸이라는 뜻이 아니다.
+            # (2026-09-24: 이 레벨의 그 판에는 쓸 수 있는 빈칸이 하나뿐이다)
+            if len(cands) == 1 or abs(gx - x) <= self.slot_x_snap_max_m:
                 self.get_logger().info(
                     f'빈칸 x: 검출 {x:+.4f} → 실측 빈칸 중심 {gx:+.4f} '
                     f'({(gx - x) * 1000:+.1f} mm, 빈칸 폭 {gw * 1000:.1f} mm, '
-                    f'실측 빈칸 {len(cands)}개) [slot_x_snap_to_gap]')
+                    f'실측 빈칸 {len(cands)}개'
+                    f'{" — 빈칸이 하나뿐이라 거리를 안 본다" if len(cands) == 1 else ""})'
+                    f' [slot_x_snap_to_gap]')
                 x = gx
             else:
-                self.get_logger().warning(
-                    f'빈칸 x: 검출 {x:+.4f} 에서 가장 가까운 실측 빈칸이 {gx:+.4f} 로 '
-                    f'{(gx - x) * 1000:+.1f} mm 떨어져 있다 — **손대지 않는다** '
-                    f'(한계 {self.slot_x_snap_max_m * 1000:.0f} mm)')
+                # **못 믿겠다고 판단했으면 그 값으로 꽂지 않는다.**
+                # 2026-09-24 에 여기서 경고만 하고 그대로 진행했더니, 손대지 않은 그
+                # 나쁜 검출로 남의 자리에 **책 두께 통째로(36.4 mm)** 박았다.
+                # 거절하면 410 으로 **안전하게** 실패한다 — 오늘 내내 좋다고 해 온 형태다.
+                self._slot_reject = (
+                    f'빈칸 x 검출 {x:+.4f} 가 실측 빈칸 {len(cands)}개 중 가장 가까운 '
+                    f'{gx:+.4f} 에서 {abs(gx - x) * 1000:.0f} mm 떨어져 있다 '
+                    f'(한계 {self.slot_x_snap_max_m * 1000:.0f} mm) — 어느 칸을 본 것인지 '
+                    f'알 수 없어 거절한다')
+                self.get_logger().warning(f'**빈칸 거절** {self._slot_reject}')
+                return None
         # 스캔과 꽂기가 같은 자리(앞면 0.444 m)라 관측 깊이를 그대로 쓴다: 틈 앞 + 책폭/2 + inset = 꽂힌 책 중심.
         # (전에 스캔만 0.75 m 물러났을 땐 그 차이만큼 차체를 옮겼다 — 이제 scan/place standoff 가 같다.)
         advance = float(self.scan_standoff_m) - float(self.place_standoff_m)
@@ -536,7 +550,9 @@ class ManipulationNode(Node):
         result.candidate_count = len(slots)
         if selected is None:
             result.error_code = 410
-            result.message = f'두 층 스캔에서 조작 가능 빈 슬롯 없음 (수신 {len(slots)}개)'
+            result.message = (getattr(self, '_slot_reject', None)
+                              or f'두 층 스캔에서 조작 가능 빈 슬롯 없음 (수신 {len(slots)}개)')
+            self._slot_reject = None
             self._set_status('FAILED', request.job_id, 0.0, 410, result.message)
             return self._finish_detection(goal_handle, result, False)
 
