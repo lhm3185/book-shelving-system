@@ -1707,6 +1707,41 @@ class BookScene:
                      f"— 거르지 않는다")
         return self._al_cache
 
+    def _ak_capable(self, frame, seed):
+        """`arm_kinematics` 가 이 프레임·이 관절 수를 풀 수 있는가 (손·손끝, 7축)."""
+        return (len(np.asarray(seed, float)) == 7 and frame in (BOT.ee_frame, BOT.hand_link)
+                and (frame == BOT.hand_link or getattr(self, "_ak_tool", None) is not None))
+
+    def _ak_target(self, frame, target_w, ori_w):
+        """월드 목표(손끝 또는 손) → `arm_kinematics` 가 받는 팔 기준·손(panda_hand) 목표."""
+        import arm_kinematics as _ak
+        p = self.to_arm(np.asarray(target_w, float))
+        Rm = self.Rl0.T @ R_from_quat(np.asarray(ori_w, float))
+        if frame == BOT.ee_frame:
+            p, Rm = _ak.hand_pose_for_tool(p, Rm, *self._ak_tool)
+        return p, Rm
+
+    def _ak_rescue_seeds(self, frame, target_w, ori_w, seed):
+        """Lula 가 씨앗 전부에서 못 풀었을 때 **씨앗으로 다시 넣을 해**를 `arm_kinematics` 로.
+
+        2026-09-25 00:40 실측: 스윙 끝(p_sw)에서 DOWN→HORIZ 뒤집기가 `IK 실패` 였는데, 같은 점을
+        오프라인에서 풀면 한계 여유 0.76 이었다(위 판 pre_ins 0.22 의 세 배). 도달 한계가 아니라
+        **Lula 가 국소 풀이라 90° 뒤집기를 그 씨앗들에서 수렴 못 한 것**이다. 그래서 ak 해를 씨앗으로
+        준다 — 결과는 여전히 Lula 해이고 가드(팔꿈치·한계·받침판)를 똑같이 거친다. Lula 가 푸는
+        판에는 한 번도 불리지 않는다.
+        """
+        if not self._ak_capable(frame, seed):
+            return []
+        import arm_kinematics as _ak
+        p, Rm = self._ak_target(frame, target_w, ori_w)
+        out = _ak.rescue_seeds(p, Rm, np.asarray(seed, float), pos_tol=0.004, rot_tol=0.05, min_margin=0.0)
+        self._ak_rescued = getattr(self, "_ak_rescued", 0) + 1
+        if self._ak_rescued in (1, 10, 100):
+            self.say(f"[IK] 씨앗 구조 ({self._ak_rescued}번째): Lula 가 씨앗 전부에서 못 풀어 "
+                     f"arm_kinematics 해 {len(out)}개를 씨앗으로 다시 푼다 — "
+                     f"목표(팔기준) {np.round(p, 4).tolist()} {frame}")
+        return out
+
     def _solve_ik(self, frame, target_w, ori_w, seed):
         """IK 한 번 — **어느 풀이기로 풀지 여기서만 고른다.** 돌려주는 값은 Lula 와 같은 `(q, ok)`.
 
@@ -1727,8 +1762,7 @@ class BookScene:
         mode = os.environ.get("SIM_IK_AK", "0").strip()
         target_w = np.asarray(target_w, float); ori_w = np.asarray(ori_w, float)
         seed = np.asarray(seed, float)
-        capable = (len(seed) == 7 and frame in (BOT.ee_frame, BOT.hand_link)
-                   and (frame == BOT.hand_link or self._ak_tool is not None))
+        capable = self._ak_capable(frame, seed)
         if mode == "1" and not capable:
             self._ak_fallback = getattr(self, "_ak_fallback", 0) + 1
             if self._ak_fallback in (1, 50):
@@ -1740,10 +1774,7 @@ class BookScene:
             if mode != "compare" or not capable:
                 return q_l, ok_l
         import arm_kinematics as _ak
-        p = self.to_arm(target_w)
-        Rm = self.Rl0.T @ R_from_quat(ori_w)
-        if frame == BOT.ee_frame:
-            p, Rm = _ak.hand_pose_for_tool(p, Rm, *self._ak_tool)
+        p, Rm = self._ak_target(frame, target_w, ori_w)
         r = _ak.ik(p, Rm, seed, pos_tol=0.004, rot_tol=0.05, min_margin=0.0)
         if mode == "1":
             return (np.asarray(r.q, float), True) if r.ok else (seed, False)
@@ -1783,7 +1814,18 @@ class BookScene:
         best = None
         # 홈을 마지막 씨앗으로 둔다 — 흔들기로 못 찾으면 팔꿈치↑ 홈에서 다시 푼다
         _seeds = [seed] + [seed + d for d in self._ik_nudges] + [np.asarray(self.q_home, float)]
-        for k, s0 in enumerate(_seeds):
+        k = 0
+        rescued = False
+        while True:
+            if k >= len(_seeds):
+                # 씨앗을 다 썼는데 해가 없다 → **딱 한 번** arm_kinematics 해를 씨앗으로 붙인다
+                if best is not None or rescued:
+                    break
+                rescued = True
+                _seeds.extend(self._ak_rescue_seeds(frame or BOT.ee_frame, target, ori, seed))
+                continue
+            s0 = _seeds[k]
+            k += 1
             # 풀이기는 `_solve_ik` 한 곳이 고른다 (Lula / arm_kinematics). 가드는 **아래에서
             # 풀이기와 무관하게** 걸린다 — 가드를 우회하는 경로가 생기면 스캔이 겪은 일이
             # 그대로 재발한다 (Lula 거짓 한계 j6 3.75 로 팔이 한계에 붙은 채 404, 2026-09-23).
@@ -2058,7 +2100,7 @@ class BookScene:
         self.say(f"[스윙] carry_rotate: a clear {clear_h:.3f} m ({n_a}점) · b j1 Δφ "
                  f"{math.degrees(dphi):+.1f}° ({n_b}점) · c reach {n_c}점 [{how_c}] · d reorient "
                  f"{n_d}점 [{how}] · 최대걸음 {worst:.3f} rad · 스윙 끝 손끝(월드) "
-                 f"{np.round(p_sw, 3).tolist()} · pre_ins(팔기준) {np.round(pre_ins_arm, 4).tolist()}")
+                 f"{np.round(p_sw, 3).tolist()} · pre_ins(팔기준 xy·월드 z) {np.round(pre_ins_arm, 4).tolist()}")
         return qs, worst, ""
 
     def _plan_swing_return(self, retreat, HORIZ, q_retreat, transfer, lift, DOWN, q_lift):

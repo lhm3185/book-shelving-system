@@ -191,6 +191,27 @@ def ik_best(p_goal: Sequence[float], R_goal: np.ndarray, seeds: Sequence[Sequenc
     return best if best is not None else IKResult(None, 1e9, 1e9, 0, 0.0)
 
 
+def rescue_seeds(p_goal: Sequence[float], R_goal: np.ndarray, q_seed: Sequence[float],
+                 k: int = 3, distinct: float = 0.05, **ik_kw) -> List[np.ndarray]:
+    """다른 풀이기(Lula)가 씨앗 전부에서 못 풀 때 **씨앗으로 건네줄 해**를 최대 k 개.
+
+    여러 씨앗에서 풀어 한계 여유가 큰 순으로, 서로 `distinct` rad 넘게 다른 것만 남긴다.
+    2026-09-25 00:40: 스윙 끝에서 DOWN→HORIZ 90° 뒤집기를 Lula 가 q_sw·흔들기·홈 씨앗
+    어디서도 수렴 못 했는데, 같은 점은 여기서 여유 0.76 으로 풀렸다. 그 해를 씨앗으로
+    주면 국소 풀이기는 거기서 바로 수렴한다 — 문턱이 아니라 씨앗을 바꾸는 것이다.
+    """
+    sols = []
+    for s in seeds_around(q_seed):
+        r = ik(p_goal, R_goal, s, **ik_kw)
+        if not r.ok:
+            continue
+        if any(float(np.max(np.abs(r.q - o.q))) < distinct for o in sols):
+            continue
+        sols.append(r)
+    sols.sort(key=lambda r: -r.limit_margin)
+    return [r.q for r in sols[:k]]
+
+
 # ---------------------------------------------------------------- 동작 생성
 def move_j(q0: Sequence[float], q1: Sequence[float], step: float = 0.05) -> List[np.ndarray]:
     """관절 공간 직선. `step` rad(가장 많이 도는 관절 기준) 간격의 경유점."""
