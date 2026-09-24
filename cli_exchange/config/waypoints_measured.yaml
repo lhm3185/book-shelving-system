@@ -1,0 +1,124 @@
+# **`home` 만 이 레벨 실측으로 고친 사본** — 이동준님 원본은 건드리지 않는다.
+# 파라미터로 가리켜 쓴다:
+#
+#     ros2 run shelving_navigation nav_manager --ros-args \
+#         --params-file <원래 navigation.yaml> \
+#         -p waypoints_file:=<저장소>/cli_exchange/config/waypoints_measured.yaml
+#
+# 왜 (2026-09-24):
+#   `RETURN_HOME` 이 `home` 으로 가는데 그 자리가 **레벨의 로봇 시작 자세와
+#   4.99 m 떨어져 있다.** 삽입 뒤 복귀하면 처음 자리로 안 돌아온다.
+#
+#     원본 home   (+0.0656, -4.7739)  yaw  0°
+#     레벨 시작   (+4.9850, -5.6071)  yaw 90°
+#
+# 값의 근거: 그 판 로그의 **팔 베이스 출발 자리 (+4.9850, -5.3071)** 실측에서
+#   루트 오프셋 0.30 m 를 빼서 유도했다 (yaw +90° 이므로 y 방향).
+#   **주석에 적힌 상수를 베낀 것이 아니다.** 레벨이 바뀌면 같은 줄로 다시 잰다.
+#
+# 고정 좌표 내비게이션 waypoint
+# isaac_map(isaac_map.py)이 component 단위로 읽는다. 구성 요소 pose 의
+# orientation 은 "요소의 앞면이 바라보는 방향"이다.
+#
+# behavior:
+#   - as_is          : 보정 없이 받은 좌표 그대로 이동 (home 등)
+#   - approach_front : 구성 요소 앞면을 정면으로 마주보게 보정 (반납구)
+#   - park_parallel  : 책장과 수평으로 주차하도록 보정 (서가)
+# parking_distance: 요소 앞면에서 로봇이 물러나 있을 거리(m). 없으면
+#                   nav_manager 의 parking_distance 파라미터를 쓴다.
+frame_id: map
+
+waypoints:
+  home:
+    # 2026-09-24 실측 유도 (팔 베이스 +4.9850,-5.3071 − 루트 오프셋 0.30 m, yaw +90°)
+    position:
+      x: 4.9850
+      y: -5.6071
+      z: 0.0
+    orientation:
+      x: 0.0
+      y: 0.0
+      z: 0.7071068
+      w: 0.7071068
+    behavior: as_is     # 원본과 같다 — 보정 없이 이 좌표 그대로 간다
+
+  return_station:
+    position:
+      x: -6.0
+      y: 0.0
+      z: 0.0
+    orientation:
+      x: 0.0
+      y: 0.0
+      z: 0.7071068
+      w: 0.7071068
+    behavior: approach_front
+    parking_distance: 1.0
+
+  shelf_01:
+    position:
+      x: 2.229003667831421
+      y: -3.0101053714752197
+      z: 0.0
+    orientation:
+      x: 0.0
+      y: 0.0
+      z: 0.7071068
+      w: 0.7071068
+    behavior: park_parallel
+    parking_distance: 1.2
+
+  shelf_02:
+    position:
+      x: 3.0
+      y: 2.0
+      z: 0.0
+    orientation:
+      x: 0.0
+      y: 0.0
+      z: 0.7071068
+      w: 0.7071068
+    behavior: park_parallel
+    parking_distance: 1.2
+
+# ------------------------------------------------------------------ 순회 경로
+# 2026-09-21 받은 좌표. **도서관 테두리를 따라 책장 바깥으로 크게 한 바퀴**를 돈다.
+# 시작 위치에서 출발해 wp1~wp4 를 지나 다시 시작 위치로 돌아온다.
+#
+# **1단계는 회전 없이 간다** — 모든 점의 yaw 가 0 이다. Ridgeback 은 전방향(홀로노믹)
+# 이라 몸통을 돌리지 않고 옆으로도 갈 수 있다. 로봇팔과 트레이가 같은 방향을 유지하므로
+# 돌아온 뒤 곧바로 파지할 수 있다. 회전은 이것이 되고 나서 붙인다.
+  patrol_start:
+    position: {x: 2.53495, y: -3.01885, z: 0.0}
+    orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
+    behavior: as_is
+
+  patrol_wp1:
+    position: {x: 4.0, y: -3.01885, z: 0.0}
+    orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
+    behavior: as_is
+
+  patrol_wp2:
+    position: {x: 4.0, y: 5.0, z: 0.0}
+    orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
+    behavior: as_is
+
+  patrol_wp3:
+    position: {x: -4.0, y: 5.0, z: 0.0}
+    orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
+    behavior: as_is
+
+  patrol_wp4:
+    position: {x: -4.0, y: -3.01885, z: 0.0}
+    orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
+    behavior: as_is
+
+# 순회 순서. 마지막에 출발점으로 돌아와 그 자리에서 파지·반납한다
+routes:
+  library_loop:
+    - patrol_start
+    - patrol_wp1
+    - patrol_wp2
+    - patrol_wp3
+    - patrol_wp4
+    - patrol_start
