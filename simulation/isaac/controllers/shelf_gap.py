@@ -197,3 +197,32 @@ def side_clearances(bb, boxes):
             if right is None or d < right:
                 right, right_name = d, name
     return left, left_name, right, right_name
+
+
+def classify_place(bb, shelf_floor_z, tray_floor_z, shelf_xy=None):
+    """책이 **어디 있는가** — `"서가"` / `"트레이"` / `"서가높이·서가밖"` / `"바닥/기타"`.
+
+    `bb` 는 월드 AABB `(x0, y0, z0, x1, y1, z1)`, `shelf_xy` 는 서가의
+    `(x0, x1, y0, y1)` (없으면 x·y 를 안 본다 — 옛 동작).
+
+    **높이만 보면 틀린다.** 2026-09-24 LIVE2 에서 한 사이클만 성공했는데 장면 조사가
+    "서가 2권" 이라고 했다. 그 판정이 `밑면 z 가 선반 판 높이 근처인가` 하나였기
+    때문이다 — 서가에서 한참 떨어진 자리에 있어도, 손에 들린 채 그 높이에 있어도
+    "서가" 로 센다.
+
+    시연 중에는 이 차이가 곧바로 해롭다. **책을 떨어뜨렸는데 "꽂았다" 로 보고되면
+    아무도 모른다.**
+    """
+    x = (float(bb[0]) + float(bb[3])) / 2.0
+    y = (float(bb[1]) + float(bb[4])) / 2.0
+    z0 = float(bb[2])
+    if abs(z0 - float(tray_floor_z)) < 0.06:
+        return "트레이"
+    if abs(z0 - float(shelf_floor_z)) >= 0.05:
+        return "바닥/기타"
+    if shelf_xy is None:
+        return "서가"                      # 서가 상자를 모르면 옛 판정 그대로
+    sx0, sx1, sy0, sy1 = (float(v) for v in shelf_xy)
+    inside = (min(sx0, sx1) <= x <= max(sx0, sx1)
+              and min(sy0, sy1) <= y <= max(sy0, sy1))
+    return "서가" if inside else "서가높이·서가밖"

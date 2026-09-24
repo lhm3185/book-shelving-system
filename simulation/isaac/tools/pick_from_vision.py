@@ -33,7 +33,51 @@ FRANKA_SLOTS = [-0.3497, -0.4297, -0.5097, -0.2697]
 #: 멈췄다 — 실제 반두께가 13.7 mm 라는 뜻이고 두께는 27.4 mm 다. 규격보다
 #: 7.8 mm 얇다. 그래서 파지 지령(13.6 mm)이 책에 닿지도 않아 조임량이 0.1 mm 다.
 #: 다섯 권 실측이 들어오면 여기와 config/book_profiles.yaml 을 함께 고친다.
-BOOK = {'thickness': 0.0353, 'height': 0.2374, 'width': 0.1631}
+def _load_book(name='default'):
+    """책 치수를 **조작 노드가 읽는 바로 그 파일**에서 읽는다.
+
+    여기 상수로 적어 두면 갈라진다. 실제로 갈라져 있었다 — 2026-09-24 에 yaml 은
+    실측으로 갱신됐는데(`width` 0.1631 → 0.1517) 이 파일은 v3 레벨 값에 멈춰
+    있었다. 그리고 **410 높이 검사는 클라이언트가 보낸 치수를 쓰므로** 그 검사가
+    옛 폭으로 돌았다. 둘 중 어느 것이 진짜인지 모르는 채로 두 값이 돌았다.
+
+    설치본(`share/`)을 먼저 본다 — 노드가 그것을 읽기 때문이다. 저장소 파일과
+    다르면 **말한다**: 빌드를 안 한 것이고, 파일값과 런타임값이 다르다는 뜻이다.
+    """
+    import yaml
+    paths = []
+    try:
+        from ament_index_python.packages import get_package_share_directory
+        paths.append(os.path.join(get_package_share_directory('shelving_manipulation'),
+                                  'config', 'book_profiles.yaml'))
+    except Exception:      # noqa: BLE001 - 설치본이 없으면 저장소 것으로 간다
+        pass
+    here = os.path.dirname(os.path.abspath(__file__))
+    repo = os.path.normpath(os.path.join(here, '..', '..', '..', 'ros2_ws', 'src',
+                                         'shelving_manipulation', 'config',
+                                         'book_profiles.yaml'))
+    paths.append(repo)
+    loaded = []
+    for path in paths:
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding='utf-8') as f:
+            p = yaml.safe_load(f)['profiles'][name]
+        loaded.append((path, {k: float(p[k]) for k in ('thickness', 'height', 'width')}))
+    if not loaded:
+        raise SystemExit(f'book_profiles.yaml 을 못 찾았다: {paths}')
+    used_path, dims = loaded[0]
+    print(f'책 치수 [{name}] {used_path}')
+    print(f'  두께 {dims["thickness"]*1000:.1f} · 높이 {dims["height"]*1000:.1f} · '
+          f'폭 {dims["width"]*1000:.1f} mm')
+    for path, other in loaded[1:]:
+        if other != dims:
+            print(f'  **주의: {path} 의 값이 다르다** {other} — 빌드를 안 했다. '
+                  f'노드는 설치본을 읽으므로 **파일값과 런타임값이 다르다**')
+    return dims
+
+
+BOOK = _load_book()
 
 #: **짝 규칙의 기준점.** 베이스를 월드 y 로 Δ 옮기면 팔 기준 목표를 −Δ 옮겨야
 #: 월드 삽입 지점이 고정된다. 이 두 값이 서로 다른 파일(full_cycle 의 PICK_SPOT,
@@ -83,7 +127,9 @@ def reclaim(node, handle, why, wait_s=10.0):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--goal-x', type=float, default=float(os.environ.get('SIM_GOAL_X', FRANKA_SLOTS[0])), help='꽂을 칸 x (팔 기준)')
+    ap.add_argument('--goal-x', type=float,
+                    default=float(os.environ.get('SIM_GOAL_X', FRANKA_SLOTS[0])),
+                    help='꽂을 칸 x (팔 기준)')
     ap.add_argument('--goal-y', type=float, default=_goal_y_default(),
                     help='꽂을 칸 y (팔 기준). 비우면 SIM_PICK_Y 에서 짝 규칙으로 만든다')
     ap.add_argument('--goal-z', type=float, default=float(os.environ.get('SIM_GOAL_Z', 0.3399)))
@@ -235,9 +281,9 @@ def main():
     goal.grasp.header = msg.header
     goal.grasp.top_center = p
     goal.grasp.thickness = BOOK['thickness']     # ← 상수. 비전이 잰 값이 아니다
-    goal.grasp.width = BOOK['width']             # ← 상수
+    goal.grasp.width = BOOK['width']             # ← yaml 프로파일
     goal.grasp.confidence = 1.0
-    print(f"  ※ 치수는 관측이 아니라 규격이다 (두께 {BOOK['thickness']*1000:.1f} · "
+    print(f"  ※ 치수는 관측이 아니라 **yaml 프로파일**이다 (두께 {BOOK['thickness']*1000:.1f} · "
           f"폭 {BOOK['width']*1000:.1f} mm). 실물과 다르면 파지 지령과 검사가 함께 틀린다")
 
     print('보냄 — 진행 상황:')

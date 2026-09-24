@@ -11,7 +11,7 @@ import sys
 
 import numpy as np
 
-from shelf_gap import side_clearances
+from shelf_gap import classify_place, side_clearances
 from pxr import Gf, Usd, UsdGeom, UsdPhysics
 from isaacsim.core.api import World
 from isaacsim.core.prims import SingleArticulation, SingleXFormPrim
@@ -3203,9 +3203,17 @@ class BookScene:
             size = bb[3:] - bb[:3]
             T, Lb, W = self.dims.get(b, (self.T, self.L, self.W))
             z0 = float(bb[2])
-            where = ("서가" if abs(z0 - self.shelf_floor_z) < 0.05
-                     else "트레이" if abs(z0 - self.tray_floor_z) < 0.06
-                     else "바닥/기타")
+            # **높이만 보면 틀린다.** 서가에서 한참 떨어진 자리에 있어도, 손에 들린
+            # 채 그 높이에 있어도 "서가" 로 셌다 (2026-09-24 LIVE2: 한 사이클만
+            # 성공했는데 "서가 2권" 이 나왔다). 시연 중에 이 차이는 곧바로 해롭다 —
+            # **책을 떨어뜨렸는데 "꽂았다" 로 보고되면 아무도 모른다.**
+            _sx = None
+            try:
+                _bb = np.asarray(self.shelf_aabb_world, float)
+                _sx = (_bb[0], _bb[3], _bb[1], _bb[4])
+            except Exception:      # noqa: BLE001 - 서가 상자를 모르면 옛 판정 그대로
+                _sx = None
+            where = classify_place(bb, self.shelf_floor_z, self.tray_floor_z, _sx)
             # **자리마다 '바른 자세'가 다르다.**
             #   트레이: 책등이 위 → **깊이(W)** 가 수직
             #   서가  : 세워 꽂음 → **높이(L)** 가 수직
@@ -3214,9 +3222,12 @@ class BookScene:
             ok_pose = abs(size[2] - want) < 0.025
             out.append({"book": b.rsplit("/", 1)[-1], "바른자세": bool(ok_pose),
                         "위치": where, "밑면z": round(z0, 4),
+                        "중심xy": [round(float((bb[0] + bb[3]) / 2), 3),
+                                   round(float((bb[1] + bb[4]) / 2), 3)],
                         "기대수직": round(float(want), 3),
                         "크기": [round(float(v), 3) for v in size]})
-        bad = [o for o in out if not o["바른자세"] or o["위치"] == "바닥/기타"]
+        bad = [o for o in out if not o["바른자세"]
+               or o["위치"] in ("바닥/기타", "서가높이·서가밖")]
         return out, bad
 
 

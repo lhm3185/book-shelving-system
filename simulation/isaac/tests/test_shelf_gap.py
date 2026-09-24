@@ -218,3 +218,51 @@ def test_the_tight_run_would_have_been_visible():
     assert lo * 1000 == pytest.approx(4.9, abs=0.1)
     assert ro * 1000 == pytest.approx(4.9, abs=0.1)
     assert min(lo, ro) * 1000 < 5.0        # ← 임계 아래인데 겹침은 0 이다
+
+
+# ----------------------------- 장면 조사의 자리 판정 (2026-09-24 LIVE2)
+#
+#   한 사이클만 성공했는데 조사가 "서가 2권" 이라고 했다. 판정이 **밑면 z 하나**
+#   였기 때문이다 — 서가에서 한참 떨어져 있어도 그 높이면 "서가" 로 센다.
+
+SHELF_Z, TRAY_Z = 0.4976, 0.3785
+SHELF_XY = (1.8692, 3.2738, -2.57, -2.27)
+
+
+def _at(x, y, z):
+    return (x - 0.018, y - 0.076, z, x + 0.018, y + 0.076, z + 0.227)
+
+
+def test_a_book_in_the_shelf_is_the_shelf():
+    from shelf_gap import classify_place
+    assert classify_place(_at(2.50, -2.42, SHELF_Z), SHELF_Z, TRAY_Z, SHELF_XY) == "서가"
+
+
+def test_a_book_in_the_tray_is_the_tray():
+    from shelf_gap import classify_place
+    assert classify_place(_at(2.10, -3.05, TRAY_Z), SHELF_Z, TRAY_Z, SHELF_XY) == "트레이"
+
+
+def test_shelf_height_but_far_away_is_not_the_shelf():
+    """**이게 LIVE2 를 설명하는 판정이다.** 높이만 맞고 자리는 딴 데다."""
+    from shelf_gap import classify_place
+    held = _at(2.50, -3.00, SHELF_Z)          # 서가 앞 58 cm — 손에 들린 높이
+    assert classify_place(held, SHELF_Z, TRAY_Z, SHELF_XY) == "서가높이·서가밖"
+
+
+def test_without_the_shelf_box_the_old_answer_comes_back():
+    """서가 상자를 모르면 옛 판정 그대로다 — **없는 정보로 단정하지 않는다.**"""
+    from shelf_gap import classify_place
+    held = _at(2.50, -3.00, SHELF_Z)
+    assert classify_place(held, SHELF_Z, TRAY_Z, None) == "서가"
+
+
+def test_the_floor_is_neither():
+    from shelf_gap import classify_place
+    assert classify_place(_at(2.5, -3.0, 0.01), SHELF_Z, TRAY_Z, SHELF_XY) == "바닥/기타"
+
+
+def test_the_tray_wins_when_heights_are_close():
+    """트레이를 먼저 본다 — 두 높이가 가까우면 트레이 쪽이 좁은 조건이다."""
+    from shelf_gap import classify_place
+    assert classify_place(_at(2.1, -3.05, TRAY_Z + 0.01), SHELF_Z, TRAY_Z, SHELF_XY) == "트레이"
