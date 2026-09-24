@@ -315,13 +315,13 @@ class ManipulationExecutor:
         # **훑을 판을 밖에서 고를 수 있게 한다** (`SIM_SWEEP_BOARDS="1.042"`, 진단용).
         # 기본은 **두 판 다** 훑는다 — 그게 비전팀이 구현한 동작이다.
         #
-        # ~~2026-09-24: 아래 판에서만 404 가 난다 (경유점 8/9 IK 실패)~~
-        # **그 근거는 틀렸다 (9/24 저녁 확인).** `8/9` 는 스윕의 숫자가 아니다 —
-        # 스윕의 정지점은 5개(`points` 기본 5)이고 조작 노드는 `points` 를 안 실어
-        # 보낸다. 9 는 자세 표 스캔(`plan_scan`)의 숫자다. **안 풀리던 쪽으로
-        # 갈아탄 것이다.** 스윕을 직접 돌려 보면 앞면 0.36~0.75 m, 시작 자세
-        # q_home·q_stow 어디서든 **두 판 다 5/5** 로 풀린다
-        # (`tests/test_scan_sweep_boards.py`).
+        # 2026-09-24 SW1 실측: 위 판 5/5(여유 0.210), **아래 판 3/5**(여유 0.100).
+        # 실패 지점은 `x=+0.17` 의 경유점 8/9, 그 자리 한계 여유가 **0.059 rad(3.4°)**.
+        #   — `정지점 5`(멈춰서 찍는 곳)와 `경유점 9`(그 사이 보간점)는 **층위가 다르다.**
+        #     둘 다 스윕의 숫자다. 내가 한때 `8/9` 를 자세 표(`plan_scan`)의 것으로
+        #     잘못 읽고 "안 풀리던 쪽으로 갈아탔다" 고 적었다 — **그 정정은 취소한다.**
+        # 반쪽 계획을 그대로 실행해서 404 가 났다. 이제 `sweep_retry` 가 방향을
+        # 뒤집고 시드를 바꿔 가며 **다 채워지는 계획만** 받는다.
         # (조작 노드는 `boards` 를 안 실어 보낸다 — 그래서 여기 기본값이 쓰인다)
         _env_boards = os.environ.get("SIM_SWEEP_BOARDS", "").strip()
         _default = ([float(b) for b in _env_boards.replace(" ", "").split(",") if b]
@@ -341,15 +341,30 @@ class ManipulationExecutor:
             face = min(fronts)
             q_now = np.asarray(self.robot.get_joint_positions()[self.scene.idx_arm], float)
             steps, holds, q = [], 0, q_now
+            from sweep_retry import attempts as _attempts, plan_full as _plan_full
+            _home = np.asarray(getattr(self.scene, "q_home", None), float) \
+                if getattr(self.scene, "q_home", None) is not None else None
             for bz in boards:
                 z_arm = bz - float(self.scene.l0p[2])
-                plan = ak.plan_board_sweep(q, face, z_arm, x_from, x_to, points)
+
+                def _fn(seed, a, b, _z=z_arm):
+                    return ak.plan_board_sweep(seed, face, _z, a, b, points)
+
+                # **반쪽 계획을 실행하지 않는다.** 2026-09-24 SW1 에서 아래 판이
+                # 3/5 로만 풀렸는데 그대로 갔고, 못 간 구간에서 404 시간 초과가 났다.
+                # 방향을 뒤집어 보고, 그래도 안 되면 앞 판의 IK 가지를 버리고 홈에서
+                # 다시 푼다. **`points` 를 줄이거나 문턱을 낮추지는 않는다.**
+                plan, how, tried = _plan_full(_fn, _attempts(q, _home, x_from, x_to), points)
+                if plan is None:
+                    self.say(f"[스윕] 판 {bz:.3f} (팔기준 z {z_arm:.3f}, 앞면 {face:.3f}) "
+                             f"**다 해 봤지만 {points}개를 못 채웠다**: {' · '.join(tried)}")
+                    continue
                 st = ak.path_stats(plan.qs) if plan.qs else {}
                 self.say(f"[스윕] 판 {bz:.3f} (팔기준 z {z_arm:.3f}, 앞면 {face:.3f}) 정지점 {len(plan.hold_idx)}/{points} "
                          f"여유 {plan.min_margin:.3f} rad 최대변화 {st.get('max_step_rad', 0):.2f} 길이 {st.get('length_rad', 0):.2f}"
+                         + (f" [{how}]" if how != "이어가기" else "")
+                         + (f" (해 본 것: {' · '.join(tried)})" if len(tried) > 1 else "")
                          + (f" — {plan.reason}" if plan.reason else ""))
-                if not plan.hold_idx:
-                    continue
                 prev = 0
                 for k, hi in enumerate(plan.hold_idx):
                     seg = plan.qs[prev:hi + 1]
@@ -361,6 +376,11 @@ class ManipulationExecutor:
                 q = plan.qs[plan.hold_idx[-1]]
             if not steps:
                 raise RuntimeError("스윕 경로가 하나도 안 풀렸다")
+            if len(steps) < 2 * points * len(boards):
+                # **다 못 훑었으면 말한다.** 스캔이 서가의 일부를 못 본 채로
+                # "완료" 되면, 비전은 못 본 자리의 빈칸을 영영 못 찾는다.
+                self.say(f"[스윕] **주의: 판 {len(boards)}개 중 일부만 훑는다** — "
+                         f"정지점 {holds}개 (다 풀렸으면 {points * len(boards)}개)")
             # 홈 복귀는 천천히(0.25 rad/s) 가고, **홈에 정말 도착할 때까지** 기다린 뒤 끝낸다. JointPath 는 지령을 다
             # 보내면 끝나는데 실제 팔은 0.43 rad 뒤처져 있었고(2026-09-23 18:55 진단), 그 상태에서 스캔이 '완료' 되어
             # 책 관측(비전)이 시작돼 카메라가 바닥을 보고 있었다 → "책 좌표 없음".
