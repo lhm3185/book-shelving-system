@@ -367,3 +367,57 @@ def test_clearance_is_counted_on_both_sides():
     exact = [(0.0, T)]
     assert choose_snap_gap(exact, 0.018, T, min_clearance=0.005)[0] is None
     assert choose_snap_gap(exact, 0.018, T, min_clearance=0.0)[0] is not None
+
+
+# ------------- 프레임마다 흔들리는 책 관측 (2026-09-24 실측)
+#
+#   한 판 안에서 프레임마다 이렇게 나왔다:
+#     x -0.344  y -0.025    ← 맞다
+#     x -0.294  y -0.026    ← **같은 책인데 x 가 50 mm 튄다**
+#     x -0.293  y +0.066    ← y 가 다르다 = **다른 책**
+#   노드가 **마지막 프레임**을 썼고, 셋째로 집으러 갔다가 41 mm 어긋나 411.
+
+FRAMES = [(-0.344, -0.025, 0.209), (-0.294, -0.026, 0.208), (-0.293, +0.066, 0.205)]
+
+
+def test_it_does_not_just_take_the_last_frame():
+    """**마지막 프레임을 쓰지 않는다.** 그게 41 mm 를 만들었다."""
+    from shelving_manipulation.book_placer import steady_book
+    x, y, _z, why = steady_book(FRAMES)
+    assert (x, y) != (-0.293, 0.066)
+    assert y == pytest.approx(-0.0255, abs=1e-3)      # 두 개짜리 묶음 쪽
+    assert '책 2권' in why
+
+
+def test_different_books_are_not_averaged_together():
+    """**다른 책을 섞어 평균내면 둘 사이 허공이 나온다.** y 로 가른다."""
+    from shelving_manipulation.book_placer import steady_book
+    _x, y, _z, _why = steady_book(FRAMES)
+    assert not (-0.025 > y > 0.066 or -0.025 < y < 0.066) or abs(y + 0.0255) < 1e-3
+
+
+def test_the_median_survives_one_wild_frame():
+    """한 프레임이 크게 튀어도 안 끌려간다 — 평균이 아니라 중앙값이다."""
+    from shelving_manipulation.book_placer import steady_book
+    pts = [(-0.334, 0.0, 0.2), (-0.336, 0.001, 0.2), (+0.500, 0.002, 0.2)]
+    x, _y, _z, _why = steady_book(pts)
+    assert x == pytest.approx(-0.334, abs=1e-6)
+
+
+def test_a_single_observation_is_refused():
+    """**한 프레임으로는 튄 것인지 알 수 없다.** 모르면서 집으러 가지 않는다."""
+    from shelving_manipulation.book_placer import steady_book
+    x, _y, _z, why = steady_book([(-0.294, 0.0, 0.2)])
+    assert x is None and '알 수 없다' in why
+
+
+def test_no_observation_says_so():
+    from shelving_manipulation.book_placer import steady_book
+    assert steady_book([])[0] is None
+
+
+def test_the_reason_carries_the_numbers():
+    """**왜 그 값인지가 남아야** 다음에 판정할 수 있다."""
+    from shelving_manipulation.book_placer import steady_book
+    _x, _y, _z, why = steady_book(FRAMES)
+    assert '관측 3개' in why and 'mm' in why

@@ -455,3 +455,60 @@ class MockSimExecutor:
             return self.done
         phase = SIM_PHASE_ORDER[index]
         return dict(base, status=SIM_RUNNING, phase=phase)
+
+
+def steady_book(points, y_group_m=0.04, min_count=2):
+    """
+    여러 프레임의 책 관측에서 **한 권을 골라 안정된 좌표**를 낸다.
+
+    `points` 는 `(x, y, z)` 목록(오래된 것 → 새 것). `(x, y, z, 고른 근거)` 를
+    돌려주고, 쓸 만한 것이 없으면 `(None, None, None, 사유)`.
+
+    왜: 조작 노드가 **마지막 프레임 하나**를 썼다. 2026-09-24 실측에서 한 판 안에
+    프레임마다 이렇게 나왔다:
+
+        x -0.344  y -0.025   conf 0.86     ← 맞다
+        x -0.294  y -0.026   conf 0.93     ← **같은 책인데 x 가 50 mm 튄다**
+        x -0.293  y +0.066   conf 0.77     ← y 가 다르다 = **다른 책**
+
+    마지막이 셋째였고, 그 좌표로 집으러 갔다가 실제 책과 41 mm 어긋나 411 이 났다.
+    **첫 프레임을 썼으면 통과했다.** 어느 프레임이 마지막이냐가 결과를 정하고 있었다.
+
+    그래서 두 가지를 한다:
+
+    1. **y 로 묶는다.** 트레이 칸 간격이 77~95 mm 인데 x 흔들림은 50 mm 다. y 가
+       가까운 것끼리는 같은 책이고, 다르면 다른 책이다. 다른 책을 섞어 평균내면
+       **둘 사이 허공**이 나온다.
+    2. 가장 많이 본 묶음에서 **축마다 중앙값**을 쓴다. 평균이 아니라 중앙값이다 —
+       한 프레임이 크게 튀어도 끌려가지 않는다.
+
+    **관측이 적으면 거절한다.** 한 프레임으로는 튄 것인지 아닌지 알 수 없고,
+    모르면서 집으러 가는 것이 오늘 내내 문제였다.
+    """
+    pts = [(float(a), float(b), float(c)) for a, b, c in points]
+    if not pts:
+        return None, None, None, '관측이 없다'
+    groups = []
+    for p in pts:
+        for g in groups:
+            if abs(p[1] - g[0][1]) <= y_group_m:
+                g.append(p)
+                break
+        else:
+            groups.append([p])
+    best = max(groups, key=len)
+    if len(best) < min_count:
+        return None, None, None, (
+            f'관측 {len(pts)}개가 책 {len(groups)}권에 흩어져 있다 — '
+            f'가장 많이 본 것도 {len(best)}개뿐이라 (필요 {min_count}) 어느 것이 '
+            f'튄 값인지 알 수 없다')
+
+    def mid(i):
+        vals = sorted(p[i] for p in best)
+        n = len(vals)
+        return vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2.0
+
+    spread = max(p[0] for p in best) - min(p[0] for p in best)
+    why = (f'관측 {len(pts)}개 · 책 {len(groups)}권 · 고른 책 {len(best)}개 '
+           f'(x 흔들림 {spread * 1000:.0f} mm) → 축마다 중앙값')
+    return mid(0), mid(1), mid(2), why

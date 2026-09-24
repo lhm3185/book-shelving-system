@@ -36,7 +36,7 @@ import yaml
 from .book_placer import (cancel_command, choose_snap_gap, COMMAND_ROTATE_BASE, decode,
                           encode, error_name, internal_failure, MockSimExecutor, Outcome,
                           PlaceTracker, publish_feedback_safely, SIM_CANCELLED, SIM_FAILED,
-                          SIM_SUCCEEDED, stale_gap_reason)
+                          SIM_SUCCEEDED, stale_gap_reason, steady_book)
 from .grasp_planner import (build_place_command, DEFAULT_LIMITS, GraspGoal, parse_profile,
                             parse_tray, PlaceGoal, resolve_book, select_tray_slot, SlotGoal,
                             snap_grasp_to_slot, validate_goal, validate_grasp)
@@ -637,8 +637,16 @@ class ManipulationNode(Node):
                           if observed_at >= started
                           and msg.header.frame_id == self.limits['frame_id']]
             if recent:
-                msg = recent[-1]
-                book_top = (float(msg.point.x), float(msg.point.y), float(msg.point.z))
+                # **마지막 프레임 하나를 쓰지 않는다.** 2026-09-24 실측: 한 판 안에서
+                # 같은 책의 x 가 50 mm 튀고, 프레임마다 **다른 책**이 뽑히기도 한다.
+                # 어느 프레임이 마지막이냐가 결과를 정하고 있었다 (41 mm 어긋나 411).
+                _bx, _by, _bz, _why = steady_book(
+                    [(m.point.x, m.point.y, m.point.z) for m in recent])
+                if _bx is None:
+                    self.get_logger().warning(f'책 관측이 안 정해진다: {_why} — 더 본다')
+                    continue
+                self.get_logger().info(f'책 좌표 정함 ({_bx:+.4f}, {_by:+.4f}, {_bz:+.4f}) — {_why}')
+                book_top = (float(_bx), float(_by), float(_bz))
                 if not self._inside(book_top, self.vision_grasp_min,
                                     self.vision_grasp_max):
                     return None, 410, \
