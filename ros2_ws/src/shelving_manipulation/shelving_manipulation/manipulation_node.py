@@ -33,10 +33,10 @@ from shelving_interfaces.msg import RobotStatus
 from std_msgs.msg import Bool, String
 import yaml
 
-from .book_placer import (cancel_command, COMMAND_ROTATE_BASE, decode, encode, error_name,
-                          internal_failure, MockSimExecutor, Outcome, PlaceTracker,
-                          publish_feedback_safely, SIM_CANCELLED, SIM_FAILED, SIM_SUCCEEDED,
-                          stale_gap_reason)
+from .book_placer import (cancel_command, choose_snap_gap, COMMAND_ROTATE_BASE, decode,
+                          encode, error_name, internal_failure, MockSimExecutor, Outcome,
+                          PlaceTracker, publish_feedback_safely, SIM_CANCELLED, SIM_FAILED,
+                          SIM_SUCCEEDED, stale_gap_reason)
 from .grasp_planner import (build_place_command, DEFAULT_LIMITS, GraspGoal, parse_profile,
                             parse_tray, PlaceGoal, resolve_book, select_tray_slot, SlotGoal,
                             snap_grasp_to_slot, validate_goal, validate_grasp)
@@ -496,32 +496,27 @@ class ManipulationNode(Node):
                 self._slot_reject = stale
                 self.get_logger().warning(f'**빈칸 거절** {stale}')
                 return None
-            cands = [((lo + hi) / 2.0, hi - lo) for lo, hi in self._shelf_gaps]
-            gx, gw = min(cands, key=lambda c: abs(c[0] - x))
-            # **빈칸이 하나뿐이면 거리를 안 본다.** 한계를 두는 이유는 "어느 칸을 본
-            # 것인지 모르겠다" 인데, 갈 곳이 하나면 그 물음이 성립하지 않는다. 그때
-            # 검출이 멀다는 것은 **검출이 틀렸다**는 뜻이지 다른 칸이라는 뜻이 아니다.
-            # (2026-09-24: 이 레벨의 그 판에는 쓸 수 있는 빈칸이 하나뿐이다)
-            if len(cands) == 1 or abs(gx - x) <= self.slot_x_snap_max_m:
-                self.get_logger().info(
-                    f'빈칸 x: 검출 {x:+.4f} → 실측 빈칸 중심 {gx:+.4f} '
-                    f'({(gx - x) * 1000:+.1f} mm, 빈칸 폭 {gw * 1000:.1f} mm, '
-                    f'실측 빈칸 {len(cands)}개'
-                    f'{" — 빈칸이 하나뿐이라 거리를 안 본다" if len(cands) == 1 else ""})'
-                    f' [slot_x_snap_to_gap]')
-                x = gx
-            else:
-                # **못 믿겠다고 판단했으면 그 값으로 꽂지 않는다.**
-                # 2026-09-24 에 여기서 경고만 하고 그대로 진행했더니, 손대지 않은 그
-                # 나쁜 검출로 남의 자리에 **책 두께 통째로(36.4 mm)** 박았다.
-                # 거절하면 410 으로 **안전하게** 실패한다 — 오늘 내내 좋다고 해 온 형태다.
-                self._slot_reject = (
-                    f'빈칸 x 검출 {x:+.4f} 가 실측 빈칸 {len(cands)}개 중 가장 가까운 '
-                    f'{gx:+.4f} 에서 {abs(gx - x) * 1000:.0f} mm 떨어져 있다 '
-                    f'(한계 {self.slot_x_snap_max_m * 1000:.0f} mm) — 어느 칸을 본 것인지 '
-                    f'알 수 없어 거절한다')
-                self.get_logger().warning(f'**빈칸 거절** {self._slot_reject}')
+            # **들어가는 빈칸만 고른다.** 폭을 재 놓고 안 쓰던 자리다 —
+            # 2026-09-24 LIVE2 에서 첫 권을 꽂자 59.9 mm 빈칸이 12.5 / 11.0 두
+            # 조각이 됐는데, 다음 판이 **11 mm 조각의 중심이 검출에 제일 가깝다**는
+            # 이유로 그리로 끌어와 36.4 mm 책을 꽂았다 (22.5 mm 겹침, 409).
+            gx, gw, why = choose_snap_gap(
+                self._shelf_gaps, x, self.profile.thickness,
+                min_clearance=float(self.limits['side_clearance']),
+                max_move=self.slot_x_snap_max_m)
+            if why is not None:
+                # **못 믿겠다고 판단했으면 그 값으로 꽂지 않는다.** 경고만 하고
+                # 진행했다가 남의 자리에 책 두께 통째로 박은 적이 있다.
+                self._slot_reject = why
+                self.get_logger().warning(f'**빈칸 거절** {why}')
                 return None
+            self.get_logger().info(
+                f'빈칸 x: 검출 {x:+.4f} → 실측 빈칸 중심 {gx:+.4f} '
+                f'({(gx - x) * 1000:+.1f} mm, 빈칸 폭 {gw * 1000:.1f} mm, '
+                f'책 두께 {self.profile.thickness * 1000:.1f} mm, '
+                f'남는 여유 한쪽 {(gw - self.profile.thickness) / 2 * 1000:.1f} mm, '
+                f'실측 빈칸 {len(self._shelf_gaps)}개) [slot_x_snap_to_gap]')
+            x = gx
         # 스캔과 꽂기가 같은 자리(앞면 0.444 m)라 관측 깊이를 그대로 쓴다: 틈 앞 + 책폭/2 + inset = 꽂힌 책 중심.
         # (전에 스캔만 0.75 m 물러났을 땐 그 차이만큼 차체를 옮겼다 — 이제 scan/place standoff 가 같다.)
         advance = float(self.scan_standoff_m) - float(self.place_standoff_m)

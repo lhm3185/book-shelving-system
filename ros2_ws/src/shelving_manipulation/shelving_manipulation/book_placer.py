@@ -220,6 +220,49 @@ def internal_failure(exc, traceback_text=''):
     return INTERNAL_ERROR, 'INTERNAL', msg
 
 
+def choose_snap_gap(gaps, want_x, thickness, min_clearance=0.005, max_move=None):
+    """
+    검출된 x 를 **들어가는 실측 빈칸** 으로 끌어온다. `(중심, 폭, 사유)`.
+
+    고르면 `(중심, 폭, None)`, 못 고르면 `(None, None, 사유)`.
+
+    `gaps` 는 팔 기준 x 구간 `[(lo, hi), ...]`.
+
+    **폭을 재 놓고 안 썼다.** 2026-09-24 LIVE2 에서 그 탓에 겹쳤다: 첫 권을 꽂자
+    폭 59.9 mm 짜리 빈칸이 12.5 / 11.0 mm 두 조각으로 쪼개졌는데, 다음 판이 그중
+    **11 mm 짜리 조각의 중심**이 검출에 제일 가깝다는 이유로 그리로 끌어와
+    36.4 mm 책을 꽂았다 — 22.5 mm 겹쳤다(409).
+
+    "가장 가까운 빈칸" 이 아니라 **"들어가는 것 중 가장 가까운 빈칸"** 이다.
+    들어가는 게 하나도 없으면 **거절한다.** 자리가 없는데 꽂을 데를 찾아내는 것은
+    도움이 아니다.
+
+    `min_clearance` 는 **한쪽** 여유다. 폭이 `두께 + 2 × 여유` 는 돼야 한다.
+    """
+    fits, tight = [], []
+    need = float(thickness) + 2.0 * float(min_clearance)
+    for lo, hi in gaps:
+        lo, hi = float(lo), float(hi)
+        w = hi - lo
+        (fits if w >= need else tight).append(((lo + hi) / 2.0, w))
+    if not fits:
+        widest = max((w for _c, w in tight), default=0.0)
+        return None, None, (
+            f'들어가는 빈칸이 없다 — 실측 빈칸 {len(gaps)}개 중 가장 넓은 것이 '
+            f'{widest * 1000:.1f} mm 인데 책 두께 {float(thickness) * 1000:.1f} mm 에 '
+            f'양쪽 여유 {float(min_clearance) * 1000:.1f} mm 씩이면 '
+            f'{need * 1000:.1f} mm 가 필요하다')
+    gx, gw = min(fits, key=lambda c: abs(c[0] - float(want_x)))
+    # **고를 것이 하나면 거리를 안 본다** — "어느 칸을 본 것인지 모르겠다" 가
+    # 성립하지 않는다. 그때 검출이 멀다는 것은 검출이 틀렸다는 뜻이다.
+    if max_move is not None and len(fits) > 1 and abs(gx - float(want_x)) > float(max_move):
+        return None, None, (
+            f'빈칸 x 검출 {float(want_x):+.4f} 가 들어가는 빈칸 {len(fits)}개 중 가장 가까운 '
+            f'{gx:+.4f} 에서 {abs(gx - float(want_x)) * 1000:.0f} mm 떨어져 있다 '
+            f'(한계 {float(max_move) * 1000:.0f} mm) — 어느 칸을 본 것인지 알 수 없어 거절한다')
+    return gx, gw, None
+
+
 def stale_gap_reason(measured_at, place_count):
     """
     빈칸 실측이 **그 뒤의 배치 때문에 낡았는가.** 낡았으면 거절 사유, 아니면 `None`.

@@ -1,5 +1,7 @@
 """PlaceTracker·MockSimExecutor 단위시험 (ROS 없이)."""
 
+import pytest
+
 from shelving_manipulation.book_placer import (
     cancel_command, decode, encode, ERRORS, MockSimExecutor, PHASES, PlaceTracker, progress_of,
     SIM_PHASE_ORDER, SIM_PHASE_TO_PHASE)
@@ -305,3 +307,63 @@ def test_the_new_code_is_retryable():
     """413 은 재시도 가능이어야 한다 — 노드가 다시 받을 수 있으니까."""
     from shelving_manipulation.book_placer import ERRORS
     assert ERRORS[413].retry is True
+
+
+# ------------------- 들어가는 빈칸만 고른다 (2026-09-24 LIVE2 cycle2)
+#
+#   폭을 재 놓고 안 썼다. 첫 권을 꽂자 59.9 mm 빈칸이 12.5 / 11.0 두 조각이 됐는데,
+#   다음 판이 **11 mm 조각의 중심이 검출에 제일 가깝다**는 이유로 그리로 끌어와
+#   36.4 mm 책을 꽂았다 — 22.5 mm 겹쳤다(409).
+
+T = 0.0364                      # 실측 꽂힌 가로 폭
+FULL = [(-0.1065, -0.0466)]     # 폭 59.9 mm — 첫 권 꽂기 전
+SPLIT = [(-0.1065, -0.0940), (-0.0583, -0.0473)]   # 12.5 · 11.0 mm — 꽂은 뒤
+
+
+def test_the_full_gap_is_chosen_before_anything_is_placed():
+    from shelving_manipulation.book_placer import choose_snap_gap
+    gx, gw, why = choose_snap_gap(FULL, -0.0651, T)
+    assert why is None
+    assert gx == pytest.approx(-0.07655, abs=1e-4)
+    assert gw * 1000 == pytest.approx(59.9, abs=0.1)
+
+
+def test_the_leftover_slivers_are_refused():
+    """**이것이 LIVE2 cycle2 다.** 두 조각 다 책보다 좁으면 꽂을 데가 없다."""
+    from shelving_manipulation.book_placer import choose_snap_gap
+    gx, gw, why = choose_snap_gap(SPLIT, -0.0651, T)
+    assert gx is None and gw is None
+    assert '들어가는 빈칸이 없다' in why
+    assert '12.5 mm' in why          # 가장 넓은 조각을 사유에 싣는다
+    assert '36.4 mm' in why          # 책 두께도 — 왜 안 되는지가 한 줄로 보인다
+
+
+def test_a_fitting_gap_further_away_beats_a_sliver_nearby():
+    """**가까운 조각보다 들어가는 칸이다.** 거리는 그 다음 기준이다."""
+    from shelving_manipulation.book_placer import choose_snap_gap
+    gaps = SPLIT + [(0.0200, 0.0800)]          # 60 mm 짜리가 멀리 하나
+    gx, _gw, why = choose_snap_gap(gaps, -0.0651, T)
+    assert why is None and gx == pytest.approx(0.05, abs=1e-6)
+
+
+def test_a_far_fitting_gap_is_refused_when_a_limit_is_given():
+    """멀면 손대지 않는다 — 어느 칸을 본 명령인지 알 수 없다."""
+    from shelving_manipulation.book_placer import choose_snap_gap
+    gaps = [(0.0200, 0.0800), (0.2000, 0.2600)]
+    gx, _gw, why = choose_snap_gap(gaps, -0.0651, T, max_move=0.05)
+    assert gx is None and '떨어져 있다' in why
+
+
+def test_a_single_fitting_gap_ignores_the_distance_limit():
+    """고를 것이 하나면 '어느 칸인지 모르겠다' 가 성립하지 않는다."""
+    from shelving_manipulation.book_placer import choose_snap_gap
+    gx, _gw, why = choose_snap_gap([(0.0200, 0.0800)], -0.0651, T, max_move=0.05)
+    assert why is None and gx == pytest.approx(0.05, abs=1e-6)
+
+
+def test_clearance_is_counted_on_both_sides():
+    """폭이 두께와 같으면 **여유가 0 이다.** 그건 들어가는 게 아니다."""
+    from shelving_manipulation.book_placer import choose_snap_gap
+    exact = [(0.0, T)]
+    assert choose_snap_gap(exact, 0.018, T, min_clearance=0.005)[0] is None
+    assert choose_snap_gap(exact, 0.018, T, min_clearance=0.0)[0] is not None
