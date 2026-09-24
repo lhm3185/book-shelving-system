@@ -22,6 +22,7 @@ from shelving_manipulation.book_placer import (
     COMMAND_CANCEL, COMMAND_PLACE, COMMAND_ROTATE_BASE, COMMAND_SCAN, COMMAND_SWEEP, decode, encode, pick_cancel, SIM_CANCELLED, SIM_FAILED,
     SIM_IDLE, SIM_RUNNING, SIM_SUCCEEDED)
 
+from base_move import refuse_far_move
 from arm_primitives import Status
 from arm_planning import tucked_joint_moves
 from book_scene import MoveJoint, VEL_LIMIT
@@ -466,6 +467,12 @@ class ManipulationExecutor:
                 dist = float(np.linalg.norm(move))
                 self.say(f"서가 앞면 {front:.3f} m → 목표 {float(standoff):.3f} m (앞뒤 {shift:+.3f}), "
                          f"서가 중심 팔기준 x {lateral:+.3f} → 옆으로 {lateral:+.3f}: 차체를 {dist:.3f} m 옮긴다")
+                # **이상치를 자른다.** 실측 43회에서 정상 최대가 0.447 m 인데, VD2 는
+                # 키오스크에 선 채로 서가 자리를 맞추려다 2.676 m 를 끌고 가려 했다.
+                # 상한을 올려 통과시키는 것이 아니라 6배 떨어진 값 하나를 거절한다.
+                _why = refuse_far_move(dist)
+                if _why is not None:
+                    raise RuntimeError(_why)
                 if dist > 0.005:
                     p0, q0 = SingleXFormPrim(ROOT).get_world_pose()
                     p0 = np.asarray(p0, float)
