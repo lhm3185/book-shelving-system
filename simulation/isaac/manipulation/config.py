@@ -73,12 +73,19 @@ class MotionConfig:
     book_coll: str = "boundingCube"
     shelf_coll: str = "none"
     shelf_row_measure: bool = True
-    carry_mode: str = "swing"
-    return_mode: str = "swing"
-    release_open_first: bool = True
+    # **여기 적힌 값은 실제로 돌린 값이어야 한다.** 2026-09-24 에 이 셋이 틀려 있었다:
+    # `swing`/`swing`/`True` 라고 적혀 있었는데, 숫자를 낸 `run_vision.sh` 는 이것들을
+    # 아예 안 건드렸고 코드 기본은 `joint`/`joint`/`False` 다. **한 번도 돌린 적 없는
+    # 조합이 "검증된 조합" 이라는 이름을 달고 있었다.** 아래 시험이 이제 그것을 막는다.
+    carry_mode: str = "joint"
+    return_mode: str = "joint"
+    release_open_first: bool = False
     speed_scale: float = 0.5
     max_step_rad: float = 0.12
     joint_segs: tuple = ("approach", "carry_rotate", "return")
+    #: 손 안에서 책이 이만큼(m) 넘게 밀리면 406. 코드 기본 0.03 은 운반 중 흔들림에
+    #: 걸린다 — 숫자를 낸 판은 전부 0.25 로 돌았다
+    hand_drift_m: float = 0.25
 
     # --- 스캔 -------------------------------------------------------------
     scan_board_z: float = 0.498
@@ -122,13 +129,19 @@ class MotionConfig:
             "SIM_BOOK_COLL": self.book_coll,
             "SIM_SHELF_COLL": self.shelf_coll,
             "SIM_SHELF_ROW_MEASURE": "1" if self.shelf_row_measure else "0",
+            "SIM_HAND_DRIFT_M": f"{self.hand_drift_m:g}",
         }
         # **GOAL_Y 는 넣지 않는다** — pick_from_vision 이 SIM_PICK_Y 에서 만든다.
         # 둘을 같이 넣으면 한쪽만 고치는 사고가 다시 난다.
         return e
 
 
-#: 오늘 검증된 조합 (v11~v15 연속 5/5, 새 레벨 2/2). **이 이름으로 부른다.**
+#: 검증된 조합. **이 이름으로 부른다.**
+#:
+#: 이 값들은 `cli_exchange/scripts/run_vision.sh` 의 기본 조합과 **같아야 한다** —
+#: 그 스크립트가 산출물의 숫자를 낸 실행기다. 갈라지면
+#: `test_motion_config.py::test_the_preset_matches_the_harness` 가 잡는다.
+#: 한쪽만 고치는 사고를 막으려고 둔 시험이다.
 PRESET_DEMO = MotionConfig()
 
 #: 베이스를 옛 자리로 되돌린 것 — 회귀 비교용. 도착 오차에 약하다(+30 mm 에서 여유 0.000)
