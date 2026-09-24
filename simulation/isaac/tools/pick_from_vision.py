@@ -73,29 +73,28 @@ def main():
     node.create_subscription(PointStamped, '/perception/books', seen.append, 10)
     trigger = node.create_publisher(Bool, '/perception/detect_request', 10)
 
-    # 검출 요청을 반복해 보낸다 — 비전은 요청이 있을 때만 검출한다.
-    # 한 번만 보내면 디스커버리가 늦어 놓치는 일이 있다 (2026-09-21 실측).
-    start = node.get_clock().now()
-    while (node.get_clock().now() - start).nanoseconds / 1e9 < a.wait:
-        trigger.publish(Bool(data=True))
-        rclpy.spin_once(node, timeout_sec=0.3)
-        if seen:
-            break
-    if not seen:
-        print(f'**비전 좌표가 {a.wait:.0f}초 안에 오지 않았다.** '
-              f'vision_manager 가 떠 있는지, 도메인이 같은지 볼 것')
-        return 2
+    def _wait_book():
+        # 검출 요청을 반복해 보낸다 — 비전은 요청이 있을 때만 검출한다.
+        # 한 번만 보내면 디스커버리가 늦어 놓치는 일이 있다 (2026-09-21 실측).
+        seen.clear()
+        start = node.get_clock().now()
+        while (node.get_clock().now() - start).nanoseconds / 1e9 < a.wait:
+            trigger.publish(Bool(data=True))
+            rclpy.spin_once(node, timeout_sec=0.3)
+            if seen:
+                return seen[-1]
+        return None
 
-    msg = seen[-1]
-    p = msg.point
-    print(f'비전 좌표(윗면 중심)  frame={msg.header.frame_id}  '
-          f'({p.x:+.4f}, {p.y:+.4f}, {p.z:+.4f})')
-    print(f'→ 로봇팔이 쓸 AABB 중심  ({p.x:+.4f}, {p.y:+.4f}, '
-          f'{p.z - BOOK["width"] / 2:+.4f})   (책 폭 {BOOK["width"]} 의 절반을 뺀 값)')
-    print(f'꽂을 곳  ({a.goal_x:+.4f}, {a.goal_y:+.4f}, {a.goal_z:+.4f})')
-    if a.dry_run:
-        print('--dry-run: 보내지 않는다')
-        return 0
+    # **빈칸을 먼저, 책을 나중에.** 순서가 중요하다 (`--detect-slot` 일 때).
+    #
+    # `DetectTargetSlot` 은 스캔 전에 차체를 서가 중심으로 **266 mm 옮긴다**
+    # (`align_base_before_work`). 책 좌표는 `arm_base_link` 기준이므로, 옮기기 **전**에
+    # 받아 두면 옮긴 뒤에는 엉뚱한 데를 가리킨다 — `goal_x` 상수가 26 cm 어긋난 것과
+    # **똑같은 병**이다 (2026-09-24). 그래서 옮긴 뒤에 받는다.
+    #
+    # 이것이 비전팀에 요청해 둔 `TargetSlot.base_pose` 가 필요한 이유이기도 하다:
+    # 좌표에 "잴 때 어디 서 있었는지" 가 없으면 이런 순서를 사람이 외워야 한다.
+    print(f'꽂을 곳(상수)  ({a.goal_x:+.4f}, {a.goal_y:+.4f}, {a.goal_z:+.4f})')
 
     # **꽂을 칸을 비전에게 묻는다** (`--detect-slot`).
     #
@@ -151,6 +150,21 @@ def main():
         if detected.available_width > 0 and detected.available_width < _need:
             print(f'  **주의: 검출 폭 {detected.available_width*1000:.1f} mm 가 '
                   f'책 두께 + 여유 {_need*1000:.1f} mm 보다 좁다**')
+
+    msg = _wait_book()
+    if msg is None:
+        print(f'**비전 좌표가 {a.wait:.0f}초 안에 오지 않았다.** '
+              f'vision_manager 가 떠 있는지, 도메인이 같은지 볼 것')
+        return 2
+    p = msg.point
+    print(f'비전 좌표(윗면 중심)  frame={msg.header.frame_id}  '
+          f'({p.x:+.4f}, {p.y:+.4f}, {p.z:+.4f})'
+          + ('   ← 빈칸 검출(차체 이동) **뒤에** 받은 값이다' if detected is not None else ''))
+    print(f'→ 로봇팔이 쓸 AABB 중심  ({p.x:+.4f}, {p.y:+.4f}, '
+          f'{p.z - BOOK["width"] / 2:+.4f})   (책 폭 {BOOK["width"]} 의 절반을 뺀 값)')
+    if a.dry_run:
+        print('--dry-run: 보내지 않는다')
+        return 0
 
     client = ActionClient(node, PlaceBook, '/place_book')
     if not client.wait_for_server(timeout_sec=10.0):
