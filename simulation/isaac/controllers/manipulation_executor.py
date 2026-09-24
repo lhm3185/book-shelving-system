@@ -312,11 +312,16 @@ class ManipulationExecutor:
         token = cmd.get("token") or uuid.uuid4().hex
         job_id = cmd.get("job_id", "sweep")
         dwell = float(cmd.get("dwell_s", 1.0))
-        # **훑을 판을 밖에서 고를 수 있게 한다** (`SIM_SWEEP_BOARDS="1.042"`).
-        # 2026-09-24: 아래 판(월드 0.498 = 팔기준 0.168)에서만 404 가 난다.
-        # 위 판은 5/5 로 완주하고 아래 판은 3/5 에서 멈춘다 — 여유가 0.210 vs
-        # **0.100 rad** 이고, 계획 단계에서 이미 `경유점 8/9 IK 실패` 가 뜬다.
-        # 아래 판을 빼면 스캔이 완주하므로 빈칸 좌표를 먼저 볼 수 있다.
+        # **훑을 판을 밖에서 고를 수 있게 한다** (`SIM_SWEEP_BOARDS="1.042"`, 진단용).
+        # 기본은 **두 판 다** 훑는다 — 그게 비전팀이 구현한 동작이다.
+        #
+        # ~~2026-09-24: 아래 판에서만 404 가 난다 (경유점 8/9 IK 실패)~~
+        # **그 근거는 틀렸다 (9/24 저녁 확인).** `8/9` 는 스윕의 숫자가 아니다 —
+        # 스윕의 정지점은 5개(`points` 기본 5)이고 조작 노드는 `points` 를 안 실어
+        # 보낸다. 9 는 자세 표 스캔(`plan_scan`)의 숫자다. **안 풀리던 쪽으로
+        # 갈아탄 것이다.** 스윕을 직접 돌려 보면 앞면 0.36~0.75 m, 시작 자세
+        # q_home·q_stow 어디서든 **두 판 다 5/5** 로 풀린다
+        # (`tests/test_scan_sweep_boards.py`).
         # (조작 노드는 `boards` 를 안 실어 보낸다 — 그래서 여기 기본값이 쓰인다)
         _env_boards = os.environ.get("SIM_SWEEP_BOARDS", "").strip()
         _default = ([float(b) for b in _env_boards.replace(" ", "").split(",") if b]
