@@ -66,6 +66,9 @@ class ManipulationNode(Node):
         # 1차 시연 파지 자리(서가 앞면 0.444 m)에서 스캔도 꽂기도 한다 — 앞뒤로 안 움직인다 (2026-09-23).
         # 스윕 레시피(arm_kinematics.sweep_recipe)가 이 거리 기준으로 실측됐다.
         self.scan_standoff_m = float(p('scan_standoff_m', 0.444).value)
+        # 빈칸(틈) 관측의 깊이를 **서가 앞면 실측에서 파생**할 것인가. 기본 꺼짐.
+        # 틈은 뚫려 있어 깊이 센서가 구멍을 통과한다 — 아래 `_pick_slot` 주석 참조.
+        self.slot_y_from_shelf_front = bool(p('slot_y_from_shelf_front', False).value)
         # 스캔 명령: scan_sweep(수평 스윕, 기본) / scan_shelf(예전 자세 표)
         self.scan_command = str(p('scan_command', 'scan_sweep').value)
         # 작업 전 차체 정렬(회전·서가 중앙·거리). 시뮬 실행기(rotate_base)가 있어야 한다 — 코드 기본은 끔이라
@@ -372,7 +375,12 @@ class ManipulationNode(Node):
         """
         contract_y = 0.5495                       # 1차 계약: 꽂힌 책 중심의 팔 기준 y (Franka)
         lower_z, middle_z = 0.3399, 0.3399 + (1.042 - 0.498)
-        far_y = float(self.scan_standoff_m) + 0.30      # 서가 깊이(0.30) 너머 = 판이 비어 뒤가 보인 것
+        # **서가 앞면은 '우리가 선 거리' 가 아니다.** `scan_standoff_m` 은 카메라를
+        # 어디 둘지이고, 서가가 실제로 어디 있는지는 스캔이 재서 `_shelf_box` 로
+        # 보내 준다 (2026-09-24 실측: 서 있는 거리 0.444, 서가 앞면 0.493).
+        # 상자가 오면 그걸 쓰고, 없을 때만 예전 어림을 쓴다.
+        front_y = float(self._shelf_box[2]) if self._shelf_box else float(self.scan_standoff_m)
+        far_y = front_y + 0.30                          # 서가 깊이(0.30) 너머 = 판이 비어 뒤가 보인 것
         # **서가 안에서만 빈칸을 인정한다** (2026-09-23 지적: 서가 밖·옆 서가 틈·바닥을 빈칸으로 오인). 시뮬이 스캔 계획 때
         # 서가 AABB(팔 기준)를 보내 준다. 없으면 파라미터 x 범위·앞면 거리로만 거른다.
         box = self._shelf_box
@@ -394,7 +402,35 @@ class ManipulationNode(Node):
                 self.get_logger().info(f'빈칸 관측 버림 (서가 밖): ({x:.3f}, {y:.3f}, {z:.3f}) 서가 x {bx0:.2f}~{bx1:.2f} y {by0:.2f}~{by1:.2f} z {bz0:.2f}~{bz1:.2f}')
                 continue
             zs = lower_z if abs(z - lower_z) <= abs(z - middle_z) else middle_z
-            gaps.append((msg, x, y + book_width / 2.0 + self.slot_center_inset, zs))
+            # **틈 관측의 y(깊이)는 못 믿는다 — 틈은 뚫려 있기 때문이다.**
+            #
+            # 빈칸 한가운데를 찍으면 깊이 센서가 구멍을 통과해 **뒤판이나 그 너머**를
+            # 읽는다. 2026-09-24 실측: 서가 앞면이 0.493 인데 관측 y 가 0.707 로
+            # **214 mm 뒤**였고, 거기에 책 깊이 절반을 더해 0.813 이 되어 검증 봉투
+            # 상한 0.65 를 넘었다 (410). 같은 판의 다른 관측은 y 2.611(서가 뒤 2 m)
+            # 까지 나왔다.
+            #
+            # x·z 는 흔들리지 않는다 (판마다 1~4 mm). **2D 검출은 맞고 깊이만 틀린다.**
+            # 그러니 x·z 는 관측을 쓰고, y 는 **우리가 잰 서가 앞면**에서 파생한다 —
+            # 치수를 아는 쪽이 유도한다는 규칙 그대로다.
+            #
+            # 기본은 꺼 둔다. 켜면 관측 y 를 버리므로, 그 판단은 두 값을 나란히 보고
+            # 사람이 한다. 로그에 둘 다 찍는다.
+            y_gap = y + book_width / 2.0 + self.slot_center_inset
+            if self.slot_y_from_shelf_front and self._shelf_box:
+                y_front = front_y + book_width / 2.0 + self.slot_center_inset
+                self.get_logger().info(
+                    f'빈칸 깊이: 관측 y {y:.3f} → 칸중심 {y_gap:.3f} · '
+                    f'앞면 실측 {front_y:.3f} → 칸중심 {y_front:.3f} '
+                    f'(차이 {(y - front_y) * 1000:+.0f} mm) '
+                    f'— **앞면 쪽을 쓴다** [slot_y_from_shelf_front]')
+                y_gap = y_front
+            elif self._shelf_box and abs(y - front_y) > 0.05:
+                self.get_logger().warning(
+                    f'빈칸 관측 y {y:.3f} 가 서가 앞면 {front_y:.3f} 에서 '
+                    f'{(y - front_y) * 1000:+.0f} mm 다 — 틈을 통과해 뒤를 읽었을 수 있다 '
+                    f'(slot_y_from_shelf_front 로 앞면에서 파생할 수 있다)')
+            gaps.append((msg, x, y_gap, zs))
         # **책 사이 틈이 있으면 그것을 먼저 쓴다.** '판 비어 있음' 관측은 틈 사이로 뒤가 보인 것일 수 있어(2026-09-23 19:29:
         # 틈 x -0.05 가 있는데 빈 판으로 판단해 x -0.35 에 꽂다 실패) 틈이 하나도 없을 때만 쓴다.
         if open_board and not gaps:
