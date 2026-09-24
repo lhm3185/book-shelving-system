@@ -69,6 +69,11 @@ class ManipulationNode(Node):
         # 빈칸(틈) 관측의 깊이를 **서가 앞면 실측에서 파생**할 것인가. 기본 꺼짐.
         # 틈은 뚫려 있어 깊이 센서가 구멍을 통과한다 — 아래 `_pick_slot` 주석 참조.
         self.slot_y_from_shelf_front = bool(p('slot_y_from_shelf_front', False).value)
+        # 빈칸 x 를 **시뮬이 잰 실제 빈칸**에 맞출 것인가. 기본 꺼짐.
+        # 비전의 빈칸 x 가 판마다 160 mm 흔들린다 (2026-09-24 다섯 판) — 아래 참조.
+        self.slot_x_snap_to_gap = bool(p('slot_x_snap_to_gap', False).value)
+        # 가장 가까운 실측 빈칸이 이보다 멀면 **손대지 않는다** (어느 칸인지 알 수 없다)
+        self.slot_x_snap_max_m = float(p('slot_x_snap_max_m', 0.12).value)
         # 스캔 명령: scan_sweep(수평 스윕, 기본) / scan_shelf(예전 자세 표)
         self.scan_command = str(p('scan_command', 'scan_sweep').value)
         # 작업 전 차체 정렬(회전·서가 중앙·거리). 시뮬 실행기(rotate_base)가 있어야 한다 — 코드 기본은 끔이라
@@ -113,6 +118,7 @@ class ManipulationNode(Node):
         self._busy = False
         self._scan_state = None
         self._empty_observations = []
+        self._shelf_gaps = None      # 시뮬이 잰 **실제 빈칸** 팔기준 x 구간 [[lo, hi], ...]
         self._shelf_box = None       # 시뮬이 스캔 계획 때 알려주는 서가 상자(팔 기준). 빈칸은 이 안에서만 인정
         self._book_observations = []
         self._status = ('IDLE', '', 0.0, 0, '')    # state, job, progress, error_code, message
@@ -186,6 +192,8 @@ class ManipulationNode(Node):
             if self._scan_state is not None \
                     and state.get('token') == self._scan_state.get('token'):
                 self._scan_state = dict(state)
+                if state.get('phase') == 'scan_plan' and state.get('shelf_gaps'):
+                    self._shelf_gaps = [[float(v) for v in g] for g in state['shelf_gaps']]
                 if state.get('phase') == 'scan_plan' and state.get('shelf_box'):
                     self._shelf_box = [float(v) for v in state['shelf_box']]   # 팔 기준 [x0,x1,y_front,y_back,z0,z1]
                 self._wake.set()
@@ -445,6 +453,34 @@ class ManipulationNode(Node):
             return None
         gaps.sort(key=lambda c: (c[3], abs(c[1])))
         msg, x, center_y, zs = gaps[0]
+        # **빈칸 x 를 시뮬이 잰 실제 빈칸에 맞춘다** (`slot_x_snap_to_gap`, 기본 꺼짐).
+        #
+        # 왜: 비전의 빈칸 x 가 **판마다 160 mm 흔들린다.** 2026-09-24 다섯 판 실측 —
+        # 같은 장면·같은 서가인데 −0.063 · −0.058 · −0.053 · −0.047 · +0.097.
+        # 그리고 **겹침이 그 흔들림을 1:1 로 따라간다**(r = 0.997): 검출이 10 mm 틀리면
+        # 10 mm 겹친다. 팔·이동·배치는 1.5 mm 안에서 정확하다 — 틀린 건 검출 하나다.
+        #
+        # 깊이(y)는 서가 앞면 실측으로 끌어왔지만 x 는 끌어올 기준이 없었다. 이제
+        # 있다 — 시뮬이 서가 책 AABB 에서 **진짜 빈칸**을 재서 보내 준다(`shelf_gaps`).
+        # 비전은 "이 근처에 틈이 있다" 고 말하고, 기하가 "틈은 정확히 여기다" 고 말한다.
+        #
+        # **멀면 손대지 않는다.** 가장 가까운 실측 빈칸이 `slot_x_snap_max_m` 보다
+        # 멀면 어느 칸을 본 것인지 알 수 없다 — 엉뚱한 칸으로 끌어당기면 남의 자리에
+        # 꽂는다. 그때는 검출을 그대로 두고 뒤쪽 검사에 맡긴다.
+        if self.slot_x_snap_to_gap and self._shelf_gaps:
+            cands = [((lo + hi) / 2.0, hi - lo) for lo, hi in self._shelf_gaps]
+            gx, gw = min(cands, key=lambda c: abs(c[0] - x))
+            if abs(gx - x) <= self.slot_x_snap_max_m:
+                self.get_logger().info(
+                    f'빈칸 x: 검출 {x:+.4f} → 실측 빈칸 중심 {gx:+.4f} '
+                    f'({(gx - x) * 1000:+.1f} mm, 빈칸 폭 {gw * 1000:.1f} mm, '
+                    f'실측 빈칸 {len(cands)}개) [slot_x_snap_to_gap]')
+                x = gx
+            else:
+                self.get_logger().warning(
+                    f'빈칸 x: 검출 {x:+.4f} 에서 가장 가까운 실측 빈칸이 {gx:+.4f} 로 '
+                    f'{(gx - x) * 1000:+.1f} mm 떨어져 있다 — **손대지 않는다** '
+                    f'(한계 {self.slot_x_snap_max_m * 1000:.0f} mm)')
         # 스캔과 꽂기가 같은 자리(앞면 0.444 m)라 관측 깊이를 그대로 쓴다: 틈 앞 + 책폭/2 + inset = 꽂힌 책 중심.
         # (전에 스캔만 0.75 m 물러났을 땐 그 차이만큼 차체를 옮겼다 — 이제 scan/place standoff 가 같다.)
         advance = float(self.scan_standoff_m) - float(self.place_standoff_m)

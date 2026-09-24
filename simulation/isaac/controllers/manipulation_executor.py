@@ -249,10 +249,38 @@ class ManipulationExecutor:
                  f"(최대 관절 변화 {max(m['step_rad'] for _, _, m in poses):.2f} rad)")
         # **꽂을 수 있는 판과 아닌 판을 미리 알린다** — 비전이 준 빈칸을 나중에 거를 때 쓴다
         self.publish(dict(self.job.state, phase="scan_plan", shelf_box=self._shelf_box_arm(),
+                          shelf_gaps=self._shelf_gaps_arm(self.scene.shelf_floor_z),
                           boards=[{"board_z": m["board_z"], "name": n,
                                    "reachable": m["reachable"]} for n, _, m in poses]))
         self.scene.set_scan_tray_guard(True)
         self.arm.enqueue(Sequence("scan", steps))
+
+    def _shelf_gaps_arm(self, board_z):
+        """그 선반 판의 **실제 빈칸**을 팔 기준 x 구간으로 → [[lo, hi], ...].
+
+        왜: 비전의 빈칸 x 가 **판마다 160 mm 까지 흔들린다** (2026-09-24 다섯 판 실측:
+        같은 장면인데 −0.063 ~ +0.097). 깊이(y)는 서가 앞면 실측으로 끌어왔지만 x 는
+        끌어올 기준이 없었다 — **이것이 그 기준이다.**
+
+        서가 책들의 AABB 에서 빈칸을 직접 잰다. `shelf_gap.py` 가 눕혀 쌓인 책의 넓은
+        AABB 가 만드는 허깨비 빈칸도 걸러 준다 (그 모듈 시험 9개가 지킨다).
+        """
+        try:
+            import sys as _s
+            import os as _o
+            _s.path.insert(0, _o.path.dirname(_o.path.abspath(__file__)))
+            from shelf_gap import gaps as _gaps
+            boxes = [(path, float(bb[0]), float(bb[3]))
+                     for path, bb in self.scene.shelf_book_boxes(board_z)]
+            if not boxes:
+                return None
+            # 월드 x → 팔 기준 x. 서가와 팔이 나란하므로 x 는 평행이동이다
+            ax = float(self.scene.l0p[0])
+            boxes = [(n, lo - ax, hi - ax) for n, lo, hi in boxes]
+            return [[round(g.lo, 4), round(g.hi, 4)] for g in _gaps(boxes)]
+        except Exception as exc:      # noqa: BLE001 - 진단값이 없다고 스캔을 막지 않는다
+            self.say(f"[빈칸] 실측 실패 {type(exc).__name__}: {exc}")
+            return None
 
     def _shelf_box_arm(self):
         """서가 AABB 를 팔 기준으로 — [x_min, x_max, y_front, y_back, z_min, z_max]. 빈칸 관측을 서가 안으로 거를 때 쓴다."""
@@ -341,6 +369,7 @@ class ManipulationExecutor:
         self.publish(self.job.state)
         self.say(f"스윕 시작: 판 {boards}, 정지점 {holds}개, 정지 {dwell:.1f}s")
         self.publish(dict(self.job.state, phase="scan_plan", shelf_box=self._shelf_box_arm(),
+                          shelf_gaps=self._shelf_gaps_arm(self.scene.shelf_floor_z),
                           boards=[{"board_z": b, "name": f"sweep_{b:.3f}", "reachable": True} for b in boards]))
         self.scene.set_scan_tray_guard(True)
         self.arm.enqueue(Sequence("scan", steps))
