@@ -44,10 +44,6 @@ ap.add_argument("--record-dir", default="", metavar="경로",
                      "화면 녹화로 찍으면 남의 작업 화면이 찍힌다 (2026-09-19 실제로 그랬다)")
 ap.add_argument("--record-every", type=int, default=6, help="몇 스텝마다 한 장 (60 Hz 기준 6 = 10 fps)")
 # 좌표를 추측하면 엉뚱한 곳(서가 벽)을 찍는다 — 기본은 **로봇 AABB 에 자동으로 맞춘다**
-ap.add_argument("--record-views", default="", metavar="이름들",
-                help="**같은 판을 여러 각도로** 찍는다: auto,front,side,top,shelf,wide 또는 all. "
-                     "비우면 종전처럼 카메라 하나. 프레임은 <record-dir>/<이름>/ 에 나뉘어 저장된다. "
-                     "한 각도로는 못 보는 것이 있다 — 옆은 깊이, 위는 비뚤어짐이 보인다")
 ap.add_argument("--record-eye", type=float, nargs=3, default=None, help="녹화 카메라 위치 (기본: 자동)")
 ap.add_argument("--record-look", type=float, nargs=3, default=None, help="보는 점 (기본: 로봇 중심)")
 ap.add_argument("--camera", action="store_true", help="레벨에 카메라가 없을 때 손목 카메라를 만든다")
@@ -233,36 +229,38 @@ if args.record_dir:
         _bb = _np.array([-1, -1, 0, 1, 1, 1.5], float)
     _mid = (_bb[:3] + _bb[3:]) / 2
     _rad = float(_np.linalg.norm(_bb[3:] - _bb[:3]))
-    # **여러 각도** (`--record-views`). 비우면 종전 그대로 카메라 하나다.
-    import sys as _sys
-    _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "controllers"))
-    from record_views import look_at_quat as _look_at, parse_views as _parse_views, view_pose as _vp
-    _views = _parse_views(args.record_views)
-    _shelf_bb = getattr(scene, "shelf_aabb_world", None)
-    # `wide` 는 출발 자리(키오스크)까지 한 화면에 넣는다. 이 프로세스는 그 자리를
-    # 모르므로 **넘기면 쓰고 없으면 로봇 둘레로 물러난다** — 모르는 값을 지어내지 않는다.
-    _home_xy = None
-    _hx = os.environ.get("SIM_RECORD_HOME_XY", "").strip()
-    if _hx:
-        try:
-            _hx0, _hx1 = (float(v) for v in _hx.replace(" ", "").split(",")[:2])
-            _home_xy = (_hx0, _hx1)
-        except ValueError:
-            say(f"SIM_RECORD_HOME_XY 를 못 읽었다: {_hx!r} — wide 는 로봇 둘레로 잡는다")
-    if _views:
-        _shots = {}
-        for _n in _views:
-            _e, _t = _vp(_n, _bb, _shelf_bb, _home_xy)
-            _shots[_n] = (_np.asarray(_e, float), _np.asarray(_t, float))
-        say(f"녹화 시점 {len(_shots)}개: {', '.join(_shots)}")
-    else:
-        _tgt = _np.array(args.record_look, float) if args.record_look else _mid
-        # 로봇 앞쪽 비스듬히 위에서 — 트레이(앞)와 팔이 같이 보이는 각도
-        _eye = (_np.array(args.record_eye, float) if args.record_eye
-                else _mid + _np.array([_rad * 0.9, -_rad * 1.0, _rad * 0.55]))
-        _shots = {"": (_eye, _tgt)}
-        say(f"녹화 구도: 로봇 중심 {_np.round(_mid,2).tolist()} 크기 {_rad:.2f} m "
-            f"→ 카메라 {_np.round(_eye,2).tolist()}")
+    _tgt = _np.array(args.record_look, float) if args.record_look else _mid
+    # 로봇 앞쪽 비스듬히 위에서 — 트레이(앞)와 팔이 같이 보이는 각도
+    _eye = (_np.array(args.record_eye, float) if args.record_eye
+            else _mid + _np.array([_rad * 0.9, -_rad * 1.0, _rad * 0.55]))
+    _shots = {"": (_eye, _tgt)}
+    say(f"녹화 구도: 로봇 중심 {_np.round(_mid,2).tolist()} 크기 {_rad:.2f} m "
+        f"→ 카메라 {_np.round(_eye,2).tolist()}")
+    def _look_at(_e, _t):
+        """눈 → 목표를 보는 카메라 쿼터니언 (w, x, y, z). USD 카메라는 −z 를 본다."""
+        _f = _np.asarray(_t, float) - _np.asarray(_e, float)
+        _f = _f / (_np.linalg.norm(_f) or 1.0)
+        _r = _np.cross(_f, _np.array([0.0, 0.0, 1.0]))
+        _r = _r / (_np.linalg.norm(_r) or 1.0)
+        _u = _np.cross(_r, _f)
+        _m = _np.eye(3)
+        _m[:, 0], _m[:, 1], _m[:, 2] = _r, _u, -_f
+        _tr = _np.trace(_m)
+        if _tr > 0:
+            _sq = _np.sqrt(_tr + 1.0) * 2
+            _q = _np.array([0.25 * _sq, (_m[2, 1] - _m[1, 2]) / _sq,
+                            (_m[0, 2] - _m[2, 0]) / _sq, (_m[1, 0] - _m[0, 1]) / _sq])
+        else:
+            _i = int(_np.argmax(_np.diag(_m)))
+            _j, _k = (_i + 1) % 3, (_i + 2) % 3
+            _sq = _np.sqrt(1.0 + _m[_i, _i] - _m[_j, _j] - _m[_k, _k]) * 2
+            _q = _np.zeros(4)
+            _q[0] = (_m[_k, _j] - _m[_j, _k]) / _sq
+            _q[_i + 1] = 0.25 * _sq
+            _q[_j + 1] = (_m[_j, _i] + _m[_i, _j]) / _sq
+            _q[_k + 1] = (_m[_k, _i] + _m[_i, _k]) / _sq
+        return _q / (_np.linalg.norm(_q) or 1.0)
+
     _cams = []
     for _n, (_e, _t) in _shots.items():
         _path = f"/World/rec_cam_{_n or 'auto'}"
