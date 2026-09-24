@@ -1026,6 +1026,13 @@ class BookScene:
                     say(f"홈 자세 이동 실패 — IK 안 풀림 (위치 오차 {_r.pos_err * 1000:.1f} mm, 여유 {_r.limit_margin:.3f}). 홈 그대로 [SIM_HOME_SHIFT]")
             except Exception as _exc:      # noqa: BLE001 - 스위치 실패가 시뮬을 막지 않게
                 say(f"SIM_HOME_SHIFT 실패 {type(_exc).__name__}: {_exc} — 홈 그대로")
+        # **②의 첫 단계 — 모델이 같은지부터 본다** (숫자만 찍는다, 동작은 안 바뀐다).
+        # `SIM_AK_CHECK=0` 으로 끌 수 있다.
+        if os.environ.get("SIM_AK_CHECK", "1") != "0":
+            try:
+                self.check_ak_model()
+            except Exception as _exc:      # noqa: BLE001 - 대조 실패가 기동을 막지 않게
+                self.say(f"[모델대조] 못 쟀다 {type(_exc).__name__}: {_exc}")
         _hp, _hR = self.lula.compute_forward_kinematics(BOT.ee_frame, self.q_home)
         self.home_tip = np.asarray(_hp, float)
         self.HOME_ORI = quat_from_R(np.asarray(_hR, float))
@@ -1417,6 +1424,51 @@ class BookScene:
         attr.Set(guard[0])
         self._scan_tray_guard = None
         self.say("[스캔안전] 트레이 고정을 풀고 원래 동적 상태로 복구했다")
+
+    def check_ak_model(self, qs=None, tol_mm=1.0):
+        """`arm_kinematics` 의 기구학 모델이 **Lula 와 같은 답을 내는가** — 한 번만 잰다.
+
+        ②(로봇팔 구동을 `arm_kinematics` 호출로 옮기기)의 첫 단계다. IK 를 옮기기 전에
+        **FK 가 같은지부터** 본다. 여기서 안 맞으면 IK 를 옮겨 봐야 엉뚱한 데로 간다.
+
+        **동작을 바꾸지 않는다.** 숫자만 찍는다. 그래서 위험이 0 이고, 판이 돌 때
+        로그로 확인만 하면 된다.
+
+        `ak.fk` 는 **팔 기준**, Lula 는 **월드**다. `to_world` 로 맞춰 견준다.
+        `ak` 는 Franka 전용 DH 표라, 다른 로봇에서는 안 맞는 것이 정상이다 —
+        그때는 그렇게 말한다.
+        """
+        try:
+            import arm_kinematics as _ak
+        except Exception as exc:      # noqa: BLE001
+            self.say(f"[모델대조] arm_kinematics 를 못 읽었다: {exc}")
+            return None
+        if qs is None:
+            qs = [np.asarray(self.q_home, float),
+                  np.asarray(getattr(self, "q_observe", self.q_home), float)]
+            qs.append(qs[0] + np.array([0.2, -0.15, 0.1, 0.12, -0.2, 0.15, -0.1])[:len(qs[0])])
+        worst, rows = 0.0, []
+        for i, q in enumerate(qs):
+            q = np.asarray(q, float)
+            if len(q) != 7:
+                rows.append(f"  q{i}: 관절 {len(q)}개 — ak 는 7축(Franka) 전용이라 건너뜀")
+                continue
+            try:
+                lp = np.asarray(self.lula.compute_forward_kinematics(BOT.ee_frame, q)[0], float)
+            except Exception as exc:      # noqa: BLE001
+                rows.append(f"  q{i}: Lula FK 실패 {type(exc).__name__}")
+                continue
+            ap, _aR = _ak.fk(q)
+            aw = self.to_world(ap)
+            d = float(np.linalg.norm(aw - lp)) * 1000.0
+            worst = max(worst, d)
+            rows.append(f"  q{i}: Lula {np.round(lp, 4).tolist()} · ak→월드 "
+                        f"{np.round(aw, 4).tolist()} · 차이 **{d:.2f} mm**")
+        verdict = ("두 모델이 같다 — IK 를 옮겨도 된다" if worst <= tol_mm
+                   else f"**{tol_mm:.1f} mm 를 넘는다 — IK 를 옮기기 전에 모델을 먼저 맞춰야 한다**")
+        self.say("[모델대조] arm_kinematics vs Lula (손끝 위치)\n" + "\n".join(rows)
+                 + f"\n  최대 차이 {worst:.2f} mm → {verdict}")
+        return worst
 
     def to_world(self, p_arm):
         return self.l0p + self.Rl0 @ np.asarray(p_arm, float)
