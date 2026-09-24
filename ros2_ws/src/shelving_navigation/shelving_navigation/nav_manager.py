@@ -114,6 +114,16 @@ class NavManager(Node):
 	def _publish(self, command):
 		self._command_pub.publish(String(data=json.dumps(command)))
 
+	@staticmethod
+	def _yaw_of(waypoint):
+		"""waypoints.yaml 한 점의 orientation(사원수) → 월드 yaw(도). 없으면 None."""
+		q = (waypoint or {}).get('orientation')
+		if not q:
+			return None
+		x, y, z, w = (float(q.get(k, 0.0)) for k in ('x', 'y', 'z', 'w'))
+		return math.degrees(math.atan2(2.0 * (w * z + x * y),
+									   1.0 - 2.0 * (y * y + z * z)))
+
 	def _command_for_goal(self, request):
 		if request.target_type == 'shelf':
 			return {
@@ -127,11 +137,23 @@ class NavManager(Node):
 			# 시뮬이 알려준 실제 출발 자리를 먼저 쓰고, 없으면 waypoints.yaml 의 home
 			with self._lock:
 				sim_home = (self._last_home or None)
-			home = (self._waypoints or {}).get('home', {}).get('position')
+			wp = (self._waypoints or {}).get('home', {})
+			home = wp.get('position')
+			# **방향까지 되돌린다.** 자리만 맞추면 서가를 볼 때의 yaw 로 선 채 끝나서,
+			# 처음 트레이를 받던 자세와 어긋난다 (2026-09-24 도윤님 지적: 이 레벨은
+			# 출발 yaw +90°, 작업 yaw 0° 라 90° 틀어진 채 복귀했다).
+			# 시뮬이 실어 보내는 출발 yaw 를 먼저 쓰고, 없으면 waypoints 의 사원수에서 낸다.
+			yaw = float(sim_home[2]) if sim_home and len(sim_home) > 2 else self._yaw_of(wp)
 			if sim_home:
-				return {'type': 'goto', 'x': float(sim_home[0]), 'y': float(sim_home[1])}
+				cmd = {'type': 'goto', 'x': float(sim_home[0]), 'y': float(sim_home[1])}
+				if yaw is not None:
+					cmd['yaw_deg'] = yaw
+				return cmd
 			if home:
-				return {'type': 'goto', 'x': float(home['x']), 'y': float(home['y'])}
+				cmd = {'type': 'goto', 'x': float(home['x']), 'y': float(home['y'])}
+				if yaw is not None:
+					cmd['yaw_deg'] = yaw
+				return cmd
 		# The simulator already delivers the tray before the ROS job starts.
 		# The verified patrol ends at the work position, which is also the
 		# manipulation/home position for this simulation scene.

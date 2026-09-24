@@ -130,12 +130,16 @@ class NavigationExecutor:
         #: 루트 대비 팔 베이스의 **상대 yaw**. 월드 yaw 를 그대로 비교하면 로봇이
         #: 돌아 있는 레벨에서 140° 씩 틀어진 값이 나온다 (2026-09-22 실측, v5 는 yaw +90°)
         self.home_rel_yaw = _yaw(self.home_arm_q) - _yaw(np.asarray(_rq, float))
+        #: **루트의 출발 yaw.** 복귀할 때 이 방향으로 되돌린다. 자리만 맞추고 방향을
+        #: 안 돌리면 서가를 볼 때의 각도(0°)로 선 채 끝난다 — 처음 트레이를 받던
+        #: 자세와 90° 어긋난다 (2026-09-24 도윤님 지적, 이 레벨은 출발 yaw +90°).
+        self.home_root_yaw = _yaw(np.asarray(_rq, float))
 
         p, _ = self.root.get_world_pose()
         self.say(f"주행 실행기 준비: {BOT.root} 현재 위치 "
                  f"({float(p[0]):+.3f}, {float(p[1]):+.3f}), 속도 {self.speed} m/s")
         self.say(f"  팔 베이스 출발 자리 ({self.home_arm[0]:+.4f}, {self.home_arm[1]:+.4f}) "
-                 f"— 돌아왔을 때 여기로 맞춘다")
+                 f"yaw {math.degrees(self.home_root_yaw):+.2f}° — 돌아왔을 때 여기로 맞춘다")
 
     # ---------------------------------------------------------------- 발행
     def publish(self, **extra):
@@ -146,7 +150,10 @@ class NavigationExecutor:
         # `home` 은 출발 자리(팔 베이스) — 작업 끝에 nav_manager 가 여기로 되돌린다 (비전 브랜치).
         p, q = self.root.get_world_pose()
         state = {"status": self.status, "legs": self.legs,
-                 "home": [round(float(self.home_arm[0]), 4), round(float(self.home_arm[1]), 4)],
+                 # **[x, y, yaw]** — 머리말의 계약대로 셋을 다 싣는다. 예전에는 x, y 만
+                 # 실어서 복귀가 자리만 맞고 방향은 파지할 때 각도로 남았다.
+                 "home": [round(float(self.home_arm[0]), 4), round(float(self.home_arm[1]), 4),
+                          round(math.degrees(self.home_root_yaw), 3)],
                  "leg": self.legs - len(self.route),
                  "pose": [round(float(p[0]), 4), round(float(p[1]), 4),
                           round(math.degrees(_yaw(q)), 3)],
