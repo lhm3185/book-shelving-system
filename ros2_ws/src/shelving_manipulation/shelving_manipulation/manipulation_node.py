@@ -33,11 +33,10 @@ from shelving_interfaces.msg import RobotStatus
 from std_msgs.msg import Bool, String
 import yaml
 
-from .book_placer import (cancel_command, choose_snap_gap, COMMAND_ROTATE_BASE, decode,
-                          encode, error_name, gaps_on_board, internal_failure,
-                          MockSimExecutor, Outcome, PlaceTracker, publish_feedback_safely,
-                          SIM_CANCELLED, SIM_FAILED, SIM_SUCCEEDED, stale_gap_reason,
-                          steady_book)
+from .book_placer import (cancel_command, choose_gap_any_board, COMMAND_ROTATE_BASE,
+                          decode, encode, error_name, internal_failure, MockSimExecutor,
+                          Outcome, PlaceTracker, publish_feedback_safely, SIM_CANCELLED,
+                          SIM_FAILED, SIM_SUCCEEDED, stale_gap_reason, steady_book)
 from .grasp_planner import (build_place_command, DEFAULT_LIMITS, GraspGoal, parse_profile,
                             parse_tray, PlaceGoal, resolve_book, select_tray_slot, SlotGoal,
                             snap_grasp_to_slot, validate_goal, validate_grasp)
@@ -503,33 +502,31 @@ class ManipulationNode(Node):
             # 이유로 그리로 끌어와 36.4 mm 책을 꽂았다 (22.5 mm 겹침, 409).
             # **같은 판의 빈칸끼리만 견준다.** 3·4번 선반을 다 재면 빈칸이 여러
             # 판에 걸치는데, 판을 안 가리면 3번에서 본 빈칸을 4번 x 로 끌어당긴다.
-            # 판 사이 **상대 높이**로 맞춘다 (`zs` 는 칸 중심, 빈칸 태그는 판 윗면)
-            _same, _bz = gaps_on_board(self._shelf_gaps, float(zs) - lower_z)
-            if not _same:
-                self._slot_reject = (
-                    f'관측이 스냅된 판(칸 중심 z {float(zs):+.4f}, 아래 판에서 '
-                    f'{float(zs) - lower_z:+.3f} m)에 실측한 빈칸이 없다 '
-                    f'(가장 가까운 실측 판 {_bz if _bz is not None else "없음"} m 위) — '
-                    f'스캔이 그 판을 안 훑었거나 관측이 판 사이에 있다')
-                self.get_logger().warning(f'**빈칸 거절** {self._slot_reject}')
-                return None
-            gx, gw, why = choose_snap_gap(
-                _same, x, self.profile.thickness,
+            # 판 사이 **상대 높이**로 맞춘다 (`zs` 는 칸 중심, 빈칸 태그는 판 윗면).
+            # 그리고 **가리킨 판에 자리가 없으면 다른 판을 본다** — 도윤님 목표가
+            # 3·4번 선반에 한 권씩인데, 비전은 두 권째에도 아래 판을 가리킨다.
+            # 가리킨 판만 보면 **비어 있는 위 판을 두고 거절한다** (2026-09-24 실측).
+            gx, gw, _rel, why = choose_gap_any_board(
+                self._shelf_gaps, x, float(zs) - lower_z, self.profile.thickness,
                 min_clearance=float(self.limits['side_clearance']),
                 max_move=self.slot_x_snap_max_m)
-            if why is not None:
-                # **못 믿겠다고 판단했으면 그 값으로 꽂지 않는다.** 경고만 하고
-                # 진행했다가 남의 자리에 책 두께 통째로 박은 적이 있다.
+            if gx is None:
                 self._slot_reject = why
                 self.get_logger().warning(f'**빈칸 거절** {why}')
                 return None
+            if _rel is not None and abs(_rel - (float(zs) - lower_z)) > 1e-6:
+                # **판을 옮겼으면 높이도 같이 옮긴다.** 안 바꾸면 *다른 판 높이에
+                # 이 판 x* 라는 있지도 않은 자리가 된다.
+                _old = float(zs)
+                zs = lower_z + _rel
+                self.get_logger().warning(
+                    f'{why}  칸 중심 z {_old:+.4f} → {zs:+.4f}')
             self.get_logger().info(
                 f'빈칸 x: 검출 {x:+.4f} → 실측 빈칸 중심 {gx:+.4f} '
                 f'({(gx - x) * 1000:+.1f} mm, 빈칸 폭 {gw * 1000:.1f} mm, '
                 f'책 두께 {self.profile.thickness * 1000:.1f} mm, '
                 f'남는 여유 한쪽 {(gw - self.profile.thickness) / 2 * 1000:.1f} mm, '
-                f'실측 빈칸 {len(_same)}개 (아래 판에서 {_bz:+.3f} m 위)) '
-                f'[slot_x_snap_to_gap]')
+                f'판 상대높이 {0.0 if _rel is None else _rel:+.3f} m) [slot_x_snap_to_gap]')
             x = gx
         # 스캔과 꽂기가 같은 자리(앞면 0.444 m)라 관측 깊이를 그대로 쓴다: 틈 앞 + 책폭/2 + inset = 꽂힌 책 중심.
         # (전에 스캔만 0.75 m 물러났을 땐 그 차이만큼 차체를 옮겼다 — 이제 scan/place standoff 가 같다.)

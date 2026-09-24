@@ -475,3 +475,64 @@ def test_the_second_book_cannot_reuse_the_filled_gap():
     same_hi, _rel = gaps_on_board(filled, PITCH)
     gx2, gw2, why2 = choose_snap_gap(same_hi, 0.198, 0.0352)
     assert why2 is None and gw2 * 1000 == pytest.approx(96.0, abs=0.1)   # 위 판 96 mm
+
+
+# ---------------- 가리킨 판에 자리가 없으면 다른 판 (2026-09-24 두 권 판)
+#
+#   두 권째도 비전이 **아래 판**을 가리킨다(관측 z 0.400). 그 판은 첫 권이 채워
+#   12/9 mm 조각만 남았고, **같은 순간 위 판에 56 mm 가 비어 있었다.**
+#   가리킨 판만 보면 비어 있는 칸을 두고 거절한다 — 도윤님 목표가 3·4번 한 권씩이다.
+
+FILLED_LOW = [[-0.1065, -0.0940, LOW], [-0.0583, -0.0473, LOW]]     # 12.5 / 11.0 mm
+OPEN_HIGH = [[0.0980, 0.1540, HIGH]]                                 # 56 mm
+BOTH = FILLED_LOW + OPEN_HIGH
+
+
+def test_the_indicated_board_wins_when_it_fits():
+    """**비전의 판단을 함부로 뒤집지 않는다.** 거기 들어가면 그걸로 끝이다."""
+    from shelving_manipulation.book_placer import choose_gap_any_board
+    gaps = [[-0.1065, -0.0466, LOW]] + OPEN_HIGH        # 아래 판 60 mm 비어 있다
+    gx, gw, rel, why = choose_gap_any_board(gaps, -0.0651, 0.0, 0.0352)
+    assert rel == pytest.approx(0.0) and gw * 1000 == pytest.approx(59.9, abs=0.1)
+    assert '판을 옮긴다' not in (why or '')
+
+
+def test_it_moves_to_the_other_board_when_the_indicated_one_is_full():
+    """**이것이 두 권째다.** 아래 판은 조각뿐이고 위 판에 56 mm 가 있다."""
+    from shelving_manipulation.book_placer import choose_gap_any_board
+    gx, gw, rel, why = choose_gap_any_board(BOTH, -0.0651, 0.0, 0.0352)
+    assert rel == pytest.approx(PITCH)                   # 위 판으로 갔다
+    assert gw * 1000 == pytest.approx(56.0, abs=0.1)
+    assert gx == pytest.approx(0.126, abs=1e-3)
+    assert '판을 옮긴다' in why and '높이도 그 판 것으로' in why
+
+
+def test_it_says_so_loudly_when_it_moves():
+    """**판을 옮겼으면 말해야 한다** — 높이도 바꿔야 하므로 부르는 쪽이 알아야 한다."""
+    from shelving_manipulation.book_placer import choose_gap_any_board
+    _gx, _gw, _rel, why = choose_gap_any_board(BOTH, -0.0651, 0.0, 0.0352)
+    assert '56 mm' in why and 'mm' in why
+
+
+def test_the_widest_fitting_gap_wins_among_other_boards():
+    """옮길 바에는 **가장 넓은** 칸으로 — 여유가 크고 가장 안전하다."""
+    from shelving_manipulation.book_placer import choose_gap_any_board
+    THIRD = HIGH + PITCH
+    gaps = FILLED_LOW + [[0.0980, 0.1540, HIGH], [0.300, 0.396, THIRD]]   # 56 / 96
+    _gx, gw, rel, _why = choose_gap_any_board(gaps, -0.0651, 0.0, 0.0352)
+    assert gw * 1000 == pytest.approx(96.0, abs=0.1) and rel == pytest.approx(2 * PITCH)
+
+
+def test_nowhere_to_go_is_refused():
+    """**자리가 없으면 만들어내지 않는다**."""
+    from shelving_manipulation.book_placer import choose_gap_any_board
+    tiny = FILLED_LOW + [[0.10, 0.115, HIGH]]
+    gx, _gw, _rel, why = choose_gap_any_board(tiny, -0.0651, 0.0, 0.0352)
+    assert gx is None and '다른 판에도 들어가는 빈칸이 없다' in why
+
+
+def test_untagged_gaps_still_work():
+    """판 태그가 없으면 옛 동작 — 한 판만 재던 때와 같다."""
+    from shelving_manipulation.book_placer import choose_gap_any_board
+    gx, _gw, rel, _why = choose_gap_any_board([[-0.1065, -0.0466]], -0.0651, 0.0, 0.0352)
+    assert gx is not None and rel is None

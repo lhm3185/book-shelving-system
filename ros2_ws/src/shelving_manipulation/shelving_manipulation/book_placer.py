@@ -247,6 +247,68 @@ def gaps_on_board(gaps, want_rel_z, tol=0.06):
     return [g for g in tagged if abs((float(g[2]) - base) - near) <= 1e-6], near
 
 
+def choose_gap_any_board(gaps, want_x, want_rel_z, thickness,
+                         min_clearance=0.005, max_move=None, tol=0.06):
+    """
+    비전이 가리킨 판에 자리가 없으면 **다른 판을 본다** → `(중심x, 폭, 판상대높이, 사유)`.
+
+    못 고르면 `(None, None, None, 사유)`.
+
+    왜: 도윤님 목표가 **3·4번 선반에 한 권씩**이다. 그런데 비전은 두 권째에도
+    아래 판을 가리킨다(2026-09-24 실측: 관측 z 0.400 → 아래 판으로 스냅). 그 판은
+    첫 권이 채워 12/9 mm 조각만 남았고, 같은 순간 **위 판에 56 mm 가 비어 있었다.**
+    가리킨 판만 보면 **비어 있는 칸을 두고 거절한다.**
+
+    그래서:
+
+    1. **가리킨 판을 먼저 본다.** 거기 들어가면 그걸로 끝이다 — 비전의 판단을
+       함부로 뒤집지 않는다.
+    2. 거기 안 들어가면 다른 판에서 **가장 넓은** 들어가는 칸을 고른다. 넓은 쪽이
+       여유가 크고, 어차피 판을 옮기는 판단이니 가장 안전한 자리로 간다.
+    3. **판을 옮겼으면 그렇게 말한다.** 높이도 그 판 것으로 바꿔야 하므로 부르는
+       쪽이 반드시 알아야 한다 — 안 바꾸면 *다른 판 높이에 이 판 x* 가 된다.
+
+    아무 판에도 안 들어가면 **거절한다.** 자리가 없는데 만들어내지 않는다.
+    """
+    same, rel = gaps_on_board(gaps, want_rel_z, tol=tol)
+    if same:
+        gx, gw, why = choose_snap_gap(same, want_x, thickness, min_clearance, max_move)
+        if gx is not None:
+            return gx, gw, rel, why
+        first_why = why
+    else:
+        first_why = f'가리킨 판(상대 {float(want_rel_z):+.3f} m)에 실측한 빈칸이 없다'
+
+    tagged = [g for g in gaps if len(g) >= 3]
+    if not tagged:
+        return None, None, None, first_why
+    base = min(float(g[2]) for g in tagged)
+    others = sorted({round(float(g[2]) - base, 4) for g in tagged})
+    need = float(thickness) + 2.0 * float(min_clearance)
+    best = None
+    for r in others:
+        if rel is not None and abs(r - rel) <= 1e-6:
+            continue
+        cands = [g for g in tagged if abs((float(g[2]) - base) - r) <= 1e-6]
+        fits = [g for g in cands if float(g[1]) - float(g[0]) >= need]
+        if not fits:
+            continue
+        widest = max(fits, key=lambda g: float(g[1]) - float(g[0]))
+        w = float(widest[1]) - float(widest[0])
+        if best is None or w > best[1]:
+            best = ((float(widest[0]) + float(widest[1])) / 2.0, w, r)
+    if best is None:
+        return None, None, None, (
+            f'{first_why}. 다른 판에도 들어가는 빈칸이 없다 '
+            f'(잰 판 {len(others)}개)')
+    gx, gw, r = best
+    return gx, gw, r, (
+        f'**판을 옮긴다** — 가리킨 판에 자리가 없다 ({first_why}). '
+        f'상대 {r:+.3f} m 판의 {gw * 1000:.0f} mm 칸으로 간다 '
+        f'(여유 한쪽 {(gw - float(thickness)) / 2 * 1000:.1f} mm). '
+        f'**높이도 그 판 것으로 바꿔야 한다**')
+
+
 def choose_snap_gap(gaps, want_x, thickness, min_clearance=0.005, max_move=None):
     """
     검출된 x 를 **들어가는 실측 빈칸** 으로 끌어온다. `(중심, 폭, 사유)`.
