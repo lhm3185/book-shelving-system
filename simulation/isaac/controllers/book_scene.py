@@ -1905,7 +1905,19 @@ class BookScene:
         n_b = len(qs) - 1 - n_a
         _p, _R = self.lula.compute_forward_kinematics(BOT.ee_frame, q_sw)
         p_sw = np.asarray(_p, float); O_sw = quat_from_R(np.asarray(_R, float))
-        # c. reach — 스윙 끝의 손 자세(=DOWN 을 Δφ 만큼 돌린 것)를 유지한 채 transfer 로 직선
+        # c. reach — 스윙 끝의 손 자세(=DOWN 을 Δφ 만큼 돌린 것)를 유지한 채 transfer 로 직선.
+        #
+        # **위 판에서는 여기서 막힌다** (2026-09-24 실측). 관절공간 되돌림을 붙여 봤더니
+        # 그쪽도 `IK 실패` 였다 — 불연속이 아니라 **`transfer` 자체가 안 풀린다.**
+        # transfer 는 grip_z+0.06 으로 **경로에서 제일 높은 점**이라, 꽂는 자리(여유
+        # 0.217 로 풀린다)보다 5 cm 더 위다. 못 가는 건 꽂는 자리가 아니라 경유점이다.
+        # clear 로 올려도(0.15 → 걸음 0.168 로 더 나빠짐) 차체를 물려도(standoff 0.52)
+        # 그대로였다.
+        #
+        # **c 와 d 를 합쳐 한 번에 가는 길(p_sw → pre_ins, 자세는 slerp)도 닫혔다.**
+        # 2026-09-24 실측: 걸음 0.243 rad 로 **아래 판부터** 깨졌다 — d 단독의 0.249 와
+        # 같은 값이다. 합치면 d 의 관절공간 되돌림이 사라져 손목 특이점을 넘길 수단이
+        # 없어진다. 되던 것까지 망가뜨리므로 쓰지 않는다.
         part, _w, err = self.plan_path([(p_sw, O_sw), (np.asarray(transfer, float), O_sw)], qs[-1])
         if part is None:
             return None, 0.0, f"스윙 c(reach): {err}"
