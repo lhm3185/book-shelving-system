@@ -1799,6 +1799,33 @@ class BookScene:
                      f"목표(팔기준) {np.round(p, 4).tolist()} {frame}")
         return out
 
+    def _dump_ik(self, frame, target_w, ori_w, seed, q_l, ok_l):
+        """IK 문제 하나를 **그대로** 파일에 남긴다 (`SIM_IK_DUMP=<jsonl>`) — 오프라인 대조용.
+
+        웹 클로드 v42 회신 §3: 대조에 필요한 건 "구간 · 목표 자세(프레임 명시) · 씨앗 · Lula 해" 네
+        필드다. 그러면 Isaac 없이 `tools/ik_compare.py` 가 수천 개를 몇 초에 돌린다 — 시뮬 안에서
+        두 번 풀어 heartbeat 를 늘리던 길(문턱 올리기 냄새)은 버린다. 목표는 **팔 기준·손끝 프레임**
+        으로 적고 손→손끝 변환(tool)도 같이 적는다. 동작은 안 바뀐다 — 쓰기만 한다.
+        """
+        import json
+        try:
+            p, Rm, tool = self._ak_target(frame, target_w, ori_w)
+            rec = {"phase": getattr(self, "_ik_phase", "?"), "frame": str(frame),
+                   "p_arm": [round(float(v), 6) for v in p],
+                   "R_arm": [round(float(v), 6) for v in np.asarray(Rm, float).ravel()],
+                   "tool": None if tool is None else
+                   {"T": [round(float(v), 6) for v in tool[0]],
+                    "R": [round(float(v), 6) for v in np.asarray(tool[1], float).ravel()]},
+                   "seed": [round(float(v), 6) for v in seed],
+                   "lula_ok": bool(ok_l),
+                   "lula_q": None if not ok_l else [round(float(v), 6) for v in np.asarray(q_l, float)]}
+            with open(os.environ["SIM_IK_DUMP"], "a") as f:
+                f.write(json.dumps(rec) + "\n")
+        except Exception as exc:      # noqa: BLE001 - 기록이 작업을 막으면 안 된다
+            self._dump_err = getattr(self, "_dump_err", 0) + 1
+            if self._dump_err == 1:
+                self.say(f"[IK덤프] 못 썼다: {type(exc).__name__}: {exc}")
+
     def _solve_ik(self, frame, target_w, ori_w, seed):
         """IK 한 번 — **어느 풀이기로 풀지 여기서만 고른다.** 돌려주는 값은 Lula 와 같은 `(q, ok)`.
 
@@ -1828,6 +1855,8 @@ class BookScene:
         q_l = ok_l = None
         if mode != "1":
             q_l, ok_l = self.lula.compute_inverse_kinematics(frame, target_w, ori_w, seed, 0.004, 0.05)
+            if capable and os.environ.get("SIM_IK_DUMP"):
+                self._dump_ik(frame, target_w, ori_w, seed, q_l, ok_l)
             if mode != "compare" or not capable:
                 return q_l, ok_l
         import arm_kinematics as _ak
