@@ -59,3 +59,45 @@ def plan_full(plan_fn: Callable[[object, float, float], object],
         if n >= points:
             return p, name, tried
     return None, "", tried
+
+
+def shrink_candidates(x_from: float, x_to: float, fracs=(1.0, 0.8, 0.6, 0.45)
+                      ) -> List[Tuple[float, float]]:
+    """훑을 x 범위 후보 — **닿는 데까지 줄여 본다.** 넓은 것부터.
+
+    양쪽 끝을 각각 줄인다. 어느 쪽이 안 닿는지 모르기 때문이다 — 2026-09-24 SW2 는
+    **오른쪽**이 안 닿았다(세 전략이 x=+0.175 · +0.35 에서 모두 실패).
+    """
+    a, b = float(x_from), float(x_to)
+    span = b - a
+    out: List[Tuple[float, float]] = []
+    for f in fracs:
+        for lo, hi in ((a, a + span * f), (b - span * f, b)):
+            pair = (round(lo, 4), round(hi, 4))
+            if pair not in out:
+                out.append(pair)
+    return out
+
+
+def plan_reachable(plan_fn, seed, x_from: float, x_to: float, points: int,
+                   min_span: float = 0.20):
+    """닿는 만큼만 훑는 계획 — `(계획, (x_lo, x_hi), 기록)`.
+
+    **판을 통째로 건너뛰는 것보다 낫다.** SW2 에서 아래 판(우리가 책을 꽂는 그 판)을
+    한 정지점도 안 봤는데, 그 판의 **왼쪽 절반은 닿는다**. 안 닿는 것은 오른쪽뿐이다.
+
+    못 본 구간을 **말한다.** 스캔이 서가의 일부를 못 본 채 "완료" 되면, 비전은 그
+    자리의 빈칸을 영영 못 찾는다. 못 본 것을 못 봤다고 해야 한다.
+
+    `min_span` 보다 좁아지면 포기한다 — 그만큼만 보고 "훑었다" 고 하면 거짓말이다.
+    """
+    tried: List[str] = []
+    for lo, hi in shrink_candidates(x_from, x_to):
+        if abs(hi - lo) < min_span:
+            continue
+        p = plan_fn(seed, lo, hi)
+        n = len(getattr(p, "hold_idx", ()) or ())
+        tried.append(f"[{lo:+.2f},{hi:+.2f}] {n}/{points}")
+        if n >= points:
+            return p, (lo, hi), tried
+    return None, None, tried

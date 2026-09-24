@@ -340,8 +340,12 @@ class ManipulationExecutor:
                 raise RuntimeError("서가가 팔 +Y 에 없다")
             face = min(fronts)
             q_now = np.asarray(self.robot.get_joint_positions()[self.scene.idx_arm], float)
+            # **계획은 이 자세에서 시작한다.** 이 값을 안 남기면 Isaac 없이 재현할 수
+            # 없다 — 2026-09-24 에 오프라인 재현이 실제와 갈린 이유가 이것이었다.
+            self.say(f"[스윕] 시작 자세 q={np.round(q_now, 4).tolist()}")
             steps, holds, q = [], 0, q_now
-            from sweep_retry import attempts as _attempts, plan_full as _plan_full
+            from sweep_retry import (attempts as _attempts, plan_full as _plan_full,
+                                     plan_reachable as _plan_reachable)
             _home = np.asarray(getattr(self.scene, "q_home", None), float) \
                 if getattr(self.scene, "q_home", None) is not None else None
             for bz in boards:
@@ -355,10 +359,26 @@ class ManipulationExecutor:
                 # 방향을 뒤집어 보고, 그래도 안 되면 앞 판의 IK 가지를 버리고 홈에서
                 # 다시 푼다. **`points` 를 줄이거나 문턱을 낮추지는 않는다.**
                 plan, how, tried = _plan_full(_fn, _attempts(q, _home, x_from, x_to), points)
+                _span = (x_from, x_to)
+                if plan is None:
+                    # **판을 통째로 건너뛰기 전에, 닿는 만큼이라도 훑는다.**
+                    # 2026-09-24 SW2 에서 아래 판(우리가 책을 꽂는 그 판)을 한 정지점도
+                    # 안 보고 사이클이 통과했다. 그 판의 **왼쪽 절반은 닿고 우리 빈칸도
+                    # 거기 있다.** 안 닿는 것은 오른쪽뿐이었다.
+                    plan, _span, _shrunk = _plan_reachable(_fn, q, x_from, x_to, points)
+                    tried = tried + _shrunk
+                    how = "좁혀서" if plan is not None else how
                 if plan is None:
                     self.say(f"[스윕] 판 {bz:.3f} (팔기준 z {z_arm:.3f}, 앞면 {face:.3f}) "
                              f"**다 해 봤지만 {points}개를 못 채웠다**: {' · '.join(tried)}")
+                    self.say(f"  시작 자세 q={np.round(np.asarray(q, float), 4).tolist()}"
+                             "   ← 이 값이 있어야 Isaac 없이 재현된다")
                     continue
+                if (_span[0], _span[1]) != (x_from, x_to):
+                    _miss = (x_to - x_from) - abs(_span[1] - _span[0])
+                    self.say(f"[스윕] **판 {bz:.3f} 은 x {_span[0]:+.2f}~{_span[1]:+.2f} 만 훑는다** — "
+                             f"{_miss * 1000:.0f} mm 는 팔이 안 닿는다. "
+                             f"그 구간의 빈칸은 이 판에서 **못 본다**")
                 st = ak.path_stats(plan.qs) if plan.qs else {}
                 self.say(f"[스윕] 판 {bz:.3f} (팔기준 z {z_arm:.3f}, 앞면 {face:.3f}) 정지점 {len(plan.hold_idx)}/{points} "
                          f"여유 {plan.min_margin:.3f} rad 최대변화 {st.get('max_step_rad', 0):.2f} 길이 {st.get('length_rad', 0):.2f}"
