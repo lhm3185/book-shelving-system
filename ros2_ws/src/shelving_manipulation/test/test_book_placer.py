@@ -421,3 +421,57 @@ def test_the_reason_carries_the_numbers():
     from shelving_manipulation.book_placer import steady_book
     _x, _y, _z, why = steady_book(FRAMES)
     assert '관측 3개' in why and 'mm' in why
+
+
+# ------------------- 판을 가려서 맞춘다 (2026-09-24 두 권 판)
+#
+#   두 권째가 **같은 칸에** 또 꽂혔다. 빈칸 측정이 한 판만 했고, 꽂은 책도
+#   목록에 없어서 폭이 59.8 mm 그대로였다. 그래서 막지도 못했다.
+#   판을 여러 개 재면 이번엔 **층이 섞일** 수 있어서 판을 가려야 한다.
+
+PITCH = 0.544        # 3·4번 선반 간격 (월드 1.042 − 0.498)
+LOW, HIGH = 0.168, 0.168 + PITCH        # 빈칸 태그: 선반판 윗면 (팔 기준)
+G = [[-0.1065, -0.0466, LOW], [0.0200, 0.0800, LOW], [0.1500, 0.2460, HIGH]]
+
+
+def test_it_picks_only_the_gaps_on_that_board():
+    from shelving_manipulation.book_placer import gaps_on_board
+    same, rel = gaps_on_board(G, 0.0)                 # 아래 판 (상대 0)
+    assert len(same) == 2 and rel == pytest.approx(0.0)
+    same, rel = gaps_on_board(G, PITCH)               # 위 판
+    assert len(same) == 1 and rel == pytest.approx(PITCH)
+
+
+def test_absolute_height_is_not_compared():
+    """**칸 중심과 판 윗면은 172 mm 다르다.** 상대 높이로 맞추니 기준이 달라도 된다."""
+    from shelving_manipulation.book_placer import gaps_on_board
+    # 노드 쪽: lower_z 0.3399 · middle_z 0.3399+PITCH → 상대는 0 과 PITCH
+    assert len(gaps_on_board(G, (0.3399 + PITCH) - 0.3399)[0]) == 1
+    assert len(gaps_on_board(G, 0.3399 - 0.3399)[0]) == 2
+
+
+def test_a_height_between_boards_is_refused():
+    """판 사이 허공이면 **빈 목록**을 준다 — 가까운 판으로 끌어당기지 않는다."""
+    from shelving_manipulation.book_placer import gaps_on_board
+    same, rel = gaps_on_board(G, PITCH / 2)
+    assert same == [] and rel is not None
+
+
+def test_untagged_gaps_fall_back_to_the_old_behaviour():
+    """판이 안 붙은 옛 형식이면 전부 준다 — 한 판만 재던 때와 같다."""
+    from shelving_manipulation.book_placer import gaps_on_board
+    old = [[-0.1065, -0.0466], [0.02, 0.08]]
+    same, rel = gaps_on_board(old, 0.0)
+    assert same == old and rel is None
+
+
+def test_the_second_book_cannot_reuse_the_filled_gap():
+    """**두 권 판의 핵심.** 첫 권이 채운 칸은 조각이 되어 들어가는 칸에서 빠진다."""
+    from shelving_manipulation.book_placer import choose_snap_gap, gaps_on_board
+    filled = [[-0.1065, -0.0940, LOW], [-0.0583, -0.0473, LOW], [0.1500, 0.2460, HIGH]]
+    same, _rel = gaps_on_board(filled, 0.0)
+    gx, _gw, why = choose_snap_gap(same, -0.0651, 0.0352)
+    assert gx is None and '들어가는 빈칸이 없다' in why      # 아래 판은 이제 못 쓴다
+    same_hi, _rel = gaps_on_board(filled, PITCH)
+    gx2, gw2, why2 = choose_snap_gap(same_hi, 0.198, 0.0352)
+    assert why2 is None and gw2 * 1000 == pytest.approx(96.0, abs=0.1)   # 위 판 96 mm

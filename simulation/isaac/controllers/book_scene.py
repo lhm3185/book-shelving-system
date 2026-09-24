@@ -3092,8 +3092,8 @@ class BookScene:
         self.shelf_gap = gt
         return gt
 
-    def shelf_book_boxes(self, board_z=None, tol=0.10):
-        """서가에 꽂힌 **낱권 책**들의 월드 AABB. 우리 책은 빼고 본다.
+    def shelf_book_boxes(self, board_z=None, tol=0.10, exclude=()):
+        """서가에 꽂힌 **낱권 책**들의 월드 AABB. **우리가 꽂은 책도 센다.**
 
         왜 필요한가 (2026-09-23 실측): 서가 낱권 책 64권은 `RigidBodyAPI` 도
         `CollisionAPI` 도 없다 — 순전히 장식이다. 그래서 **꽉 찬 칸에 꽂아도 책이
@@ -3103,6 +3103,14 @@ class BookScene:
         `/World/books/<층>/<책>` 이 서가 책이고, 우리가 다루는 책은
         `/World/tray_books/*`(레벨 트레이) 또는 `/World/bs_books/*`(스폰) 이다.
         `board_z` 를 주면 그 선반판 위 `tol` 안에 있는 책만 돌려준다.
+
+        **우리가 꽂은 책도 센다** (2026-09-24 실측으로 드러났다). 예전에는 우리 책을
+        통째로 뺐는데, 그러면 **한 권 꽂은 뒤에도 그 칸이 비어 보인다** — 실제로
+        두 권째가 같은 칸(폭 59.8 mm 그대로)으로 끌려가 옆 책을 3.8 mm 파고들었고,
+        임계 5 mm 아래라 `code 0` 으로 "성공" 보고까지 했다.
+
+        **트레이에 있는 우리 책은 안 센다** — 판 높이로 걸러지므로 저절로 빠진다.
+        `exclude` 는 지금 판정하려는 책이다. 안 빼면 자기 자신과 100% 겹친다.
         """
         root = self.stage.GetPrimAtPath("/World/books")
         if not root.IsValid():
@@ -3120,9 +3128,21 @@ class BookScene:
                 if board_z is not None and abs(float(b[2]) - float(board_z)) > tol:
                     continue
                 out.append((path, b))
+        # **우리가 꽂은 책을 그 판의 책으로 편입한다.** 판 높이로 거르므로 트레이에
+        # 남아 있는 것은 저절로 빠진다.
+        _skip = set(exclude) if not isinstance(exclude, str) else {exclude}
+        for path in self.books:
+            if path in _skip:
+                continue
+            b = self.aabb(path)
+            if not np.all(np.isfinite(b)) or np.any(b[3:] - b[:3] <= 0):
+                continue
+            if board_z is None or abs(float(b[2]) - float(board_z)) > tol:
+                continue
+            out.append((path, b))
         return out
 
-    def jam_report(self, bb, board_z):
+    def jam_report(self, bb, board_z, exclude=()):
         """꽂은 책이 **옆 책 속에 박혀 있는가** — 침투 깊이(m)와 최악의 이웃.
 
         겹침 판정은 세 축 모두 겹칠 때만 성립하고, 침투 깊이는 **떼어내는 데 필요한
@@ -3133,7 +3153,7 @@ class BookScene:
         바닥값**이지 통과시키려고 올린 문턱이 아니다.
         """
         worst, who, axes = 0.0, "", None
-        for path, nb in self.shelf_book_boxes(board_z):
+        for path, nb in self.shelf_book_boxes(board_z, exclude=exclude):
             ov = np.minimum(bb[3:], nb[3:]) - np.maximum(bb[:3], nb[:3])
             if np.any(ov <= 0):
                 continue                      # 한 축이라도 안 겹치면 떨어져 있다
@@ -3166,7 +3186,7 @@ class BookScene:
             self.say("[꽂은 자세] 단면이 정사각이라 비뚤어짐을 못 잰다 — skew 검사 건너뜀")
         # 옆 책과 겹쳤는가 (T1). 물리가 막아 주지 않으므로 기하로 잰다 — 위 머리말 참조.
         if JAM_CHECK:
-            jam, who, axes = self.jam_report(bb, plan.get("floor_z"))
+            jam, who, axes = self.jam_report(bb, plan.get("floor_z"), exclude=plan["book"])
             checks["no_jam"] = jam <= JAM_TOL
             # **겹침이 안 나도 찍는다.** 비뚤어짐은 겹쳐야만 생기는 게 아니라
             # 시연 구간(-45 ~ +52 mm) 안에서도 작게 일어나고 있을 수 있고,
@@ -3195,7 +3215,7 @@ class BookScene:
                          f"기울기 {_skew:+.2f}° 로 x 폭이 {(_sx - _T)*1000:+.1f} mm 부풀었다 → "
                          f"{'비뚤어짐' if (_sx - _T) > abs(_off) else '옆으로 밀림'}")
             else:
-                _boxes = self.shelf_book_boxes(plan.get("floor_z"))
+                _boxes = self.shelf_book_boxes(plan.get("floor_z"), exclude=plan["book"])
                 n = len(_boxes)
                 # **겹침 0 이 "여유가 있다" 를 뜻하지 않는다.** 겹침 0 으로 통과한 판의
                 # 실제 여유가 한쪽 4.9 mm 였던 적이 있다(임계 5 mm). 통과와 아슬아슬함을

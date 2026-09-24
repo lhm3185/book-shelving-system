@@ -220,6 +220,33 @@ def internal_failure(exc, traceback_text=''):
     return INTERNAL_ERROR, 'INTERNAL', msg
 
 
+def gaps_on_board(gaps, want_rel_z, tol=0.06):
+    """
+    빈칸 목록에서 **그 판의 것만** 고른다 → `(같은 판 빈칸, 판 상대높이 또는 None)`.
+
+    `gaps` 는 `[lo, hi]` 또는 `[lo, hi, 판z]`. 판이 안 붙어 있으면 전부 돌려준다
+    (옛 형식 — 그때는 한 판만 쟀다).
+
+    **절대 높이로 맞추지 않는다.** 빈칸의 `판z` 는 선반판 윗면이고, 조작 노드가 쓰는
+    `zs` 는 꽂힌 책의 중심이다 — 172 mm 쯤 다르다. 두 기준을 직접 비교하면 늘 어긋난다.
+    대신 **가장 낮은 판에서 얼마나 올라왔는가**(상대 높이)로 맞춘다. 판 간격은
+    양쪽에서 같으므로(0.544 m) 이 값은 기준이 달라도 같다.
+
+    왜 판을 가려야 하나: 3·4번 선반을 다 재면 빈칸이 여러 판에 걸친다. 안 가리면
+    **3번에서 본 빈칸을 4번 x 로 끌어당긴다** — 높이는 검출값이 그대로 가므로
+    *3번 높이에 4번 x* 라는 있지도 않은 자리가 만들어진다.
+    """
+    tagged = [g for g in gaps if len(g) >= 3]
+    if not tagged:
+        return list(gaps), None
+    base = min(float(g[2]) for g in tagged)
+    rels = sorted({round(float(g[2]) - base, 4) for g in tagged})
+    near = min(rels, key=lambda r: abs(r - float(want_rel_z)))
+    if abs(near - float(want_rel_z)) > tol:
+        return [], near
+    return [g for g in tagged if abs((float(g[2]) - base) - near) <= 1e-6], near
+
+
 def choose_snap_gap(gaps, want_x, thickness, min_clearance=0.005, max_move=None):
     """
     검출된 x 를 **들어가는 실측 빈칸** 으로 끌어온다. `(중심, 폭, 사유)`.
@@ -241,8 +268,10 @@ def choose_snap_gap(gaps, want_x, thickness, min_clearance=0.005, max_move=None)
     """
     fits, tight = [], []
     need = float(thickness) + 2.0 * float(min_clearance)
-    for lo, hi in gaps:
-        lo, hi = float(lo), float(hi)
+    # 빈칸은 `[lo, hi]` 또는 `[lo, hi, 판z]` 다. 판 태그는 여기서 안 쓴다 —
+    # 판 가리기는 `gaps_on_board` 가 먼저 하고 온다.
+    for g in gaps:
+        lo, hi = float(g[0]), float(g[1])
         w = hi - lo
         (fits if w >= need else tight).append(((lo + hi) / 2.0, w))
     if not fits:

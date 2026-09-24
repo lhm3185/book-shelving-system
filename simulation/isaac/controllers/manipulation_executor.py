@@ -253,36 +253,49 @@ class ManipulationExecutor:
         self.say(f"스캔 시작: 자세 {len(poses)}개, 자세마다 {dwell:.1f}초 정지 "
                  f"(최대 관절 변화 {max(m['step_rad'] for _, _, m in poses):.2f} rad)")
         # **꽂을 수 있는 판과 아닌 판을 미리 알린다** — 비전이 준 빈칸을 나중에 거를 때 쓴다
+        _boards = sorted({float(m["board_z"]) for _, _, m in poses})
         self.publish(dict(self.job.state, phase="scan_plan", shelf_box=self._shelf_box_arm(),
-                          shelf_gaps=self._shelf_gaps_arm(self.scene.shelf_floor_z),
+                          shelf_gaps=self._shelf_gaps_arm(_boards),
                           boards=[{"board_z": m["board_z"], "name": n,
                                    "reachable": m["reachable"]} for n, _, m in poses]))
         self.scene.set_scan_tray_guard(True)
         self.arm.enqueue(Sequence("scan", steps))
 
-    def _shelf_gaps_arm(self, board_z):
-        """그 선반 판의 **실제 빈칸**을 팔 기준 x 구간으로 → [[lo, hi], ...].
+    def _shelf_gaps_arm(self, boards):
+        """선반 판들의 **실제 빈칸**을 팔 기준으로 → `[[lo, hi, 판z_팔기준], ...]`.
 
-        왜: 비전의 빈칸 x 가 **판마다 160 mm 까지 흔들린다** (2026-09-24 다섯 판 실측:
-        같은 장면인데 −0.063 ~ +0.097). 깊이(y)는 서가 앞면 실측으로 끌어왔지만 x 는
-        끌어올 기준이 없었다 — **이것이 그 기준이다.**
+        왜: 비전의 빈칸 x 가 판마다 크게 흔들린다. 깊이(y)는 서가 앞면 실측으로
+        끌어왔지만 x 는 끌어올 기준이 없었다 — 이것이 그 기준이다.
 
-        서가 책들의 AABB 에서 빈칸을 직접 잰다. `shelf_gap.py` 가 눕혀 쌓인 책의 넓은
-        AABB 가 만드는 허깨비 빈칸도 걸러 준다 (그 모듈 시험 9개가 지킨다).
+        **판을 여러 개 잰다** (2026-09-24). 예전에는 `shelf_floor_z` 한 판만 쟀고,
+        그래서 다른 판의 빈칸은 목록에 아예 없었다. 도윤님 목표가 **3·4번 선반에
+        한 권씩**인데 한 판만 재면 두 권째가 갈 곳이 없다.
+
+        **빈칸마다 어느 판인지를 같이 보낸다.** 안 보내면 맞춤이 층을 섞어,
+        3번 선반에서 본 빈칸을 4번 선반 x 로 끌어당길 수 있다.
         """
         try:
             import sys as _s
             import os as _o
             _s.path.insert(0, _o.path.dirname(_o.path.abspath(__file__)))
             from shelf_gap import gaps as _gaps
-            boxes = [(path, float(bb[0]), float(bb[3]))
-                     for path, bb in self.scene.shelf_book_boxes(board_z)]
-            if not boxes:
-                return None
-            # 월드 x → 팔 기준 x. 서가와 팔이 나란하므로 x 는 평행이동이다
+            if isinstance(boards, (int, float)):
+                boards = [float(boards)]
             ax = float(self.scene.l0p[0])
-            boxes = [(n, lo - ax, hi - ax) for n, lo, hi in boxes]
-            return [[round(g.lo, 4), round(g.hi, 4)] for g in _gaps(boxes)]
+            az = float(self.scene.l0p[2])
+            out = []
+            for bz in boards:
+                boxes = [(path, float(bb[0]) - ax, float(bb[3]) - ax)
+                         for path, bb in self.scene.shelf_book_boxes(float(bz))]
+                if not boxes:
+                    continue
+                z_arm = round(float(bz) - az, 4)
+                got = [[round(g.lo, 4), round(g.hi, 4), z_arm] for g in _gaps(boxes)]
+                out += got
+                self.say(f"[빈칸] 판 {bz:.3f} (팔기준 z {z_arm:.3f}): 책 {len(boxes)}권 · "
+                         f"빈칸 {len(got)}개 "
+                         + " ".join(f"{(g[1]-g[0])*1000:.0f}mm@{(g[0]+g[1])/2:+.3f}" for g in got))
+            return out or None
         except Exception as exc:      # noqa: BLE001 - 진단값이 없다고 스캔을 막지 않는다
             self.say(f"[빈칸] 실측 실패 {type(exc).__name__}: {exc}")
             return None
@@ -382,7 +395,7 @@ class ManipulationExecutor:
         self.publish(self.job.state)
         self.say(f"스윕 시작: 판 {boards}, 정지점 {holds}개, 정지 {dwell:.1f}s")
         self.publish(dict(self.job.state, phase="scan_plan", shelf_box=self._shelf_box_arm(),
-                          shelf_gaps=self._shelf_gaps_arm(self.scene.shelf_floor_z),
+                          shelf_gaps=self._shelf_gaps_arm(boards),
                           boards=[{"board_z": b, "name": f"sweep_{b:.3f}", "reachable": True} for b in boards]))
         self.scene.set_scan_tray_guard(True)
         self.arm.enqueue(Sequence("scan", steps))
