@@ -344,59 +344,15 @@ class ManipulationExecutor:
             # 없다 — 2026-09-24 에 오프라인 재현이 실제와 갈린 이유가 이것이었다.
             self.say(f"[스윕] 시작 자세 q={np.round(q_now, 4).tolist()}")
             steps, holds, q = [], 0, q_now
-            from sweep_retry import (attempts as _attempts, plan_full as _plan_full,
-                                     plan_reachable as _plan_reachable)
-            # **두 홈을 다 시드로 써 본다.** `SIM_HOME_Q` 로 갈아 낀 홈은 파지 여유가
-            # 크지만(0.707 vs 0.128) **아래 판 스윕이 그 자세에서 안 풀린다**
-            # (2026-09-24 실측: 아래 판 3/5 여유 0.118 vs 원래 홈 5/5 여유 0.166).
-            # 하나를 고를 일이 아니라 **둘 다 해 보면 된다.**
-            _home = np.asarray(getattr(self.scene, "q_home", None), float) \
-                if getattr(self.scene, "q_home", None) is not None else None
-            _home2 = getattr(self.scene, "q_home_conf", None)
-            _home2 = np.asarray(_home2, float) if _home2 is not None else None
-            if _home2 is not None and _home is not None and np.allclose(_home2, _home):
-                _home2 = None          # 갈아 끼우지 않았으면 같은 것을 두 번 안 한다
             for bz in boards:
                 z_arm = bz - float(self.scene.l0p[2])
-
-                def _fn(seed, a, b, _z=z_arm):
-                    return ak.plan_board_sweep(seed, face, _z, a, b, points)
-
-                # **반쪽 계획을 실행하지 않는다.** 2026-09-24 SW1 에서 아래 판이
-                # 3/5 로만 풀렸는데 그대로 갔고, 못 간 구간에서 404 시간 초과가 났다.
-                # 방향을 뒤집어 보고, 그래도 안 되면 앞 판의 IK 가지를 버리고 홈에서
-                # 다시 푼다. **`points` 를 줄이거나 문턱을 낮추지는 않는다.**
-                _cands = _attempts(q, _home, x_from, x_to)
-                if _home2 is not None:
-                    _cands += [("원래 홈에서", _home2, x_from, x_to),
-                               ("원래 홈에서 되돌아", _home2, x_to, x_from)]
-                plan, how, tried = _plan_full(_fn, _cands, points)
-                _span = (x_from, x_to)
-                if plan is None:
-                    # **판을 통째로 건너뛰기 전에, 닿는 만큼이라도 훑는다.**
-                    # 2026-09-24 SW2 에서 아래 판(우리가 책을 꽂는 그 판)을 한 정지점도
-                    # 안 보고 사이클이 통과했다. 그 판의 **왼쪽 절반은 닿고 우리 빈칸도
-                    # 거기 있다.** 안 닿는 것은 오른쪽뿐이었다.
-                    plan, _span, _shrunk = _plan_reachable(_fn, q, x_from, x_to, points)
-                    tried = tried + _shrunk
-                    how = "좁혀서" if plan is not None else how
-                if plan is None:
-                    self.say(f"[스윕] 판 {bz:.3f} (팔기준 z {z_arm:.3f}, 앞면 {face:.3f}) "
-                             f"**다 해 봤지만 {points}개를 못 채웠다**: {' · '.join(tried)}")
-                    self.say(f"  시작 자세 q={np.round(np.asarray(q, float), 4).tolist()}"
-                             "   ← 이 값이 있어야 Isaac 없이 재현된다")
-                    continue
-                if (_span[0], _span[1]) != (x_from, x_to):
-                    _miss = (x_to - x_from) - abs(_span[1] - _span[0])
-                    self.say(f"[스윕] **판 {bz:.3f} 은 x {_span[0]:+.2f}~{_span[1]:+.2f} 만 훑는다** — "
-                             f"{_miss * 1000:.0f} mm 는 팔이 안 닿는다. "
-                             f"그 구간의 빈칸은 이 판에서 **못 본다**")
+                plan = ak.plan_board_sweep(q, face, z_arm, x_from, x_to, points)
                 st = ak.path_stats(plan.qs) if plan.qs else {}
                 self.say(f"[스윕] 판 {bz:.3f} (팔기준 z {z_arm:.3f}, 앞면 {face:.3f}) 정지점 {len(plan.hold_idx)}/{points} "
                          f"여유 {plan.min_margin:.3f} rad 최대변화 {st.get('max_step_rad', 0):.2f} 길이 {st.get('length_rad', 0):.2f}"
-                         + (f" [{how}]" if how != "이어가기" else "")
-                         + (f" (해 본 것: {' · '.join(tried)})" if len(tried) > 1 else "")
                          + (f" — {plan.reason}" if plan.reason else ""))
+                if not plan.hold_idx:
+                    continue
                 prev = 0
                 for k, hi in enumerate(plan.hold_idx):
                     seg = plan.qs[prev:hi + 1]
@@ -408,11 +364,6 @@ class ManipulationExecutor:
                 q = plan.qs[plan.hold_idx[-1]]
             if not steps:
                 raise RuntimeError("스윕 경로가 하나도 안 풀렸다")
-            if len(steps) < 2 * points * len(boards):
-                # **다 못 훑었으면 말한다.** 스캔이 서가의 일부를 못 본 채로
-                # "완료" 되면, 비전은 못 본 자리의 빈칸을 영영 못 찾는다.
-                self.say(f"[스윕] **주의: 판 {len(boards)}개 중 일부만 훑는다** — "
-                         f"정지점 {holds}개 (다 풀렸으면 {points * len(boards)}개)")
             # 홈 복귀는 천천히(0.25 rad/s) 가고, **홈에 정말 도착할 때까지** 기다린 뒤 끝낸다. JointPath 는 지령을 다
             # 보내면 끝나는데 실제 팔은 0.43 rad 뒤처져 있었고(2026-09-23 18:55 진단), 그 상태에서 스캔이 '완료' 되어
             # 책 관측(비전)이 시작돼 카메라가 바닥을 보고 있었다 → "책 좌표 없음".
