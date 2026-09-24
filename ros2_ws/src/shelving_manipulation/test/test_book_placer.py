@@ -227,3 +227,37 @@ def test_a_handle_without_is_active_still_works():
     b = Bare()
     ok, _why = publish_feedback_safely(b, 'fb')
     assert ok and b.sent == ['fb']
+
+
+# ------------------------- 사이클이 사이클을 망친다 (2026-09-24 생중계 확정 뒤)
+#
+#   지금까지 잰 조건: 판마다 시뮬·노드를 새로 띄우고 사이클 1번.
+#   생중계 시연:      시뮬·노드를 한 번 띄우고 사이클을 여러 번.
+#   **시연 조건은 한 번도 안 쟀다.** 그 조건에서만 나는 것이 이것이다.
+#
+#   빈칸은 스캔할 때 잰다. 그런데 책을 한 권 꽂으면 **그 빈칸이 없어진다.**
+#   다시 안 재고 그 값을 쓰면 방금 채운 자리에 또 꽂는다.
+
+def test_a_fresh_measurement_is_usable():
+    from shelving_manipulation.book_placer import stale_gap_reason
+    assert stale_gap_reason(0, 0) is None
+    assert stale_gap_reason(3, 3) is None
+
+
+def test_a_measurement_from_before_a_placement_is_refused():
+    """**한 번만 꽂아도 낡는다.** 그 한 권이 빈칸을 채웠다."""
+    from shelving_manipulation.book_placer import stale_gap_reason
+    why = stale_gap_reason(0, 1)
+    assert why is not None and '배치 1회 전' in why and '다시 스캔' in why
+
+
+def test_the_reason_says_how_many_placements_ago():
+    from shelving_manipulation.book_placer import stale_gap_reason
+    assert '배치 3회 전' in stale_gap_reason(2, 5)
+
+
+def test_never_measured_is_refused_too():
+    """안 잰 것과 낡은 것은 다르지만, **둘 다 꽂으면 안 된다.**"""
+    from shelving_manipulation.book_placer import stale_gap_reason
+    why = stale_gap_reason(None, 0)
+    assert why is not None and '스캔이 먼저' in why

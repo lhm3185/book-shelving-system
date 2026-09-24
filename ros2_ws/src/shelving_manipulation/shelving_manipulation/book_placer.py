@@ -189,6 +189,28 @@ def publish_feedback_safely(goal_handle, message, on_error=None):
         return False, why
 
 
+def stale_gap_reason(measured_at, place_count):
+    """빈칸 실측이 **그 뒤의 배치 때문에 낡았는가.** 낡았으면 거절 사유, 아니면 `None`.
+
+    빈칸은 서가를 스캔할 때 잰다. 그런데 **책을 한 권 꽂으면 그 빈칸이 없어진다.**
+    다시 재지 않고 그 값을 쓰면, 방금 채운 자리를 비었다고 보고 그 위에 또 꽂는다.
+
+    한 판에 사이클 하나만 돌 때는 이 일이 안 난다 — 그래서 2026-09-24 까지 한 번도
+    안 보였다. **생중계 시연은 시뮬을 한 번 띄우고 사이클을 여러 번 돈다.** 지금까지
+    잰 조건이 아니다.
+
+    낡았으면 **거절한다**(410). 낡은 값으로 꽂는 것보다 안 꽂는 것이 낫고, 사유를
+    읽으면 "다시 스캔하라" 가 바로 나온다.
+    """
+    if measured_at is None:
+        return '빈칸을 아직 안 쟀다 — 스캔이 먼저다'
+    if measured_at == place_count:
+        return None
+    n = place_count - measured_at
+    return (f'빈칸 실측이 배치 {n}회 전의 값이다 (잰 시점 {measured_at}, 지금 {place_count}) '
+            f'— 꽂은 책이 그 빈칸을 채웠을 수 있다. 다시 스캔해야 한다')
+
+
 def pick_cancel(inbox, token):
     """대기 중인 명령들에서 **내 토큰의 취소만** 꺼낸다.
 

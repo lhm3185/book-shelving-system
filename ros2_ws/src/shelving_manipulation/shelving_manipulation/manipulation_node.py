@@ -120,6 +120,10 @@ class ManipulationNode(Node):
         self._scan_state = None
         self._empty_observations = []
         self._shelf_gaps = None      # 시뮬이 잰 **실제 빈칸** 팔기준 x 구간 [[lo, hi], ...]
+        # **빈칸은 배치 한 번이면 낡는다.** 꽂은 책이 그 자리를 채우기 때문이다.
+        # 한 판에 사이클 하나만 돌면 안 보이는데, 생중계는 사이클을 여러 번 돈다.
+        self._place_count = 0        # 책을 꽂아 본 횟수
+        self._shelf_gaps_at = None   # 빈칸을 잰 시점의 `_place_count`
         self._shelf_box = None       # 시뮬이 스캔 계획 때 알려주는 서가 상자(팔 기준). 빈칸은 이 안에서만 인정
         self._book_observations = []
         self._status = ('IDLE', '', 0.0, 0, '')    # state, job, progress, error_code, message
@@ -196,6 +200,7 @@ class ManipulationNode(Node):
                 self._scan_state = dict(state)
                 if state.get('phase') == 'scan_plan' and state.get('shelf_gaps'):
                     self._shelf_gaps = [[float(v) for v in g] for g in state['shelf_gaps']]
+                    self._shelf_gaps_at = self._place_count      # 이 시점의 값이다
                 if state.get('phase') == 'scan_plan' and state.get('shelf_box'):
                     self._shelf_box = [float(v) for v in state['shelf_box']]   # 팔 기준 [x0,x1,y_front,y_back,z0,z1]
                 self._wake.set()
@@ -473,6 +478,11 @@ class ManipulationNode(Node):
         # 멀면 어느 칸을 본 것인지 알 수 없다 — 엉뚱한 칸으로 끌어당기면 남의 자리에
         # 꽂는다. 그때는 검출을 그대로 두고 뒤쪽 검사에 맡긴다.
         if self.slot_x_snap_to_gap and self._shelf_gaps:
+            stale = stale_gap_reason(self._shelf_gaps_at, self._place_count)
+            if stale:
+                self._slot_reject = stale
+                self.get_logger().warning(f'**빈칸 거절** {stale}')
+                return None
             cands = [((lo + hi) / 2.0, hi - lo) for lo, hi in self._shelf_gaps]
             gx, gw = min(cands, key=lambda c: abs(c[0] - x))
             # **빈칸이 하나뿐이면 거리를 안 본다.** 한계를 두는 이유는 "어느 칸을 본
@@ -906,6 +916,13 @@ class ManipulationNode(Node):
 
         if outcome.success or any(ph in tracker.history for ph in LEFT_TRAY_PHASES):
             self.used_slots.add(tray_slot.index)
+        # **꽂아 본 판은 빈칸 실측을 낡게 만든다.** 성공했든 아니든 책이 서가 쪽으로
+        # 갔으면 그 자리는 더 이상 우리가 잰 그 빈칸이 아니다.
+        if any(ph in tracker.history for ph in LEFT_TRAY_PHASES):
+            self._place_count += 1
+            self.get_logger().info(
+                f'빈칸 실측이 낡았다 (배치 {self._place_count}회째) — 다음 판은 다시 스캔해야 한다. '
+                f'트레이 쓴 칸 {sorted(self.used_slots)} / 전체 {len(self.tray_slots)}')
         self._set_status('SUCCEEDED' if outcome.success else 'FAILED', job_id, tracker.progress,
                          outcome.error_code, outcome.message or outcome.failed_phase)
         return self._finish(goal_handle, outcome.success, outcome.failed_phase,
