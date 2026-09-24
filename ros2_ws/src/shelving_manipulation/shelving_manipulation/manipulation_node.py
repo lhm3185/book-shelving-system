@@ -33,8 +33,9 @@ from std_msgs.msg import Bool, String
 import yaml
 
 from .book_placer import (cancel_command, COMMAND_ROTATE_BASE, COMMAND_SCAN, decode, encode,
-                          error_name, MockSimExecutor, Outcome, PlaceTracker, SIM_CANCELLED,
-                          SIM_FAILED, SIM_SUCCEEDED)
+                          error_name, MockSimExecutor, Outcome, PlaceTracker,
+                          publish_feedback_safely, SIM_CANCELLED, SIM_FAILED, SIM_SUCCEEDED,
+                          stale_gap_reason)
 from .grasp_planner import (build_place_command, DEFAULT_LIMITS, GraspGoal, parse_profile,
                             parse_tray, PlaceGoal, resolve_book, select_tray_slot, SlotGoal,
                             snap_grasp_to_slot, validate_goal, validate_grasp)
