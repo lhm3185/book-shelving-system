@@ -103,7 +103,6 @@ spawn ros2 run shelving_perception vision_manager --ros-args \
     -p confidence_threshold:="${VISION_CONF:-0.75}" > "$LOG/vision.log" 2>&1
 spawn ros2 run shelving_manipulation manipulation_node --ros-args \
     --params-file "$REPO/ros2_ws/src/shelving_manipulation/config/manipulation.yaml" -p executor:=sim \
-    -p slot_x_snap_to_gap:=false \
     > "$LOG/manipulation.log" 2>&1
 spawn ros2 run shelving_navigation nav_manager --ros-args \
     --params-file "$REPO/ros2_ws/src/shelving_navigation/config/navigation.yaml" \
