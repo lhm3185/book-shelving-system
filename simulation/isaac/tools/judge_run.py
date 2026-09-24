@@ -62,6 +62,15 @@ def read(d):
     d_mm = re.findall(r"밑면−칸바닥 ([+-][\d.]+) mm", txt)
     if len(d_mm) >= 2:
         g["rise_mm"] = float(d_mm[-1]) - float(d_mm[0])
+    # 꽂기 전 차체 옆이동 — 검출된 틈을 검증된 place_x 로 가져오는 양.
+    # 판마다 다르고(0.171~0.288 m), 그만큼 팔 자세가 달라져 min_margin 이 흔들린다.
+    m = re.search(r"꽂기 전 차체를 옆으로 ([+-]?[\d.]+) m", txt)
+    if m:
+        g["shift_m"] = float(m.group(1))
+    # 빈칸 깊이 파생이 얼마나 끌어왔나 (관측이 얼마나 뒤를 읽었나)
+    dep = [float(v) for v in re.findall(r"빈칸 깊이:.*?차이 ([+-][\d.]+) mm", txt)]
+    if dep:
+        g["depth_pull_mm"] = (min(dep), max(dep))
     # 레벨·코드 출처
     lv = os.path.join(d, "level.txt")
     if os.path.exists(lv):
@@ -121,6 +130,8 @@ def main() -> int:
                 f"겹침 {g.get('jam_mm', float('nan')):.1f} mm")
         if g.get("span_mm"):
             nums += f" · 가로 {g['span_mm']:.1f} mm {g.get('tilt_deg', 0):+.2f}°"
+        if g.get("shift_m") is not None:
+            nums += f" · 옆이동 {g['shift_m']:+.3f} m"
         print(f"{head} {nums}")
         if a.brief:
             continue
@@ -128,6 +139,9 @@ def main() -> int:
             print(f"    ✘ {b}")
         for w in warn:
             print(f"    ! {w}")
+        if g.get("depth_pull_mm"):
+            lo, hi = g["depth_pull_mm"]
+            print(f"    빈칸 관측이 앞면보다 {lo:+.0f}~{hi:+.0f} mm 뒤였다 (파생으로 끌어옴)")
         if g.get("md5") or g.get("git"):
             print(f"    레벨 {g.get('md5', '?')[:8]} · 코드 {g.get('git', '?')[:8]}")
     if len(dirs) > 1:
