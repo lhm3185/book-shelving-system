@@ -464,14 +464,21 @@ class ManipulationNode(Node):
         # **책 사이 틈이 있으면 그것을 먼저 쓴다.** '판 비어 있음' 관측은 틈 사이로 뒤가 보인 것일 수 있어(2026-09-23 19:29:
         # 틈 x -0.05 가 있는데 빈 판으로 판단해 x -0.35 에 꽂다 실패) 틈이 하나도 없을 때만 쓴다.
         if open_board and not gaps:
+            # **여기서 바로 돌려주지 않는다.** 예전에는 "판이 비었다" 관측이면 실측 빈칸을
+            # 안 보고 아래 판 x -0.35 를 목표로 박았다. 2026-09-25 00:15 실측: 비전 관측이
+            # 전부 서가 밖으로 걸러진 판에서 이 분기가 열렸고, 아래 판 실측은 14 / 10 mm
+            # 조각뿐인데 35.2 mm 책을 밀어 넣으러 가 손에서 1.1 cm 밀렸다(406). "못 한다"
+            # 대신 "꽉 찬 데 밀어 넣는다" 가 됐다 — 401 보다 나쁘다. 그래서 이 관측도
+            # 아래 정상 경로(실측 빈칸 스냅 → 들어가는 칸만 → 없으면 거절)를 **똑같이**
+            # 탄다. 스냅이 꺼져 있거나 실측 빈칸이 없으면 예전과 같은 자리(-0.35, 계약 y,
+            # 아래 판)가 된다.
             msg, x = open_board[0]
-            self.place_standoff_dynamic = float(self.place_standoff_m)
-            self.place_lateral_dynamic = 0.0
             self.get_logger().info(
                 f'빈칸 선택: 아래 판이 비어 있음 (서가 너머 관측 {len(open_board)}개) '
-                f'→ x {x:.3f}, 계약 y {contract_y}, '
-                f'z {lower_z}; 꽂기 전 서가 앞면 {self.place_standoff_dynamic:.3f} m 로 붙는다')
-            return msg, (x, contract_y, lower_z)
+                f'→ x {x:.3f}, 계약 y {contract_y}, z {lower_z} 를 **후보로** 두고 '
+                f'실측 빈칸에 맞춰 본다')
+            advance = float(self.scan_standoff_m) - float(self.place_standoff_m)
+            gaps.append((msg, x, contract_y + advance, lower_z))
         if not gaps:
             return None
         gaps.sort(key=lambda c: (c[3], abs(c[1])))
