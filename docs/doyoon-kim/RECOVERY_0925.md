@@ -15,11 +15,35 @@
 
 ## 1. 기준선 — `04441f6` 한 판, **아무것도 고치지 않고**  [30분]
 
+**`demo_check.sh` 를 쓰면 안 된다.** 그 커밋에는 없다(오늘 만들었다). 그리고 우리
+스크립트로 띄우는 것 자체가 이미 변경이다. **어제 쓰던 스크립트가 그 커밋 안에 있다:**
+
 ```bash
 git stash list                       # 남은 게 없는지
 git checkout 04441f6
-bash cli_exchange/scripts/demo_check.sh BASE0923
+bash scripts/demo/full_cycle.sh      # ← 이것이 "어제 그대로" 다
 ```
+
+그 스크립트가 무엇을 하는지 읽어 뒀다. **오늘 우리가 다시 만든 것을 이미 다 하고 있다:**
+
+```
+Isaac + 비전 + 조작 + **주행 + FSM(task_manager) + 반납기**   ← 우리 run_vision.sh 는 FSM 이 없다
+rqt_image_view 두 개 (/perception/debug_image · depth)         ← demo_check.sh 가 다시 만든 것
+logs/rec 에 뷰포트 PNG 녹화 — 주석: "**스캔 모션을 눈으로 확인한다**"
+```
+
+**우리와 다른 것 — 첫 판에서 바꾸지 말 것:**
+
+```
+ROS_DOMAIN_ID   **129**  (우리 run_vision.sh 는 130)
+SIM_HOME_Q      **없다** ← 이것이 오늘 사달의 원인이다. 어제는 yaml 홈(2.811)으로 돌았다
+그 밖           SIM_HOME_J7_DEG=90 · SIM_HOME_SHIFT=0,0,0.10 · SIM_FIX_BASE=0
+                SIM_GRIP_ROT90=1 · SIM_GRASP_KINEMATIC=1 · SIM_TRAY_TO=4.907,-5.782,0.3365
+레벨            /home/rokey/env_v5/Collected_ing_library_env_v5/ing_library_env_v5.usd
+```
+
+> **주의**: 그 스크립트는 맨 앞에서 `pkill -f "install/shelving_…"` 를 돈다.
+> 데스크탑에 남의 프로세스가 없을 때만 돌린다. 지금은 정리돼 있으니 괜찮다.
 
 **여기서 코드를 고치지 않는다.** 안 되면 안 되는 대로 기록한다 — "어제 되던 것"
 이라는 전제 자체가 틀렸다는 뜻이고, 그것도 알아야 할 사실이다.
@@ -46,14 +70,26 @@ git tag baseline-vision-0923 04441f6
 git checkout work/vision_merge_0924
 ```
 
-끌 것 — 오늘 바꾼 목록은 **네 개**다:
+끌 것 — **기준선이 안 읽던 것은 전부 끈다.** `04441f6` 을 확인해 보니
+콜리전 교정 스위치 셋을 **읽는 코드 자체가 없었다**(`grep` 0건). 즉 어제는
+런타임 교정이 없었다. 그러니 끄는 것이 "어제와 같게" 다.
 
 ```
-SIM_HOME_Q               빼고 돌린다 (yaml 홈으로)
+SIM_HOME_Q               **빼고 돌린다** (yaml 홈으로) ← 가장 중요
 slot_x_snap_to_gap       false
 slot_y_from_shelf_front  false
+SIM_BOOK_COLL            빈 값
+SIM_SHELF_COLL           빈 값
+SIM_SHELF_ROW_MEASURE    0
 scan_command             건드리지 않는다 (이미 scan_sweep = 코드 기본)
 ```
+
+> 데스크탑이 "레벨이 이미 교정됐으니 런타임 스위치는 무의미하지 않나" 고 물었다.
+> 그 말이 맞을 수 있지만 **그건 4번에서 확인할 일**이다. 2번의 질문은
+> "오늘 바꾼 것을 다 끄면 기준선과 같은가" 하나다. **같으면 무해가 증명되고,
+> 다르면 그 차이가 범인이다.** 판 하나 더 도는 값은 그만큼 한다.
+>
+> 그리고 4번의 첫 항목이 콜리전 교정이다 — 바로 다음에 켜 보면 된다.
 
 **1번과 같은가?** 같으면 우리 변경은 무해하고, 범인은 위 넷 안에 있다.
 다르면 **그 차이 목록이 곧 범인 목록**이다.
@@ -135,6 +171,21 @@ q_home 실제값 · 환경변수 전체 · 프리셋 이름
 **우회인지 대안인지 가르는 한 문장**:
 *이 변경 뒤에도 원래 질문에 답할 수 있는가.*
 답할 수 없으면 우회다. `scan_shelf` 가 그랬다.
+
+---
+
+## 6.1 어제 스크립트에서 가져올 것 — **다시 만들지 않는다**
+
+`scripts/demo/full_cycle.sh` 가 오늘 우리가 새로 만든 것을 이미 하고 있었다.
+복구 뒤에도 **그 스크립트를 쓰는 쪽**이 맞다.
+
+```
+rqt 두 창            demo_check.sh 로 다시 만들 필요 없었다
+뷰포트 녹화           record_views 로 다시 만들 필요 없었다
+FSM 까지 포함한 전 구간  우리 run_vision.sh 는 FSM 없이 python 으로 몰았다
+```
+
+**오늘 만든 것 중 이 셋은 중복이었다.** 있는 것을 안 읽고 만들었다.
 
 ---
 
