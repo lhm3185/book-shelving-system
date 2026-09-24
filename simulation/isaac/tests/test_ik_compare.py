@@ -41,7 +41,7 @@ def test_Lula해가_틀리면_모델문제로_판정된다():
     out = compare([_rec("carry_rotate", HOME, far, q_wrong)])
     s = out["구간"]["carry_rotate"]
     if s["Lula만"] == 1:                                                   # ak 가 먼 씨앗에서 실패한 경우만 판별
-        assert out["판별"]["모델문제"] == 1
+        assert out["판별"]["모델차이"] == 1
         assert out["못푼목표"][0]["Lula해_오차mm"] > 10.0
     assert s["모델오차mm"] > 10.0
 
@@ -65,3 +65,24 @@ def test_덤프를_파일에서_읽고_문제로_되돌린다(tmp_path):
     assert lq is None and tool is not None and R.shape == (3, 3)
     out = compare(recs)
     assert out["구간"]["down"]["ak만"] == 1                                  # Lula 못 품, ak 품
+
+
+def test_Lula해가_ak_한계표_밖이면_한계표밖이다():
+    """Lula 한계가 더 넓다(j6 3.75 vs 3.0). 그 해는 클립되어 목표를 벗어나므로 모델이 아니라 한계표다."""
+    from ik_compare import classify, limit_violation
+    q_out = HOME.copy(); q_out[5] = ak.Q_MAX[5] + 0.3
+    assert limit_violation(q_out) == [(6, round(float(q_out[5]), 4), round(float(ak.Q_MAX[5]), 4))]
+    tl = (np.asarray(TOOL["T"]), np.asarray(TOOL["R"]).reshape(3, 3))
+    p, R = ak.fk_tool(q_out, tl)
+    why, detail = classify(p, R, tl, q_out, dict(pos_tol=0.001, rot_tol=0.01, min_margin=0.0))
+    assert why == "한계표밖" and detail["관절"][0][0] == 6
+
+
+def test_Lula_허용치_안의_오차는_모델차이가_아니다():
+    """되돌린 오차 3.875 mm 는 Lula 허용 4 mm 안 — 그 판정은 모델차이가 아니어야 한다."""
+    from ik_compare import classify
+    tl = (np.asarray(TOOL["T"]), np.asarray(TOOL["R"]).reshape(3, 3))
+    p, R = ak.fk_tool(HOME, tl)
+    p_off = p + np.array([0.003, 0.0, 0.0])                                  # Lula 가 3 mm 남기고 멈춘 해
+    why, _ = classify(p_off, R, tl, HOME, dict(pos_tol=0.001, rot_tol=0.01, min_margin=0.0))
+    assert why != "모델차이"

@@ -58,20 +58,62 @@ def tip_error_mm(q, p, R, tool):
     return float(np.linalg.norm(pq - p)) * 1000.0, float(np.linalg.norm(ak._rot_error(Rq, R)))
 
 
+#: Lula 호출의 허용치 (book_scene._solve_ik 그대로). Lula 해는 이 안이면 "정답" 이다 —
+#: 그러니 Lula 해를 ak FK 로 되돌린 오차가 이 안이면 모델 차이가 아니라 **Lula 의 허용치**다.
+LULA_POS_TOL, LULA_ROT_TOL = 0.004, 0.05
+
+
+def limit_violation(q):
+    """ak 한계표 밖인 관절 → `[(관절번호, 값, 한계)]`. Lula 한계가 더 넓으면 여기서 드러난다."""
+    q = np.asarray(q, float)
+    out = []
+    for i in range(7):
+        if q[i] < ak.Q_MIN[i] - 1e-6:
+            out.append((i + 1, round(float(q[i]), 4), round(float(ak.Q_MIN[i]), 4)))
+        elif q[i] > ak.Q_MAX[i] + 1e-6:
+            out.append((i + 1, round(float(q[i]), 4), round(float(ak.Q_MAX[i]), 4)))
+    return out
+
+
+def classify(p, R, tool, lq, kw):
+    """ak 가 씨앗에서 못 푼 목표 하나의 원인. `(판정, 세부)`.
+
+    2026-09-25 08:41 덤프(10,746 문제)에서 처음 판정이 "모델문제 411" 로 나왔는데 둘이 틀렸다:
+    ① Lula 해를 ak FK 로 되돌린 오차 3.875 mm 는 **Lula 허용치(4 mm / 0.05 rad) 안**이다 —
+       모델 차이가 아니라 Lula 가 거기서 멈춘 것이다(다른 구간은 0.002 mm 다).
+    ② Lula 해가 ak 허용 안인데도 ak 가 "실패" 한 249건 — `ik()` 가 씨앗을 **한계표로 클립**하므로
+       Lula 해가 ak 한계표 밖이면 클립된 씨앗은 이미 목표를 벗어난다. 모델이 아니라 **한계표**다.
+    그래서 순서대로 가른다: 한계표밖 → 모델차이(Lula 허용 밖) → 씨앗문제 / 수렴실패.
+    """
+    viol = limit_violation(lq)
+    if viol:
+        return "한계표밖", {"관절": viol}
+    e_mm, e_rot = tip_error_mm(lq, p, R, tool)
+    if e_mm > LULA_POS_TOL * 1000.0 + 1e-6 or e_rot > LULA_ROT_TOL + 1e-6:
+        return "모델차이", {"Lula해_오차mm": round(e_mm, 3), "Lula해_회전오차rad": round(e_rot, 4)}
+    r2 = ak.ik(p, R, lq, tool=tool, **kw)
+    moved = None if not r2.ok else float(np.max(np.abs(r2.q - lq)))
+    if r2.ok and moved < 0.05:
+        return "씨앗문제", {"Lula씨앗_ak_이동rad": round(moved, 4)}
+    return "수렴실패", {"Lula씨앗_ak_ok": bool(r2.ok), "Lula해_오차mm": round(e_mm, 3),
+                       "Lula해_회전오차rad": round(e_rot, 4)}
+
+
 def compare(recs, pos_tol=0.001, rot_tol=0.01):
     """구간별 집계 + 판별 실험 결과. 돌려주는 값은 그대로 찍을 수 있는 dict."""
     kw = dict(pos_tol=pos_tol, rot_tol=rot_tol, min_margin=0.0)
     by = OrderedDict()
-    verdict = {"씨앗문제": 0, "모델문제": 0}
+    verdict = OrderedDict((k, 0) for k in ("한계표밖", "모델차이", "씨앗문제", "수렴실패"))
     worst_model = 0.0
     hard = []
+    points = {}
     for rec in recs:
         ph = rec.get("phase", "?")
         s = by.setdefault(ph, {"n": 0, "둘다": 0, "Lula만": 0, "ak만": 0, "둘다못": 0,
                                "모델오차mm": 0.0, "ak오차mm": 0.0})
         p, R, tool, seed, lq = problem(rec)
         s["n"] += 1
-        # 1. 모델 검증 — Lula 해를 ak FK 로
+        # 1. 모델 검증 — Lula 해를 ak FK 로 (Lula 허용치 안이면 모델이 아니라 Lula 가 멈춘 자리다)
         if lq is not None:
             e_mm, _ = tip_error_mm(lq, p, R, tool)
             s["모델오차mm"] = max(s["모델오차mm"], e_mm)
@@ -85,27 +127,21 @@ def compare(recs, pos_tol=0.001, rot_tol=0.01):
             s["둘다"] += 1
         elif lq is not None:
             s["Lula만"] += 1
-            # 3. 판별 — Lula 해를 씨앗으로
-            r2 = ak.ik(p, R, lq, tool=tool, **kw)
-            e_mm, e_rot = tip_error_mm(lq, p, R, tool)
-            moved = None if not r2.ok else float(np.max(np.abs(r2.q - lq)))
-            if r2.ok and moved is not None and moved < 0.05:
-                verdict["씨앗문제"] += 1
-                why = "씨앗문제"
-            else:
-                verdict["모델문제"] += 1
-                why = "모델문제"
-            hard.append({"phase": ph, "p_arm": rec["p_arm"], "판정": why,
-                         "Lula해_오차mm": round(e_mm, 3), "Lula해_회전오차rad": round(e_rot, 4),
-                         "Lula씨앗_ak_ok": bool(r2.ok),
-                         "Lula씨앗_ak_이동rad": None if moved is None else round(moved, 4),
-                         "ak_씨앗풀이_오차mm": round(r.pos_err * 1000, 2)})
+            why, detail = classify(p, R, tool, lq, kw)      # 3. 판별
+            verdict[why] += 1
+            key = tuple(round(float(v), 3) for v in rec["p_arm"])
+            pt = points.setdefault(key, {"n": 0, "판정": {}})
+            pt["n"] += 1
+            pt["판정"][why] = pt["판정"].get(why, 0) + 1
+            hard.append(dict({"phase": ph, "p_arm": rec["p_arm"], "판정": why,
+                              "ak_씨앗풀이_오차mm": round(r.pos_err * 1000, 2)}, **detail))
         elif r.ok:
             s["ak만"] += 1
         else:
             s["둘다못"] += 1
     return {"구간": by, "판별": verdict, "모델오차_최대mm": round(worst_model, 3), "못푼목표": hard,
-            "허용": {"pos_tol": pos_tol, "rot_tol": rot_tol}}
+            "서로다른점": len(points), "점별": points,
+            "허용": {"pos_tol": pos_tol, "rot_tol": rot_tol, "Lula_pos_tol": LULA_POS_TOL, "Lula_rot_tol": LULA_ROT_TOL}}
 
 
 def main(argv=None):
@@ -130,15 +166,21 @@ def main(argv=None):
               f"{s['모델오차mm']:>11.3f}{s['ak오차mm']:>10.3f}")
     v = out["판별"]
     print()
-    print(f"판별 실험 (Lula 해를 ak 씨앗으로): 씨앗문제 {v['씨앗문제']} · 모델문제 {v['모델문제']}")
-    for h in out["못푼목표"][:20]:
-        mv = h["Lula씨앗_ak_이동rad"]
-        print(f"  {h['phase']:>12} p_arm {h['p_arm']}  → **{h['판정']}**  "
-              f"Lula해 오차 {h['Lula해_오차mm']:.3f} mm / {h['Lula해_회전오차rad']:.4f} rad · "
-              f"Lula씨앗 ak {'ok' if h['Lula씨앗_ak_ok'] else '실패'}"
-              + ("" if mv is None else f" 이동 {mv:.4f} rad"))
-    if len(out["못푼목표"]) > 20:
-        print(f"  … {len(out['못푼목표']) - 20}개 더 (--json 으로 전부)")
+    print(f"모델 검증 기준: Lula 허용치 {LULA_POS_TOL * 1000:.0f} mm / {LULA_ROT_TOL} rad 안이면 모델 차이가 아니다")
+    print("판별 실험 (ak 가 씨앗에서 못 푼 것): " + " · ".join(f"{k} {n}" for k, n in v.items())
+          + f"   — 서로 다른 점 {out['서로다른점']}개")
+    viol = {}
+    for h in out["못푼목표"]:
+        for j, val, lim in h.get("관절", []):
+            k = (j, "아래" if val < lim else "위")
+            viol[k] = viol.get(k, 0) + 1
+    if viol:
+        print("  한계표밖 — 어느 관절이 ak 한계표를 넘는가: "
+              + " · ".join(f"관절 {j} {side}로 {n}건" for (j, side), n in sorted(viol.items())))
+    for key, pt in sorted(out["점별"].items(), key=lambda kv: -kv[1]["n"])[:12]:
+        print(f"  {list(key)}  {pt['n']}번  " + " · ".join(f"{k} {n}" for k, n in pt["판정"].items()))
+    if out["서로다른점"] > 12:
+        print(f"  … 점 {out['서로다른점'] - 12}개 더 (--json 으로 전부)")
     return 0
 
 
