@@ -40,7 +40,7 @@ export DISPLAY="${DISPLAY:-:1}"
 export XAUTHORITY="${XAUTHORITY:-/run/user/1000/gdm/Xauthority}"
 LOG="${LOG:-$REPO/logs}"; mkdir -p "$LOG"
 SPEED="${SPEED:-0.5}"; JOB_DELAY="${JOB_DELAY:-25.0}"   # 소수점 필수 — 25 는 INTEGER 로 읽혀 노드가 죽는다
-[ "$(hostname)" = "IsaacSim15" ] || { echo "!!! IsaacSim15 가 아님: $(hostname) — 중단"; exit 99; }
+case "$(hostname)" in IsaacSim15|BryanKUBT) ;; *) echo "!!! 시연 PC 가 아님: $(hostname) — 중단"; exit 99;; esac
 spawn() { setsid nohup "$@" < /dev/null & }
 set +u; source /opt/ros/jazzy/setup.bash; source "$REPO/ros2_ws/install/setup.bash"; set -u
 
@@ -83,10 +83,12 @@ spawn ros2 run shelving_perception vision_manager --ros-args \
     -p confidence_threshold:="${VISION_CONF:-0.75}" > "$LOG/vision.log" 2>&1
 spawn ros2 run shelving_manipulation manipulation_node --ros-args \
     --params-file "$REPO/ros2_ws/src/shelving_manipulation/config/manipulation.yaml" -p executor:=sim \
+    -p slot_x_snap_to_gap:=false \
     > "$LOG/manipulation.log" 2>&1
 spawn ros2 run shelving_navigation nav_manager --ros-args \
-    --params-file "$REPO/ros2_ws/src/shelving_navigation/config/navigation.yaml" > "$LOG/nav_manager.log" 2>&1
-spawn ros2 run shelving_system task_manager_node --ros-args -p use_sim_time:=false > "$LOG/task_manager.log" 2>&1
+    --params-file "$REPO/ros2_ws/src/shelving_navigation/config/navigation.yaml" \
+    -p waypoints_file:="$REPO/cli_exchange/config/waypoints_measured.yaml" > "$LOG/nav_manager.log" 2>&1
+spawn ros2 run shelving_system task_manager_node --ros-args -p use_sim_time:=false -p book_profiles_path:="$REPO/cli_exchange/config/book_profiles_measured.yaml" > "$LOG/task_manager.log" 2>&1
 sleep 10
 # 검출 화면 창 — 책·빈칸 검출은 요청이 올 때만 그려지므로(스캔 정지점·책 관측 때) 창은 늘 떠 있어야 놓치지 않는다.
 # 재시작 스크립트가 창을 닫고 다시 안 띄운 채 두 판을 돌렸다 (2026-09-23 19:09 지적).
