@@ -9,7 +9,6 @@ Isaac 실행 자체(앱 생성·USD 로드·루프)는 `run_simulation.py` 가 �
 import math
 import os
 import sys
-import math
 import time
 import uuid
 
@@ -24,7 +23,6 @@ from shelving_manipulation.book_placer import (
 
 from base_move import refuse_far_move
 from arm_primitives import Status
-from arm_planning import tucked_joint_moves
 from book_scene import MoveJoint, VEL_LIMIT
 
 
@@ -254,6 +252,10 @@ class ManipulationExecutor:
                  f"(최대 관절 변화 {max(m['step_rad'] for _, _, m in poses):.2f} rad)")
         # **꽂을 수 있는 판과 아닌 판을 미리 알린다** — 비전이 준 빈칸을 나중에 거를 때 쓴다
         _boards = sorted({float(m["board_z"]) for _, _, m in poses})
+        try:
+            self.scene.shadow_boards(_boards + [float(self.scene.shelf_floor_z)])   # 로그만
+        except Exception as _exc:      # noqa: BLE001 - 계측이 스캔을 막으면 안 된다
+            self.say(f"[판목록] 못 견줬다: {type(_exc).__name__}: {_exc}")
         self.publish(dict(self.job.state, phase="scan_plan", shelf_box=self._shelf_box_arm(),
                           shelf_gaps=self._shelf_gaps_arm(_boards),
                           boards=[{"board_z": m["board_z"], "name": n,

@@ -9,7 +9,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "controllers"))
 
-from shelf_gap import nearest_board  # noqa: E402
+from shelf_gap import boards_from_zs, nearest_board  # noqa: E402
 
 BOARDS = [0.4976, 1.0417]
 
@@ -30,3 +30,14 @@ def test_너무_멀면_없다고_한다():
 
 def test_가장_가까운_판을_고른다():
     assert nearest_board(0.77, [0.70, 0.80, 0.90]) == 0.80
+
+
+def test_메시_z_에서_판_윗면을_고른다():
+    """2026-09-24 실측 모양: 판마다 아랫면·윗면이 5.5 cm 간격 쌍. 그 위쪽이 윗면."""
+    zs = [0.0, 0.4425, 0.4976, 0.9866, 1.0417, 1.5261, 1.5812, 2.5]
+    assert boards_from_zs(zs) == [0.4976, 1.0417, 1.5812]
+
+
+def test_간격이_판_두께가_아니면_판이_아니다():
+    assert boards_from_zs([0.0, 0.5, 1.0]) == []                 # 50 cm 간격 — 판이 아니다
+    assert boards_from_zs([0.4976, 0.4980]) == []                # 0.4 mm — 같은 면

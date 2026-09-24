@@ -199,6 +199,24 @@ def side_clearances(bb, boxes):
     return left, left_name, right, right_name
 
 
+def boards_from_zs(zs, thick_min=0.02, thick_max=0.08):
+    """서가 메시 점들의 z 값 집합 → **판 윗면 z 목록**.
+
+    저폴리 서가 메시는 판마다 아랫면·윗면이 각각 한 z 에 모인다. 오름차순 z 에서 간격이 판 두께
+    (2~8 cm) 인 쌍의 **위쪽**이 윗면이다. reach_check 와 book_scene 이 같은 규칙을 쓴다 —
+    한쪽만 고치면 시뮬 없이 낸 답과 시뮬이 쓰는 값이 갈린다.
+    """
+    zs = sorted({round(float(z), 4) for z in zs})
+    boards, i = [], 0
+    while i < len(zs) - 1:
+        if thick_min < zs[i + 1] - zs[i] < thick_max:
+            boards.append(zs[i + 1])
+            i += 2
+        else:
+            i += 1
+    return boards
+
+
 def nearest_board(z, boards, tol=0.08):
     """`z` 에서 `tol` 안에 있는 **가장 가까운 판 윗면** z. 없으면 None.
 

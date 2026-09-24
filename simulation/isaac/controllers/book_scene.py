@@ -11,7 +11,7 @@ import sys
 
 import numpy as np
 
-from shelf_gap import nearest_board, classify_place, side_clearances, skew_deg_from_spans
+from shelf_gap import boards_from_zs, nearest_board, classify_place, side_clearances, skew_deg_from_spans
 from pxr import Gf, Usd, UsdGeom, UsdPhysics
 from isaacsim.core.api import World
 from isaacsim.core.prims import SingleArticulation, SingleXFormPrim
@@ -1182,6 +1182,46 @@ class BookScene:
     def _prim_valid(self, p):
         # 확인할 수 없으면 **유효하지 않다**고 본다. 검사의 기본값이 '통과' 면 검사가 아니다
         return self.stage.GetPrimAtPath(p).IsValid() if getattr(self, "stage", None) else False
+
+    def level_boards(self):
+        """레벨(장면)의 서가 메시에서 **판 윗면 z(월드) 목록**을 읽는다. 못 읽으면 [].
+
+        **그림자 모드** (웹 클로드 v42 회신 §4): 읽어서 로그에만 찍고 판단은 상수(`SIM_SWEEP_BOARDS`·
+        `SIM_SHELF_ROW_Z`)가 그대로 한다. 동작 변경이 구조적으로 0 이다. 그림자 로그가 여러 판
+        연속 상수와 일치하면 그때 스위치로 실측을 쓰게 한다 — 상수를 지우는 게 아니라 **검증된
+        캐시**로 강등하는 것이다. `reach_check.read_shelf` 와 같은 규칙(`boards_from_zs`)이다.
+        """
+        try:
+            root = self.stage.GetPrimAtPath(SHELF)
+            if not (root and root.IsValid()):
+                return []
+            zs = []
+            for pr in Usd.PrimRange(root):
+                if not pr.IsA(UsdGeom.Mesh):
+                    continue
+                pts = UsdGeom.Mesh(pr).GetPointsAttr().Get()
+                if not pts:
+                    continue
+                M = UsdGeom.Xformable(pr).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+                zs.extend(float(M.Transform(Gf.Vec3d(float(q[0]), float(q[1]), float(q[2])))[2]) for q in pts)
+            return boards_from_zs(zs)
+        except Exception as exc:      # noqa: BLE001 - 계측이 기동을 막으면 안 된다
+            self.say(f"[판목록] 레벨에서 못 읽었다: {type(exc).__name__}: {exc}")
+            return []
+
+    def shadow_boards(self, used):
+        """`used`(실제로 쓰는 판 z 목록, 월드)를 레벨 실측과 견줘 **로그만** 남긴다. 값은 안 바꾼다."""
+        lv = self.level_boards()
+        if not lv:
+            self.say(f"[판목록] 레벨 실측 없음 · 쓰는 값 {sorted(round(float(u), 4) for u in used)} (상수)")
+            return lv
+        diffs = []
+        for u in used:
+            b = nearest_board(u, lv, 0.10)
+            diffs.append("없음" if b is None else f"{(b - float(u)) * 1000:+.1f}")
+        self.say(f"[판목록] 레벨 실측 {lv} · 쓰는 값 {sorted(round(float(u), 4) for u in used)} "
+                 f"· 차이 [{', '.join(diffs)}] mm  (그림자 — 판단은 상수 그대로)")
+        return lv
 
     def known_boards(self):
         """지금까지 아는 **선반 판 윗면 z(월드) 목록** — 설정/실측한 아래 판 + 꽂으면서 잰 판들."""

@@ -25,7 +25,7 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "controllers"))
 
 import arm_kinematics as ak          # noqa: E402
-from shelf_gap import gaps as find_gaps   # noqa: E402
+from shelf_gap import boards_from_zs, gaps as find_gaps   # noqa: E402
 
 #: 꽂을 때 손 자세 — 서가(+Y)를 향하고 물림축이 +X (`SIM_GRIP_ROT90=1` 조합)
 R_INSERT = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]])
@@ -68,15 +68,8 @@ def read_shelf(usd_path, shelf_prim):
     xf = UsdGeom.Xformable(mesh).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
     wp = [xf.Transform(q) for q in UsdGeom.Mesh(mesh).GetPointsAttr().Get()]
     xs = sorted({round(float(q[0]), 4) for q in wp})
-    zs = sorted({round(float(q[2]), 4) for q in wp})
     inner = (xs[1], xs[-2]) if len(xs) >= 4 else (xs[0], xs[-1])
-    boards, i = [], 0
-    while i < len(zs) - 1:
-        if 0.02 < zs[i + 1] - zs[i] < 0.08:
-            boards.append(zs[i + 1])
-            i += 2
-        else:
-            i += 1
+    boards = boards_from_zs(float(q[2]) for q in wp)
     books = {}
     root = stage.GetPrimAtPath("/World/books")
     if root and root.IsValid():
