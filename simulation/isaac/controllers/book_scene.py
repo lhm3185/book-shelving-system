@@ -26,7 +26,7 @@ import yaml
 # 저장소 코드를 그대로 쓴다 (~/arm 복사 없음): 같은 폴더의 팔 모듈들
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from arm_geometry import R_from_quat, quat_angle, quat_from_R, slerp  # noqa: E402
-from arm_planning import tucked_joint_moves  # noqa: E402
+from arm_planning import carry_ladder, plan_first, tucked_joint_moves  # noqa: E402
 from tray_delivery import (  # noqa: E402
     deliver_from_to, drift_mm, TRAY_FROM_FALLBACK, TRAY_TO_XY)
 from arm_primitives import ArmController, MoveJoint, Primitive, SetGripper, Sequence, Status, Wait  # noqa: E402
@@ -1854,6 +1854,18 @@ class BookScene:
                 best, dist = b, d
         return best, dist
 
+    def _plan_carry_joint(self, lift, transfer, pre_ins, DOWN, HORIZ, q_lift):
+        """관절 모드 `carry_rotate` — 경유점 `transfer` 가 안 풀리면 자세를 바꿔, 그래도 안 되면
+        빼고 잇는다. 후보 순서와 까닭은 `arm_planning.carry_ladder` 에 있다. 첫 후보가 지금까지의
+        경로라 아래 판은 한 점도 안 바뀐다.
+        """
+        ladder = carry_ladder(lift, transfer, pre_ins, DOWN, HORIZ)
+        qs, worst, err, i, errs = plan_first(ladder, lambda w: self.plan_joint_path(w, q_lift))
+        if qs is not None and i:
+            self.say(f"[운반] transfer@DOWN 이 안 풀려 **{ladder[i][0]}** 로 잇는다 "
+                     f"({i + 1}번째 후보) — 앞 후보: {' / '.join(errs)}")
+        return qs, worst, err
+
     # ---------------------------------------------------------------- 스윙 운반 (SIM_CARRY_MODE=swing)
     # carry_rotate 를 관절공간 한 호로 잇으면 양 끝 자세가 멀어 손끝이 1 m 넘게 솟았다
     # (2026-09-22 저녁 영상). 구간을 "관절 1개 순수 회전" 과 "직교 직선" 으로 나눠
@@ -2294,6 +2306,8 @@ class BookScene:
             elif name == "return" and RETURN_MODE == "swing":
                 qs, worst, err = self._plan_swing_return(retreat, HORIZ, q, transfer, lift, DOWN,
                                                          segs["lift"][-1])
+            elif name == "carry_rotate" and name in JOINT_SEGS:
+                qs, worst, err = self._plan_carry_joint(lift, transfer, pre_ins, DOWN, HORIZ, q)
             elif name in JOINT_SEGS:
                 qs, worst, err = self.plan_joint_path(wps, q)
             else:

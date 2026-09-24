@@ -8,7 +8,7 @@ IK 함수를 주입받는다 — Isaac(Lula)이든 mock 이든 같은 계획기�
 """
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -77,6 +77,45 @@ def plan_chain(segments: Sequence[Tuple[str, Sequence[Waypoint]]], seed, ik: IKF
         q = pl.qs[-1]
         worst = max(worst, pl.worst_step)
     return plans, PathPlan([q], worst)
+
+
+def carry_ladder(lift, transfer, pre_ins, DOWN, HORIZ):
+    """관절 모드 `carry_rotate` 의 경유점 후보를 **시도할 순서대로** 돌려준다.
+
+    첫 후보가 지금까지의 경로다 — 아래 판은 거기서 풀리므로 한 점도 안 바뀐다.
+    `transfer = (place_x, y_pre − 0.02, grip_z + 0.06)` 를 손을 아래로(DOWN) 향한 채 들르는데,
+    위 판(팔기준 z ≈ 0.95)에서는 **그 점이 어떤 y 에서도 안 풀린다** (2026-09-25 00:00
+    arm_kinematics 오프라인 표, y 0.40~0.65: DOWN 계열은 z 0.84~0.95 띠에 해가 없고 HORIZ 만
+    풀린다, 0.898 → 여유 0.175). 손이 아래를 향하면 플랜지가 손끝보다 10 cm 위에 있어야 해서
+    어깨 반경을 넘고, HORIZ 는 플랜지가 10 cm 앞이라 어깨에 가깝다. 높이를 낮춰서는 안 되고
+    **자세**를 바꿔야 한다 — 그래서 z 사다리가 아니라 자세 사다리다.
+
+    같은 밤에 경로를 구부리는 수는 전부 실패했다: clear 0.15(악화)·0.60(1권부터 실패)·
+    standoff 0.52(그대로)·c 관절 되돌림(끝점 자체가 안 풀림)·c+d 합침(손목 특이점 0.243 rad,
+    아래 판까지 깨짐). 점을 옮기는 것만 남았다.
+    """
+    return [
+        ("transfer@DOWN", [(lift, DOWN), (transfer, DOWN), (pre_ins, HORIZ)]),
+        ("transfer@HORIZ", [(lift, DOWN), (transfer, HORIZ), (pre_ins, HORIZ)]),
+        ("transfer 없이", [(lift, DOWN), (pre_ins, HORIZ)]),
+    ]
+
+
+def plan_first(ladder, planner):
+    """후보를 차례로 계획해 **처음 풀리는 것**을 쓴다.
+
+    `planner(wps) → (qs, worst, err)` 는 book_scene.plan_joint_path 와 같은 꼴이다.
+    돌려주는 값: `(qs, worst, err, 쓴 후보 번호(0부터), 앞 후보들의 실패 사유)`.
+    전부 실패하면 qs 가 None 이고 err 에 사유가 전부 들어 있다. 후보 번호가 0 이 아니면
+    호출한 쪽이 로그에 남겨야 한다 — 되돌림은 조용히 지나가면 안 된다.
+    """
+    errs = []
+    for i, (label, wps) in enumerate(ladder):
+        qs, worst, err = planner(wps)
+        if qs is not None:
+            return qs, worst, "", i, errs
+        errs.append(f"{label}: {err}")
+    return None, 0.0, "경유점 후보 전부 실패 — " + " / ".join(errs), len(ladder), errs
 
 
 def tucked_joint_moves(q_now, q_goal, q_stow, turn_threshold=0.5):
