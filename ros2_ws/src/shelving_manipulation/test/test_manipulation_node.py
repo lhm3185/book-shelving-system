@@ -12,6 +12,7 @@ import time
 import uuid
 
 from action_msgs.msg import GoalStatus
+from geometry_msgs.msg import PointStamped
 import pytest
 
 os.environ.setdefault('ROS_AUTOMATIC_DISCOVERY_RANGE', 'LOCALHOST')
@@ -21,10 +22,12 @@ from rclpy.action import ActionClient  # noqa: E402
 from rclpy.executors import MultiThreadedExecutor  # noqa: E402
 from rclpy.node import Node  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
-from shelving_interfaces.action import PlaceBook  # noqa: E402
+from shelving_interfaces.action import DetectTargetSlot, PlaceBook  # noqa: E402
 from shelving_interfaces.msg import RobotStatus  # noqa: E402
 
+from shelving_manipulation.book_placer import decode, encode  # noqa: E402
 from shelving_manipulation.manipulation_node import ManipulationNode, SimMockNode  # noqa: E402
+from std_msgs.msg import String  # noqa: E402
 
 PROFILES = str(Path(__file__).resolve().parents[1] / 'config' / 'book_profiles.yaml')
 VERIFIED = (-0.3497, 0.5495, 0.3399)
@@ -37,13 +40,53 @@ def ros():
     rclpy.shutdown()
 
 
+class ScanStubNode(Node):
+    """두 층 스캔 실행기의 완료와 빈 슬롯 한 점을 흉내 낸다."""
+
+    def __init__(self, command_topic, state_topic):
+        super().__init__(f'scan_stub_{uuid.uuid4().hex[:8]}')
+        self.state_pub = self.create_publisher(String, state_topic, 10)
+        self.slot_pub = self.create_publisher(
+            PointStamped, '/perception/empty_shelf_position', 10)
+        self.create_subscription(String, command_topic, self._on_command, 10)
+        self.pending = None
+        self.sent_slot = False
+        self.create_timer(0.05, self._tick)
+
+    def _on_command(self, msg):
+        command = decode(msg.data)
+        if command and command.get('type') in ('scan_shelf', 'scan_sweep'):   # 수평 스윕(scan_sweep)도 같은 스텁으로
+            self.pending = command
+            self.sent_slot = False
+
+    def _tick(self):
+        if self.pending is None:
+            return
+        if not self.sent_slot:
+            point = PointStamped()
+            point.header.frame_id = 'arm_base_link'
+            point.point.x = -0.35
+            point.point.y = 0.48
+            point.point.z = 0.34
+            self.slot_pub.publish(point)
+            self.sent_slot = True
+            return
+        state = {
+            'token': self.pending['token'], 'status': 'SUCCEEDED',
+            'phase': 'scan_return', 'message': 'scan complete'}
+        self.state_pub.publish(String(data=encode(state)))
+        self.pending = None
+
+
 class Harness:
-    def __init__(self, with_sim_mock=False, **params):
+    def __init__(self, with_sim_mock=False, with_scan_stub=False, **params):
         suffix = uuid.uuid4().hex[:8]
         self.action = f'/test_place_book_{suffix}'
+        self.perception_action = f'/test_detect_slot_{suffix}'
         self.status_topic = f'/test_status_{suffix}'
         base = {
             'action_name': self.action, 'status_topic': self.status_topic,
+            'perception_action': self.perception_action,
             'book_profiles_file': PROFILES, 'mock_step_s': 0.02, 'status_rate_hz': 20.0,
             'sim_command_topic': f'/test_cmd_{suffix}', 'sim_state_topic': f'/test_state_{suffix}',
         }
@@ -52,6 +95,8 @@ class Harness:
         self.server = ManipulationNode(parameter_overrides=overrides)
         self.client_node = Node(f'test_client_{suffix}')
         self.client = ActionClient(self.client_node, PlaceBook, self.action)
+        self.detect_client = ActionClient(
+            self.client_node, DetectTargetSlot, self.perception_action)
         self.statuses = []
         self.client_node.create_subscription(RobotStatus, self.status_topic,
                                              lambda m: self.statuses.append(m.state), 10)
@@ -59,12 +104,17 @@ class Harness:
         self.executor.add_node(self.server)
         self.executor.add_node(self.client_node)
         self.sim = None
+        self.scan_stub = None
         if with_sim_mock:
             self.sim = SimMockNode(parameter_overrides=[
                 Parameter('sim_command_topic', value=base['sim_command_topic']),
                 Parameter('sim_state_topic', value=base['sim_state_topic']),
                 Parameter('mock_step_s', value=0.02)])
             self.executor.add_node(self.sim)
+        if with_scan_stub:
+            self.scan_stub = ScanStubNode(
+                base['sim_command_topic'], base['sim_state_topic'])
+            self.executor.add_node(self.scan_stub)
         self.thread = threading.Thread(target=self.executor.spin, daemon=True)
         self.thread.start()
         assert self.client.wait_for_server(timeout_sec=5.0)
@@ -108,6 +158,8 @@ class Harness:
         self.client_node.destroy_node()
         if self.sim:
             self.sim.destroy_node()
+        if self.scan_stub:
+            self.scan_stub.destroy_node()
 
 
 @pytest.fixture
@@ -213,6 +265,44 @@ def test_sim_executor_missing_is_411(harness_factory):
     assert done.wait(10.0)
     r = box['result'].result
     assert r.error_code == 411 and '미연결' in r.message
+
+
+def test_perception_bridge_scans_and_returns_fixed_depth_slot(harness_factory):
+    h = harness_factory(
+        with_scan_stub=True, executor='sim', enable_perception_bridge=True,
+        scan_timeout_s=2.0)
+    assert h.detect_client.wait_for_server(timeout_sec=5.0)
+    goal = DetectTargetSlot.Goal()
+    goal.job_id = 'scan-job'
+    goal.book_id = 'book-1'
+    goal.shelf_id = 'shelf-1'
+    goal.book_width = 0.10
+    goal.book_height = 0.25
+    goal.book_thickness = 0.035
+
+    done = threading.Event()
+    box = {}
+
+    def on_goal(future):
+        box['handle'] = future.result()
+        box['handle'].get_result_async().add_done_callback(on_result)
+
+    def on_result(future):
+        box['result'] = future.result()
+        done.set()
+
+    h.detect_client.send_goal_async(goal).add_done_callback(on_goal)
+    assert done.wait(10.0)
+    wrapped = box['result']
+    assert wrapped.status == GoalStatus.STATUS_SUCCEEDED
+    result = wrapped.result
+    assert result.success and result.candidate_count == 1
+    assert result.target_slot.header.frame_id == 'arm_base_link'
+    assert result.target_slot.pose.position.x == pytest.approx(-0.35)
+    assert result.target_slot.pose.position.y == pytest.approx(0.554)
+    # z 는 관측값이 아니라 가장 가까운 선반판 칸 높이(0.3399)로 스냅된다 — 빈 공간 중심은 판 높이가 아니다 (2026-09-23)
+    assert result.target_slot.pose.position.z == pytest.approx(0.34, abs=1e-3)
+    assert result.target_slot.insertion_depth == pytest.approx(0.30)
 
 
 def test_success_then_failure_on_same_node(harness_factory):

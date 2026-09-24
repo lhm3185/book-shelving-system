@@ -5,6 +5,10 @@ nav_manager:
     target_action: /navigate_to_target
     nav2_action: /navigate_to_pose
     navigation_timeout_sec: 300.0
+    # Isaac Sim uses the verified patrol route; temporary shelf_map coordinates
+    # are not valid world coordinates for the simulation scene.
+    patrol_route: library_loop
+    patrol_speed: 0.5
     default_frame_id: map
 
     # isaac_map 지도 파일. 비우면 패키지 config/waypoints.yaml

@@ -166,37 +166,49 @@ def camera_rotation(tilt_rad):
                      [0.0, c, -s]])
 
 
-def camera_pose(board_z, cx, distance, tilt_deg, arm_base_z=ARM_BASE_Z):
+def camera_pose(board_z, cx, distance, tilt_deg, arm_base_z=ARM_BASE_Z,
+                shelf_face_y=SHELF_FACE_Y):
     """스캔 한 자세의 **카메라** 위치·회전 (팔 기준).
 
-    목표점은 선반 **뒷면**(`SHELF_BACK_Y`)의 책 중심 높이다. 카메라는 그 점에서
+    목표점은 `shelf_face_y` 의 책 중심 높이다. 인자로 받는 것이 옳다 — 상수로 박으면
+    베이스가 움직일 때 썩는다 (비전 브랜치에서 온 개선).
+
+    **주의 — 이 인자가 앞면인지 뒷면인지 아직 안 갈렸다.** 기본값 0.749 는 내력으로
+    보면 **뒷면**이고(`SHELF_BACK_Y` 주석 참조), 비전 브랜치의 호출부는
+    `min(_front_candidates)` 로 **앞면**을 재서 넘긴다. 서가 깊이가 0.305 m 이므로
+    둘을 섞으면 스캔 목표가 그만큼 어긋난다. 합친 뒤 첫 판에서
+    **실제로 넘어온 값을 로그로 확인할 것.** 카메라는 그 점에서
     시선 방향으로 `distance` 만큼 물러난 자리에 놓는다.
     """
     tilt = math.radians(tilt_deg)
     target_z = board_z + BOOK_CENTER_H - arm_base_z
     view = np.array([0.0, math.cos(tilt), math.sin(tilt)])   # 시선 (팔 기준)
-    pos = np.array([cx, SHELF_BACK_Y, target_z]) - distance * view
+    pos = np.array([cx, shelf_face_y, target_z]) - distance * view
     return pos, camera_rotation(tilt)
 
 
-def hand_pose(board_z, cx, distance, tilt_deg, arm_base_z=ARM_BASE_Z):
+def hand_pose(board_z, cx, distance, tilt_deg, arm_base_z=ARM_BASE_Z,
+              shelf_face_y=SHELF_FACE_Y):
     """같은 자세를 **손** 기준으로 바꾼다 — IK 는 손을 푼다.
 
     카메라는 손에 고정돼 있으므로 손 자세는 카메라 자세에서 그 고정 변환만큼 뺀 것이다.
     """
-    cam_p, R_arm_cam = camera_pose(board_z, cx, distance, tilt_deg, arm_base_z)
+    cam_p, R_arm_cam = camera_pose(
+        board_z, cx, distance, tilt_deg, arm_base_z, shelf_face_y)
     R_arm_hand = R_arm_cam @ R_HAND_CAM.T
     return cam_p - R_arm_hand @ T_HAND_CAM, R_arm_hand
 
 
-def scan_poses(table=SCAN_TABLE, arm_base_z=ARM_BASE_Z):
+def scan_poses(table=SCAN_TABLE, arm_base_z=ARM_BASE_Z,
+               shelf_face_y=SHELF_FACE_Y):
     """스캔 순서대로 (이름, 손 위치, 손 회전, 메타) 를 내놓는다.
 
     순서는 **아래에서 위로** 간다. 팔을 접었다 펴는 큰 이동을 줄이기 위해서다.
     """
     out = []
     for board_z, cx, distance, tilt_deg in table:
-        p, R = hand_pose(board_z, cx, distance, tilt_deg, arm_base_z)
+        p, R = hand_pose(
+            board_z, cx, distance, tilt_deg, arm_base_z, shelf_face_y)
         side = "L" if cx < 0 else ("R" if cx > 0 else "C")
         name = f"scan_{board_z:.3f}_{side}"
         out.append((name, p, R, {"board_z": board_z, "cx": cx,

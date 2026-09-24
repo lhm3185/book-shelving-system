@@ -1,0 +1,21 @@
+scenes:
+  library_map:
+    world_usd: assets/worlds/library_environment.usda
+    nav_map_yaml: ../ros2_ws/src/shelving_navigation/maps/library_map.yaml
+
+    robot:
+      usd: assets/robots/franka_nav.usda
+      prim_path: /World/ridgeback_franka
+
+      simulation_pose:
+        position: [2.03174, -5.64259, 0.0]
+        yaw: 1.5707963267948966
+
+      nav_initial_pose:
+        x: 2.03174
+        y: -5.64259
+        yaw: 1.5707963267948966
+
+    ros:
+      domain_id: 130
+      namespace: ""

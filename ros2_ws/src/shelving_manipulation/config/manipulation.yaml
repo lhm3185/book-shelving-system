@@ -2,10 +2,17 @@
 manipulation_node:
   ros__parameters:
     action_name: /place_book
+    # 기존 task_manager 계약을 그대로 받아 manipulation이 두 층 팔 스캔을 조율합니다.
+    perception_action: /detect_target_slot
+    enable_perception_bridge: true
+    # 빈 슬롯 액션 뒤 PlaceBook에 grasp가 없으면 책 관측 자세에서 좌표를 새로 받습니다.
+    auto_detect_book: true
+    # 작업 전 차체 정렬: 도착 yaw 유지·서가 중앙·앞면 거리(scan/place_standoff_m). 시뮬 rotate_base 필요
+    align_base_before_work: true
     status_topic: /robot/status
 
     # mock: 노드 안에서 흉내 (Isaac 없이 FSM 연동)  /  sim: Isaac 작업 실행기와 JSON 명령·상태 교환
-    executor: mock
+    executor: sim
     sim_command_topic: /manipulation/sim/command
     sim_state_topic: /manipulation/sim/state
 
@@ -16,6 +23,15 @@ manipulation_node:
     heartbeat_timeout_s: 10.0   # 시뮬 상태가 이만큼 끊기면 M404 (한 번도 안 오면 M411). Isaac 경로 계획 중 수 초 멈춘다
     goal_timeout_s: 180.0       # 작업 전체. 넘으면 취소 → 안전 정지 → M404. Isaac 1권 실측 33 s
     cancel_timeout_s: 30.0      # 취소 후 안전 정지 보고를 기다리는 시간
+    scan_dwell_s: 1.2           # 두 개 선반 층의 각 카메라 자세 정지 시간
+    scan_timeout_s: 180.0
+    # 옆이동 직후 15 s 안에 책 좌표가 안 왔다(2026-09-23 18:37). 같은 자세에서 손으로 요청하면 잡히므로 정착 시간 문제 — 넉넉히
+    book_detect_timeout_s: 30.0
+    slot_center_inset: 0.024    # 서가 전면 → 꽂힌 책 AABB 중심 추가 여유
+    fixed_insertion_depth: 0.30 # 뒤가 열린 서가: 삽입량은 비전 depth가 아닌 고정값
+    # 비전 책 좌표 x -0.579 가 3 cm 차이로 범위 밖(410)이 났다 (2026-09-23) — 트레이 칸 x -0.47~-0.65 를 덮게 넓힘
+    vision_grasp_region_min: [-0.70, -0.35, 0.05]
+    vision_grasp_region_max: [-0.15, 0.35, 0.30]
     status_rate_hz: 2.0
     feedback_rate_hz: 10.0
 
@@ -34,10 +50,11 @@ manipulation_node:
     max_target_age_s: 0.0       # 0 = 검사 안 함 (Isaac sim time 정합 후 켠다)
     require_slot_dimensions: false
     max_book_dimension: 0.5
-    place_region_min: [-0.56, 0.45, 0.25]
+    # 비전 빈칸은 서가 폭 어디든 올 수 있고 가운데 판(z 0.88)도 꽂는다 (2026-09-23) — x·z 를 넓혔다
+    place_region_min: [-0.60, 0.45, 0.25]
     # z 상한을 0.45 → 0.55 로 넓혔다. M0609 는 팔 베이스가 37 cm 높아 같은 서가라도
     # 꽂는 단이 팔 기준 0.5097 이 된다 (Franka 는 0.3399). 한 상자로 둘 다 덮는다 (2026-09-20)
-    place_region_max: [-0.22, 0.65, 0.55]
+    place_region_max: [0.45, 0.65, 0.95]
 
     # mock 실행기 (실패 입력 시험)
     mock_step_s: 0.2

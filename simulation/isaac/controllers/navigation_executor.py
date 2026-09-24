@@ -143,8 +143,10 @@ class NavigationExecutor:
         # 코드는 x, y 만 보내고 있었다. 그래서 full_cycle 이 **출발 방향을 알 길이
         # 없었고**, ⑤ 복귀가 자리로는 돌아오는데 방향은 파지할 때 각도(yaw 0) 그대로
         # 남았다 — "복귀했는데 처음 자세가 아니다" 의 원인이다 (2026-09-23).
+        # `home` 은 출발 자리(팔 베이스) — 작업 끝에 nav_manager 가 여기로 되돌린다 (비전 브랜치).
         p, q = self.root.get_world_pose()
         state = {"status": self.status, "legs": self.legs,
+                 "home": [round(float(self.home_arm[0]), 4), round(float(self.home_arm[1]), 4)],
                  "leg": self.legs - len(self.route),
                  "pose": [round(float(p[0]), 4), round(float(p[1]), 4),
                           round(math.degrees(_yaw(q)), 3)],

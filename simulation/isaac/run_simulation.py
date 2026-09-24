@@ -64,6 +64,12 @@ ap.add_argument("--probe-tray", action="store_true",
                      "(파지하지 않는다). 세션을 여러 번 돌려 계통/무작위를 가른다")
 args = ap.parse_args()
 
+# 레벨에 저장된 관절 자세를 쓰는 모드에서는 USD의 drive target도 그대로 둔다.
+# 그렇지 않으면 BookScene 초기화가 target을 0도로 바꿔 카메라가 책장을 보던
+# 7축 자세가 재생 직후 풀린다.
+if args.start_home == "keep":
+    os.environ["SIM_PRESERVE_DRIVE_TARGETS"] = "1"
+
 # 저장소 코드를 그대로 쓴다 (~/arm 으로 복사하지 않는다)
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE / "controllers"))

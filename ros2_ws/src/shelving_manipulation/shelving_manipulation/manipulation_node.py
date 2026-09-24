@@ -12,25 +12,29 @@ executor 파라미터
 취소: 시뮬에 취소를 보내고, 시뮬이 안전 동작을 마쳤다고 알릴 때까지 기다린 뒤 결과를 돌려준다 (03 문서 2절).
 """
 
+from dataclasses import replace
+import math
 import os
 import threading
 import time
 import uuid
 
 from ament_index_python.packages import get_package_share_directory
+from geometry_msgs.msg import PointStamped
 import rclpy
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.time import Time
-from shelving_interfaces.action import PlaceBook
+from shelving_interfaces.action import DetectTargetSlot, PlaceBook
 from shelving_interfaces.msg import RobotStatus
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 import yaml
 
-from .book_placer import (cancel_command, decode, encode, error_name, MockSimExecutor, Outcome,
-                          PlaceTracker)
+from .book_placer import (cancel_command, COMMAND_ROTATE_BASE, COMMAND_SCAN, decode, encode,
+                          error_name, MockSimExecutor, Outcome, PlaceTracker, SIM_CANCELLED,
+                          SIM_FAILED, SIM_SUCCEEDED)
 from .grasp_planner import (build_place_command, DEFAULT_LIMITS, GraspGoal, parse_profile,
                             parse_tray, PlaceGoal, resolve_book, select_tray_slot, SlotGoal,
                             snap_grasp_to_slot, validate_goal, validate_grasp)
@@ -45,6 +49,9 @@ class ManipulationNode(Node):
         super().__init__('manipulation_node', **kwargs)
         p = self.declare_parameter
         self.action_name = p('action_name', '/place_book').value
+        self.perception_action = p('perception_action', '/detect_target_slot').value
+        self.enable_perception_bridge = bool(p('enable_perception_bridge', False).value)
+        self.auto_detect_book = bool(p('auto_detect_book', False).value)
         self.status_topic = p('status_topic', '/robot/status').value
         self.executor_kind = p('executor', 'mock').value
         self.command_topic = p('sim_command_topic', '/manipulation/sim/command').value
@@ -54,6 +61,28 @@ class ManipulationNode(Node):
         self.heartbeat_timeout_s = float(p('heartbeat_timeout_s', 3.0).value)
         self.goal_timeout_s = float(p('goal_timeout_s', 180.0).value)
         self.cancel_timeout_s = float(p('cancel_timeout_s', 30.0).value)
+        self.scan_dwell_s = float(p('scan_dwell_s', 1.2).value)
+        # 서가 앞면까지 거리 (m): 스캔은 자세 표 기준 0.75, 꽂기는 도착 자리 그대로 0.36
+        # 1차 시연 파지 자리(서가 앞면 0.444 m)에서 스캔도 꽂기도 한다 — 앞뒤로 안 움직인다 (2026-09-23).
+        # 스윕 레시피(arm_kinematics.sweep_recipe)가 이 거리 기준으로 실측됐다.
+        self.scan_standoff_m = float(p('scan_standoff_m', 0.444).value)
+        # 스캔 명령: scan_sweep(수평 스윕, 기본) / scan_shelf(예전 자세 표)
+        self.scan_command = str(p('scan_command', 'scan_sweep').value)
+        # 작업 전 차체 정렬(회전·서가 중앙·거리). 시뮬 실행기(rotate_base)가 있어야 한다 — 코드 기본은 끔이라
+        # 가짜 시뮬로 도는 테스트가 30 s 회전 대기에 걸리지 않고, 실제 실행은 manipulation.yaml 에서 켠다.
+        self.align_base_before_work = bool(p('align_base_before_work', False).value)
+        # 작업 자세(월드 yaw, 도): 서가와 **나란히** 서서 팔 +Y 가 서가 앞면을 보게. level_franka0 의 shelf_01 은
+        # x 1.87~3.28, y -2.57~-2.27 (yaw 0) 이고 카트는 y -3.0 에 서므로 yaw 0 이 맞다. 90 은 옆 서가 끝을 봤다 (2026-09-23)
+        self.work_yaw_deg = float(p('work_yaw_deg', 0.0).value)
+        self.place_standoff_m = float(p('place_standoff_m', 0.444).value)
+        self.scan_timeout_s = float(p('scan_timeout_s', 180.0).value)
+        self.book_detect_timeout_s = float(p('book_detect_timeout_s', 15.0).value)
+        self.slot_center_inset = float(p('slot_center_inset', 0.024).value)
+        self.fixed_insertion_depth = float(p('fixed_insertion_depth', 0.30).value)
+        self.vision_grasp_min = tuple(float(v) for v in p(
+            'vision_grasp_region_min', [-0.55, -0.35, 0.05]).value)
+        self.vision_grasp_max = tuple(float(v) for v in p(
+            'vision_grasp_region_max', [-0.15, 0.35, 0.30]).value)
         status_rate = float(p('status_rate_hz', 2.0).value)
         self.loop_period_s = 1.0 / float(p('feedback_rate_hz', 10.0).value)
         self.limits = {}
@@ -78,10 +107,28 @@ class ManipulationNode(Node):
         self._lock = threading.Lock()
         self._wake = threading.Event()
         self._tracker = None
+        self._busy = False
+        self._scan_state = None
+        self._empty_observations = []
+        self._shelf_box = None       # 시뮬이 스캔 계획 때 알려주는 서가 상자(팔 기준). 빈칸은 이 안에서만 인정
+        self._book_observations = []
         self._status = ('IDLE', '', 0.0, 0, '')    # state, job, progress, error_code, message
 
         group = ReentrantCallbackGroup()
         self.status_pub = self.create_publisher(RobotStatus, self.status_topic, 10)
+        self.detect_pub = self.create_publisher(Bool, '/perception/detect_request', 10)
+        self.scan_active_pub = self.create_publisher(Bool, '/perception/slot_scan_active', 10)
+        # 작업 서가의 x 범위(팔 기준, 꽂기 자리). 옆 서가와의 틈(x -0.43)을 빈칸으로 잡은 적이 있다 (2026-09-23).
+        # level_franka0 shelf_01: 월드 x 1.87~3.28, 팔 베이스 x 2.22 → -0.35~1.06; 책 반폭·팔 도달을 빼서 -0.25~0.45
+        # 작업 위치에서 서가 중앙에 맞춰 서므로(executor rotate_base center) 범위는 좌우 대칭 — 서가 반폭 0.7 에서 책 반폭·여유를 뺐다
+        # 검증된 삽입 x (1차 시연 고정 칸 -0.51~-0.27 의 가운데). 틈이 다른 x 에 있으면 차체를 옆으로 옮겨 맞춘다
+        self.place_x = float(p('place_x', -0.35).value)
+        self.shelf_x_min = float(p('shelf_x_min', -0.50).value)
+        self.shelf_x_max = float(p('shelf_x_max', 0.50).value)
+        self.create_subscription(PointStamped, '/perception/empty_shelf_position',
+                                 self._on_empty_slot, 50, callback_group=group)
+        self.create_subscription(PointStamped, '/perception/books',
+                                 self._on_book, 50, callback_group=group)
         self.create_timer(1.0 / status_rate, self._publish_status, callback_group=group)
 
         if self.executor_kind == 'mock':
@@ -100,14 +147,24 @@ class ManipulationNode(Node):
         self.server = ActionServer(
             self, PlaceBook, self.action_name,
             execute_callback=self._execute,
-            goal_callback=self._on_goal,
+            goal_callback=self._on_place_goal,
             cancel_callback=self._on_cancel,
             callback_group=group,
         )
+        self.perception_server = None
+        if self.enable_perception_bridge:
+            self.perception_server = ActionServer(
+                self, DetectTargetSlot, self.perception_action,
+                execute_callback=self._execute_slot_detection,
+                goal_callback=self._on_detection_goal,
+                cancel_callback=self._on_cancel,
+                callback_group=group,
+            )
         self.get_logger().info(
             f'PlaceBook {self.action_name} executor={self.executor_kind} '
             f'profile={self.profile_name} tray_slots={len(self.tray_slots)} '
-            f'status={self.status_topic}')
+            f'status={self.status_topic} perception_bridge='
+            f'{self.enable_perception_bridge}')
 
     # -------------------------------------------------------------- 시뮬 상태
 
@@ -123,6 +180,12 @@ class ManipulationNode(Node):
 
     def _on_sim_state(self, state):
         with self._lock:
+            if self._scan_state is not None \
+                    and state.get('token') == self._scan_state.get('token'):
+                self._scan_state = dict(state)
+                if state.get('phase') == 'scan_plan' and state.get('shelf_box'):
+                    self._shelf_box = [float(v) for v in state['shelf_box']]   # 팔 기준 [x0,x1,y_front,y_back,z0,z1]
+                self._wake.set()
             tracker = self._tracker
             # 다른 작업(이전 작업의 마지막 상태 반복 포함)의 상태는 token 이 달라 무시된다
             if tracker is not None and tracker.on_sim_state(state, time.monotonic()):
@@ -130,12 +193,26 @@ class ManipulationNode(Node):
 
     # -------------------------------------------------------------- 액션
 
-    def _on_goal(self, goal_request):
+    def _claim_goal(self, label):
         with self._lock:
-            if self._tracker is not None:
-                self.get_logger().warning(
-                    f'목표 거절: 작업 {self._tracker.job_id} 실행 중 (M411 NOT_READY)')
-                return GoalResponse.REJECT
+            if self._busy or self._tracker is not None:
+                active = self._tracker.job_id if self._tracker is not None else 'scan'
+                self.get_logger().warning(f'{label} 목표 거절: 작업 {active} 실행 중')
+                return False
+            self._busy = True
+        return True
+
+    def _on_place_goal(self, goal_request):
+        if not self._claim_goal('PlaceBook'):
+            return GoalResponse.REJECT
+        return GoalResponse.ACCEPT
+
+    def _on_detection_goal(self, goal_request):
+        if self.executor_kind != 'sim':
+            self.get_logger().warning('빈 슬롯 스캔은 executor=sim 에서만 지원한다')
+            return GoalResponse.REJECT
+        if not self._claim_goal('DetectTargetSlot'):
+            return GoalResponse.REJECT
         return GoalResponse.ACCEPT
 
     def _on_cancel(self, goal_handle):
@@ -213,12 +290,454 @@ class ManipulationNode(Node):
             self.get_logger().info(f'PlaceBook 성공 {text}')
         else:
             self.get_logger().warning(f'PlaceBook 실패 {text}')
+        with self._lock:
+            self._busy = False
         return result
+
+    def _on_empty_slot(self, msg):
+        with self._lock:
+            self._empty_observations.append((time.monotonic(), msg))
+            self._empty_observations = self._empty_observations[-100:]
+
+    def _on_book(self, msg):
+        with self._lock:
+            self._book_observations.append((time.monotonic(), msg))
+            self._book_observations = self._book_observations[-100:]
+
+    @staticmethod
+    def _inside(point, lower, upper):
+        return all(lower[i] <= point[i] <= upper[i] for i in range(3))
+
+    def _detection_feedback(self, goal_handle, phase, count=0, confidence=0.0):
+        feedback = DetectTargetSlot.Feedback()
+        feedback.phase = phase
+        feedback.candidate_count = int(count)
+        feedback.best_confidence = float(confidence)
+        goal_handle.publish_feedback(feedback)
+
+    def _scan_for_empty_slots(self, goal_handle, job_id, feedback):
+        token = uuid.uuid4().hex
+        started = time.monotonic()
+        with self._lock:
+            self._empty_observations.clear()
+            self._scan_state = {'token': token, 'status': 'RUNNING', 'phase': 'scan_request'}
+        feedback('SCANNING_SHELF', 0)
+        self._set_status('RUNNING', job_id, 0.02, 0, 'SCANNING_SHELF')
+        self.scan_active_pub.publish(Bool(data=True))      # 비전: 지금부터 빈칸을 봐라
+        self._send({'type': self.scan_command, 'token': token,
+                    'job_id': f'{job_id}:scan', 'dwell_s': self.scan_dwell_s})
+
+        while time.monotonic() - started < self.scan_timeout_s:
+            if goal_handle.is_cancel_requested:
+                self._send(cancel_command(token, f'{job_id}:scan'))
+                with self._lock:
+                    self._scan_state = None
+                return None, 412, '서가 스캔 취소'
+            self._wake.wait(self.loop_period_s)
+            self._wake.clear()
+            with self._lock:
+                state = dict(self._scan_state or {})
+                count = sum(observed_at >= started
+                            for observed_at, _ in self._empty_observations)
+            feedback(str(state.get('phase', 'SCANNING_SHELF')), count)
+            status = str(state.get('status', '')).upper()
+            if status == SIM_SUCCEEDED:
+                break
+            if status in (SIM_FAILED, SIM_CANCELLED):
+                with self._lock:
+                    self._scan_state = None
+                return None, int(state.get('error_code', 410)), \
+                    state.get('message', '서가 스캔 실패')
+        else:
+            self._send(cancel_command(token, f'{job_id}:scan'))
+            with self._lock:
+                self._scan_state = None
+            return None, 404, f'서가 스캔 {self.scan_timeout_s:.0f}s 시간 초과'
+
+        with self._lock:
+            slots = [msg for observed_at, msg in self._empty_observations
+                     if observed_at >= started]
+            self._scan_state = None
+        return slots, 0, ''
+
+    def _select_empty_slot(self, slots, book_width):
+        """스캔 자리(0.75 m)에서 받은 빈칸 관측 → 꽂을 칸 (팔 기준, 꽂기 자리).
+
+        2026-09-23 두 단 스캔 실측(6자세, 관측 5개):
+          · 가운데 판(책 있음)은 책 사이 틈이 잡힌다: (-0.43, 0.85, 0.66) — 앞면 0.75 에서 10 cm 안쪽, 정상.
+            그런데 가운데 판(팔 기준 z 0.88)은 운반 자세 IK 가 안 풀린다 (레벨 관절 한계가 Lula 보다 좁다).
+          · 아래 판은 책이 하나도 없어 카메라가 서가 **너머**(2.9 m)를 본다 — 비전은 이걸 '빈 곳' 으로 준다.
+            이건 잘못이 아니라 **판 전체가 비었다**는 관측이다. 그 판(계약 z 0.3399, 삽입 검증된 높이)에 꽂는다.
+        선택 순서: 아래 판(비어 있음 관측) → 가운데 판 틈. x 는 팔이 닿는 폭(-0.5~0.2) 으로 자른다.
+        """
+        contract_y = 0.5495                       # 1차 계약: 꽂힌 책 중심의 팔 기준 y (Franka)
+        lower_z, middle_z = 0.3399, 0.3399 + (1.042 - 0.498)
+        far_y = float(self.scan_standoff_m) + 0.30      # 서가 깊이(0.30) 너머 = 판이 비어 뒤가 보인 것
+        # **서가 안에서만 빈칸을 인정한다** (2026-09-23 지적: 서가 밖·옆 서가 틈·바닥을 빈칸으로 오인). 시뮬이 스캔 계획 때
+        # 서가 AABB(팔 기준)를 보내 준다. 없으면 파라미터 x 범위·앞면 거리로만 거른다.
+        box = self._shelf_box
+        if box:
+            bx0, bx1 = box[0] + 0.05, box[1] - 0.05             # 옆판 두께·책 반폭 여유
+            by0, by1 = box[2] - 0.03, box[3] + 0.05             # 앞면 조금 앞 ~ 뒤판
+            bz0, bz1 = box[4], box[5]
+        else:
+            bx0, bx1, by0, by1, bz0, bz1 = self.shelf_x_min, self.shelf_x_max, 0.30, far_y, 0.15, 1.10
+        open_board, gaps = [], []
+        for msg in slots:
+            if msg.header.frame_id != self.limits['frame_id']:
+                continue
+            x, y, z = float(msg.point.x), float(msg.point.y), float(msg.point.z)
+            if y > far_y and bx0 <= x <= bx1:
+                open_board.append((msg, self.place_x))     # 판이 비어 뒤가 보인 것(서가 x 폭 안에서만) → 검증된 삽입 x 에 꽂는다
+                continue
+            if not (bx0 <= x <= bx1) or not (by0 <= y <= by1) or not (bz0 <= z <= bz1):
+                self.get_logger().info(f'빈칸 관측 버림 (서가 밖): ({x:.3f}, {y:.3f}, {z:.3f}) 서가 x {bx0:.2f}~{bx1:.2f} y {by0:.2f}~{by1:.2f} z {bz0:.2f}~{bz1:.2f}')
+                continue
+            zs = lower_z if abs(z - lower_z) <= abs(z - middle_z) else middle_z
+            gaps.append((msg, x, y + book_width / 2.0 + self.slot_center_inset, zs))
+        # **책 사이 틈이 있으면 그것을 먼저 쓴다.** '판 비어 있음' 관측은 틈 사이로 뒤가 보인 것일 수 있어(2026-09-23 19:29:
+        # 틈 x -0.05 가 있는데 빈 판으로 판단해 x -0.35 에 꽂다 실패) 틈이 하나도 없을 때만 쓴다.
+        if open_board and not gaps:
+            msg, x = open_board[0]
+            self.place_standoff_dynamic = float(self.place_standoff_m)
+            self.place_lateral_dynamic = 0.0
+            self.get_logger().info(
+                f'빈칸 선택: 아래 판이 비어 있음 (서가 너머 관측 {len(open_board)}개) → x {x:.3f}, 계약 y {contract_y}, '
+                f'z {lower_z}; 꽂기 전 서가 앞면 {self.place_standoff_dynamic:.3f} m 로 붙는다')
+            return msg, (x, contract_y, lower_z)
+        if not gaps:
+            return None
+        gaps.sort(key=lambda c: (c[3], abs(c[1])))
+        msg, x, center_y, zs = gaps[0]
+        # 스캔과 꽂기가 같은 자리(앞면 0.444 m)라 관측 깊이를 그대로 쓴다: 틈 앞 + 책폭/2 + inset = 꽂힌 책 중심.
+        # (전에 스캔만 0.75 m 물러났을 땐 그 차이만큼 차체를 옮겼다 — 이제 scan/place standoff 가 같다.)
+        advance = float(self.scan_standoff_m) - float(self.place_standoff_m)
+        self.place_standoff_dynamic = float(self.place_standoff_m)
+        # **꽂는 x 는 검증된 -0.35 로 고정하고 차체를 옆으로 옮겨 틈을 거기에 둔다.** 틈 x -0.05(정면)에서는
+        # 운반 자세(carry_rotate) IK 가 안 풀렸다 (2026-09-23) — 1차 시연이 검증한 x 는 -0.51~-0.27 뿐이다.
+        self.place_lateral_dynamic = x - self.place_x
+        self.get_logger().info(
+            f'빈칸 선택: 책 사이 틈 관측 ({x:.3f}, {float(msg.point.y):.3f}, {float(msg.point.z):.3f}) → '
+            f'칸 중심 y {center_y - advance:.3f}, z {zs:.3f} (판 높이로 스냅); 꽂기 전 차체를 옆으로 '
+            f'{self.place_lateral_dynamic:+.3f} m 옮겨 틈을 x {self.place_x} 에 둔다')
+        return msg, (self.place_x, center_y - advance, zs)
+
+    def _finish_detection(self, goal_handle, result, success):
+        if success:
+            goal_handle.succeed()
+        elif goal_handle.is_cancel_requested:
+            goal_handle.canceled()
+        else:
+            goal_handle.abort()
+        with self._lock:
+            self._busy = False
+        return result
+
+    def _execute_slot_detection(self, goal_handle):
+        request = goal_handle.request
+        result = DetectTargetSlot.Result()
+
+        def feedback(phase, count):
+            self._detection_feedback(
+                goal_handle, phase, count, 1.0 if count else 0.0)
+        # **스캔 전에 먼저 베이스를 돌린다.** 주행은 yaw 를 고정한 채 오므로 도착 자세는 출발 자세 그대로다.
+        # 스캔 자세 표는 서가가 팔 +Y 에 있다고 가정하는데, 회전 없이 스캔하면 팔이 엉뚱한 쪽으로 펴져
+        # 트레이·서가에 끼고 그 반작용으로 카트가 밀려났다 (2026-09-23 실측). PlaceBook 앞의 회전은
+        # 이미 돌아 있으면 차이 0 이라 그대로 둔다.
+        if self.executor_kind == 'sim' and self.align_base_before_work:
+            rotate_result = self._rotate_base_before_work(goal_handle, request.job_id, feedback=feedback,
+                                                          standoff=self.scan_standoff_m)
+            if rotate_result is not None:
+                result.error_code, result.message = rotate_result
+                self._set_status('FAILED', request.job_id, 0.0, result.error_code, result.message)
+                return self._finish_detection(goal_handle, result, False)
+        slots, code, message = self._scan_for_empty_slots(
+            goal_handle, request.job_id, feedback)
+        self.scan_active_pub.publish(Bool(data=False))     # 비전: 빈칸 그만 (책 검출 때 점이 뜨면 안 된다)
+        if slots is None:
+            result.error_code = code
+            result.message = message
+            self._set_status('FAILED', request.job_id, 0.0, code, message)
+            return self._finish_detection(goal_handle, result, False)
+
+        selected = self._select_empty_slot(slots, float(request.book_width))
+        result.candidate_count = len(slots)
+        if selected is None:
+            result.error_code = 410
+            result.message = f'두 층 스캔에서 조작 가능 빈 슬롯 없음 (수신 {len(slots)}개)'
+            self._set_status('FAILED', request.job_id, 0.0, 410, result.message)
+            return self._finish_detection(goal_handle, result, False)
+
+        raw, center = selected
+        # **스캔은 0.75 m 물러나서 하고 꽂기는 0.36 m 로 다시 붙어서 한다.** 빈칸 좌표는 물러난 자리의
+        # 팔 기준이므로, 붙은 뒤의 팔 기준으로 +Y 를 그만큼 당겨 둔다 (순수 평행이동, x·z 는 그대로).
+        slot = result.target_slot
+        slot.header = raw.header
+        slot.pose.position.x, slot.pose.position.y, slot.pose.position.z = center
+        slot.pose.orientation.z = math.sqrt(0.5)
+        slot.pose.orientation.w = math.sqrt(0.5)
+        slot.available_width = 0.0
+        slot.available_height = 0.0
+        slot.insertion_depth = self.fixed_insertion_depth
+        slot.pre_insert_offset = 0.05
+        slot.confidence = 1.0
+        result.success = True
+        result.error_code = 0
+        result.message = '두 선반 층 스캔에서 빈 슬롯 중심을 선택했다.'
+        self._detection_feedback(goal_handle, 'TRANSFORMING_FRAME', len(slots), 1.0)
+        self._set_status('SUCCEEDED', request.job_id, 1.0, 0, 'EMPTY_SLOT_READY')
+        self.get_logger().info(
+            f'빈 슬롯 스캔 완료: {tuple(round(v, 4) for v in center)}, '
+            f'삽입깊이 {self.fixed_insertion_depth:.3f}m')
+        return self._finish_detection(goal_handle, result, True)
+
+    def _detect_book_for_place(self, goal_handle, goal):
+        with self._lock:
+            self._book_observations.clear()
+        started = time.monotonic()
+        last_trigger = 0.0
+        self._feedback(goal_handle, 'DETECTING_BOOK', 0.18)
+        while time.monotonic() - started < self.book_detect_timeout_s:
+            now = time.monotonic()
+            if now - last_trigger >= 0.5:
+                self.detect_pub.publish(Bool(data=True))
+                last_trigger = now
+            if goal_handle.is_cancel_requested:
+                return None, 412, '책 검출 취소'
+            self._wake.wait(min(self.loop_period_s, 0.1))
+            self._wake.clear()
+            with self._lock:
+                recent = [msg for observed_at, msg in self._book_observations
+                          if observed_at >= started
+                          and msg.header.frame_id == self.limits['frame_id']]
+            if recent:
+                msg = recent[-1]
+                book_top = (float(msg.point.x), float(msg.point.y), float(msg.point.z))
+                if not self._inside(book_top, self.vision_grasp_min,
+                                    self.vision_grasp_max):
+                    return None, 410, \
+                        f'비전 책 좌표 {tuple(round(v, 3) for v in book_top)}가 안전 범위 밖'
+                grasp = GraspGoal(
+                    frame_id=self.limits['frame_id'], top_center=book_top,
+                    spine_yaw=0.0, thickness=goal.book_thickness,
+                    width=goal.book_width, confidence=1.0, age_s=0.0)
+                return replace(goal, grasp=grasp), 0, ''
+        return None, 411, \
+            f'책 관측 자세에서 {self.book_detect_timeout_s:.0f}s 동안 책 좌표 없음'
+
+    def _auto_perception(self, goal_handle, goal):
+        """
+        두 선반 층 스캔 뒤 빈 슬롯과 책 좌표를 채운다.
+
+        task_manager는 비전과 통신하지 않는다. 이 함수가 Isaac 실행기에 스캔을
+        요청하고, 실행기가 각 정지 자세에서 비전을 트리거한다. 스캔 종료 후 q_home
+        (책 관측 자세)에서 책 검출을 별도로 요청한다.
+        """
+        if self.executor_kind != 'sim':
+            return None, 411, '자동 비전 스캔은 executor=sim 에서만 지원한다'
+
+        token = uuid.uuid4().hex
+        started = time.monotonic()
+        with self._lock:
+            self._empty_observations.clear()
+            self._scan_state = {'token': token, 'status': 'RUNNING', 'phase': 'scan_request'}
+        self._feedback(goal_handle, 'SCANNING_SHELF', 0.02)
+        self._set_status('RUNNING', goal.job_id, 0.02, 0, 'SCANNING_SHELF')
+        self._send({'type': self.scan_command, 'token': token,
+                    'job_id': f'{goal.job_id}:scan', 'dwell_s': self.scan_dwell_s})
+
+        while time.monotonic() - started < self.scan_timeout_s:
+            if goal_handle.is_cancel_requested:
+                self._send(cancel_command(token, f'{goal.job_id}:scan'))
+                with self._lock:
+                    self._scan_state = None
+                return None, 412, '서가 스캔 취소'
+            self._wake.wait(self.loop_period_s)
+            self._wake.clear()
+            with self._lock:
+                state = dict(self._scan_state or {})
+            status = str(state.get('status', '')).upper()
+            phase = str(state.get('phase', 'SCANNING_SHELF'))
+            self._feedback(goal_handle, phase, 0.10)
+            if status == SIM_SUCCEEDED:
+                break
+            if status in (SIM_FAILED, SIM_CANCELLED):
+                with self._lock:
+                    self._scan_state = None
+                return None, int(state.get('error_code', 410)), \
+                    state.get('message', '서가 스캔 실패')
+        else:
+            self._send(cancel_command(token, f'{goal.job_id}:scan'))
+            with self._lock:
+                self._scan_state = None
+            return None, 404, f'서가 스캔 {self.scan_timeout_s:.0f}s 시간 초과'
+
+        with self._lock:
+            slots = [msg for observed_at, msg in self._empty_observations
+                     if observed_at >= started]
+            self._scan_state = None
+
+        slot_candidates = []
+        for msg in slots:
+            if msg.header.frame_id != self.limits['frame_id']:
+                continue
+            # 비전 토픽은 서가 전면의 빈칸 중심이다. 실제 배치 목표는 꽂힌 책의
+            # AABB 중심이므로 책 깊이 절반과 작은 안쪽 여유만 더한다.
+            center = (float(msg.point.x),
+                      float(msg.point.y) + goal.book_width / 2.0 + self.slot_center_inset,
+                      float(msg.point.z))
+            if self._inside(center, self.limits['place_region_min'],
+                            self.limits['place_region_max']):
+                slot_candidates.append((msg, center))
+        if not slot_candidates:
+            return None, 410, f'두 층 스캔에서 조작 가능 빈 슬롯 없음 (수신 {len(slots)}개)'
+        slot_msg, slot_center = slot_candidates[-1]
+
+        with self._lock:
+            self._book_observations.clear()
+        detect_started = time.monotonic()
+        last_trigger = 0.0
+        book_msg = None
+        self._feedback(goal_handle, 'DETECTING_BOOK', 0.18)
+        while time.monotonic() - detect_started < self.book_detect_timeout_s:
+            now = time.monotonic()
+            if now - last_trigger >= 0.5:
+                self.detect_pub.publish(Bool(data=True))
+                last_trigger = now
+            if goal_handle.is_cancel_requested:
+                return None, 412, '책 검출 취소'
+            self._wake.wait(min(self.loop_period_s, 0.1))
+            self._wake.clear()
+            with self._lock:
+                recent = [msg for observed_at, msg in self._book_observations
+                          if observed_at >= detect_started
+                          and msg.header.frame_id == self.limits['frame_id']]
+            if recent:
+                book_msg = recent[-1]
+                break
+        if book_msg is None:
+            return None, 411, f'책 관측 자세에서 {self.book_detect_timeout_s:.0f}s 동안 책 좌표 없음'
+
+        book_top = (float(book_msg.point.x), float(book_msg.point.y), float(book_msg.point.z))
+        if not self._inside(book_top, self.vision_grasp_min, self.vision_grasp_max):
+            return None, 410, f'비전 책 좌표 {tuple(round(v, 3) for v in book_top)}가 안전 범위 밖'
+
+        slot = SlotGoal(
+            frame_id=self.limits['frame_id'], position=slot_center,
+            orientation_xyzw=(0.0, 0.0, math.sqrt(0.5), math.sqrt(0.5)),
+            available_width=0.0, available_height=0.0,
+            insertion_depth=self.fixed_insertion_depth, pre_insert_offset=0.05,
+            confidence=1.0, age_s=0.0)
+        grasp = GraspGoal(
+            frame_id=self.limits['frame_id'], top_center=book_top, spine_yaw=0.0,
+            thickness=goal.book_thickness, width=goal.book_width,
+            confidence=1.0, age_s=0.0)
+        self.get_logger().info(
+            f'비전 연동 완료: 빈 슬롯 {tuple(round(v, 4) for v in slot_center)}, '
+            f'책 윗면 {tuple(round(v, 4) for v in book_top)}, 삽입깊이 {self.fixed_insertion_depth:.3f}m')
+        return replace(goal, slot=slot, grasp=grasp), 0, ''
+
+    def _rotate_base_before_work(self, goal_handle, job_id, feedback=None, standoff=None, lateral=None):
+        """작업 시작 전에 franka base를 90도 회전시킨다.
+
+        Returns:
+            None: 성공 (계속 진행)
+            (error_code, message): 실패
+        """
+        import uuid as _uuid
+
+        token = _uuid.uuid4().hex
+        rotate_cmd = {
+            'type': COMMAND_ROTATE_BASE,
+            'token': token,
+            'job_id': f'{job_id}:rotate',
+            'yaw': float(self.work_yaw_deg),
+        }
+        if standoff is not None:
+            rotate_cmd['standoff'] = float(standoff)
+        if lateral is not None:
+            rotate_cmd['lateral'] = float(lateral)      # 서가 AABB 중앙 대신 이만큼 옆으로
+
+        self.get_logger().info(f'베이스 회전 명령 전송 (목표 yaw {self.work_yaw_deg:+.0f}°, 서가 거리 {standoff})')
+        # PlaceBook 피드백 헬퍼는 DetectTargetSlot 핸들에 쓰면 TypeError 가 난다 — 호출자가 맞는 피드백을 준다
+        if feedback is not None:
+            feedback('ROTATING_BASE', 0)
+        else:
+            self._feedback(goal_handle, 'ROTATING_BASE', 0.0)
+        self._set_status('RUNNING', job_id, 0.0, 0, 'ROTATING_BASE')
+
+        with self._lock:
+            self._scan_state = {'token': token, 'status': 'RUNNING', 'phase': 'rotate_base'}
+
+        self._send(rotate_cmd)
+
+        # 회전 완료 대기 (최대 10초)
+        import time
+        started = time.monotonic()
+        timeout = 30.0
+        while time.monotonic() - started < timeout:
+            if goal_handle.is_cancel_requested:
+                self._send(cancel_command(token, f'{job_id}:rotate'))
+                with self._lock:
+                    self._scan_state = None
+                return 412, '베이스 회전 취소'
+            self._wake.wait(min(self.loop_period_s, 0.1))
+            self._wake.clear()
+            with self._lock:
+                state = dict(self._scan_state or {})
+            status = str(state.get('status', '')).upper()
+            if status == SIM_SUCCEEDED:
+                self.get_logger().info('베이스 회전 완료')
+                with self._lock:
+                    self._scan_state = None
+                return None
+            if status in (SIM_FAILED, SIM_CANCELLED):
+                with self._lock:
+                    self._scan_state = None
+                return int(state.get('error_code', 410)), \
+                    state.get('message', '베이스 회전 실패')
+
+        # 타임아웃
+        self._send(cancel_command(token, f'{job_id}:rotate'))
+        with self._lock:
+            self._scan_state = None
+        return 404, f'베이스 회전 {timeout:.0f}s 시간 초과'
 
     def _execute(self, goal_handle):
         request = goal_handle.request
         job_id = request.job_id
         goal = self._to_goal(request)
+        vision_owned = not goal.slot.frame_id
+        continuous_grasp = vision_owned
+
+        # **작업 시작 전에 franka base를 90도 회전시킨다.**
+        # 카트가 서가 앞에 서면 franka 팔이 책장을 정면으로 보게 되는데,
+        # 수평 삽입을 위해 base를 90도 회전시켜야 한다.
+        # task_manager 가 빈칸(frame_id 있음)을 넘겨줄 때도 **꽂기 거리로 다시 붙어야** 한다 — 스캔은 0.75 m 물러나서
+        # 했다. vision_owned 조건 때문에 안 붙어서 허공에 꽂을 뻔했다 (2026-09-23). yaw 는 이미 맞아 차이 0.
+        if self.executor_kind == 'sim' and self.align_base_before_work:
+            rotate_result = self._rotate_base_before_work(
+                goal_handle, job_id, standoff=getattr(self, 'place_standoff_dynamic', None) or self.place_standoff_m,
+                lateral=getattr(self, 'place_lateral_dynamic', None))
+            if rotate_result is not None:
+                code, message = rotate_result
+                self._set_status('FAILED', job_id, 0.0, code, message)
+                return self._finish(goal_handle, False, 'ROTATING_BASE', False,
+                                    code, message, canceled=code == 412)
+
+        if vision_owned:
+            goal, code, message = self._auto_perception(goal_handle, goal)
+            if goal is None:
+                self._set_status('FAILED', job_id, 0.0, code, message)
+                return self._finish(goal_handle, False, 'DETECTING_BOOK', False,
+                                    code, message, canceled=code == 412)
+        elif goal.grasp is None and self.auto_detect_book:
+            goal, code, message = self._detect_book_for_place(goal_handle, goal)
+            if goal is None:
+                self._set_status('FAILED', job_id, 0.0, code, message)
+                return self._finish(goal_handle, False, 'DETECTING_BOOK', False,
+                                    code, message, canceled=code == 412)
+            continuous_grasp = True
         self._set_status('RUNNING', job_id, 0.0, 0, 'DETECTING_BOOK')
         self._feedback(goal_handle, 'DETECTING_BOOK', 0.0)
 
@@ -229,12 +748,14 @@ class ManipulationNode(Node):
         if check.ok:
             # **검사 전에** 비전 x 를 칸 중심에 맞춘다 — 트레이는 좌표를 아는 고정 지그다.
             # 비전이 정하는 것은 몇 번 칸인가이고, 그 칸의 x 는 지그가 이미 안다
-            goal, note = snap_grasp_to_slot(goal, self.tray_slots, self.limits)
+            goal, note = ((goal, '') if continuous_grasp else
+                          snap_grasp_to_slot(goal, self.tray_slots, self.limits))
             if note:
                 self.get_logger().info(note)
             # 계약 §5 — 틀린 점을 경계에서 잡는다. 특히 "윗면 높이가 책 규격과 맞는가"
             # 위에서 맞췄어도 이 검사는 그대로 둔다 (마지막 안전선이다)
-            check = validate_grasp(goal, self.tray_slots, self.limits)
+            check = validate_grasp(
+                goal, [] if continuous_grasp else self.tray_slots, self.limits)
             if not check.ok:
                 self.get_logger().warning(f'파지 관측 거절: {check.message}')
         tray_slot = None

@@ -204,7 +204,7 @@ class MockPerceptionServer(Node):
             request.book_height
             + request.safety_margin,
         )
-        target_slot.insertion_depth = 0.25
+        target_slot.insertion_depth = 0.30
         target_slot.pre_insert_offset = 0.05
         target_slot.confidence = 0.95
 

@@ -335,12 +335,46 @@ class BookScene:
         if not sources and not (USE_LEVEL_TRAY and _lt and _lt.IsValid()):
             raise RuntimeError("쓸 수 있는 책 원본이 없다")
         shelf = self.aabb(SHELF)
+        self.shelf_aabb_world = np.asarray(shelf, float).copy()
         # **레벨 책을 그대로 쓸 때는 끄지 않는다** — 끄면 쓸 책이 사라진다
         _keep_level = USE_LEVEL_TRAY and _lt and _lt.IsValid()
         for p in (([] if _keep_level else [s[0] for s in sources if s[0] is not None])
                   + ([str(c.GetPath()) for c in st.GetPrimAtPath("/World/fixtures").GetChildren()]
                      if st.GetPrimAtPath("/World/fixtures").IsValid() else [])):
             st.GetPrimAtPath(p).SetActive(False)
+
+        # **출발 방향 스위치** — `SIM_ROBOT_YAW=<도>`: 로봇을 **팔 베이스를 축으로** 제자리 회전시킨다.
+        # 이 레벨(level_franka0)은 로봇이 yaw 0° 로 놓여 있어 데크가 반납기 출구와 어긋난다. 반납기에서
+        # 트레이를 -x 로 밀어 얹으려면 데크가 반납기 앞에 와야 하고, 그러려면 yaw 90° 로 서야 한다
+        # (.4 PC 9/22 결론: "AMR 은 z 축 90° 로 시작해야 트레이가 데크에 실린다"). 트레이 배치·이송 목표는
+        # 이 뒤에서 계산되므로 돌린 자세가 그대로 기준이 된다. 기본은 비움 = 레벨 그대로.
+        _yaw_env = os.environ.get("SIM_ROBOT_YAW", "").strip()
+        if _yaw_env:
+            try:
+                _rad = math.radians(float(_yaw_env))
+                _rp, _rq = SingleXFormPrim(R).get_world_pose()
+                _rp, _rq = np.asarray(_rp, float), np.asarray(_rq, float)
+                # 축: 기본은 **차체(루트) 제자리 회전** — 레벨이 정한 카트 자리를 지킨다. 팔 베이스를 축으로
+                # 돌리면 차체가 0.6 m 옮겨져 반납기(x 5.44~)와 겹쳐 시작하자마자 튕겼다 (2026-09-23 실측).
+                # SIM_ROBOT_YAW_PIVOT=arm 이면 팔 베이스를 축으로 (팔 베이스 자리를 지킬 때).
+                if os.environ.get("SIM_ROBOT_YAW_PIVOT", "root").strip() == "arm":
+                    _pv, _ = SingleXFormPrim(BASE_LINK).get_world_pose()
+                    _pv = np.asarray(_pv, float)
+                else:
+                    _pv = _rp.copy()
+                _c, _s = math.cos(_rad), math.sin(_rad)
+                _d = _rp - _pv
+                _np = _pv + np.array([_c * _d[0] - _s * _d[1], _s * _d[0] + _c * _d[1], _d[2]])
+                _cw, _sz = math.cos(_rad / 2.0), math.sin(_rad / 2.0)
+                _w, _x, _y, _z = _rq                                        # Isaac: (w, x, y, z)
+                _nq = np.array([_cw * _w - _sz * _z, _cw * _x - _sz * _y,
+                                _cw * _y + _sz * _x, _cw * _z + _sz * _w], float)
+                SingleXFormPrim(R).set_world_pose(_np, _nq)
+                _pv2, _ = SingleXFormPrim(BASE_LINK).get_world_pose()
+                say(f"출발 방향 회전: {float(_yaw_env):+.1f}° (축 {os.environ.get('SIM_ROBOT_YAW_PIVOT', 'root')} {np.round(_pv[:2], 3).tolist()}, "
+                    f"회전 뒤 팔 베이스 {np.round(np.asarray(_pv2, float)[:2], 3).tolist()}) [SIM_ROBOT_YAW]")
+            except (TypeError, ValueError) as _exc:
+                say(f"SIM_ROBOT_YAW 형식 오류 '{_yaw_env}' ({_exc}) — 돌리지 않는다")
 
         # 트레이
         #
@@ -702,6 +736,7 @@ class BookScene:
         _damp = float(os.environ.get("ARM_DRIVE_DAMPING", BOT.drive_damping))
         _maxf = float(os.environ.get("ARM_DRIVE_MAXFORCE", "0"))
         _tuned = []
+        _preserve_targets = os.environ.get("SIM_PRESERVE_DRIVE_TARGETS", "0") == "1"
         for _p in Usd.PrimRange(st.GetPrimAtPath(R)):
             if _p.GetName() not in set(ARM_JOINTS):
                 continue
@@ -716,13 +751,15 @@ class BookScene:
                 # 도달 판정을 못 받아 `404` 가 났다 (2026-09-21 실측, 주변에 닿는 물체는 없었다).
                 _d.CreateMaxForceAttr().Set(_maxf)
             _t = _d.GetTargetPositionAttr().Get()
-            if _t not in (None, 0.0):
+            if not _preserve_targets and _t not in (None, 0.0):
                 _d.CreateTargetPositionAttr().Set(0.0)
                 _tuned.append(f"{_p.GetName()} 목표 {_t}°→0°")
         say(("팔 구동 게인 설정: 강성 %.0e 감쇠 %.0e 힘상한 %s" % (_stiff, _damp, _maxf or "에셋값")) if _stiff > 0
             else "팔 구동 게인: **에셋 기본값 사용** (ARM_DRIVE_STIFFNESS=0)")
         if _tuned:
             say(f"  구동 목표 보정: {_tuned}")
+        elif _preserve_targets:
+            say("  구동 목표 보존: 레벨에 저장된 카메라 관측 자세 유지")
 
         if before_reset is not None:
             before_reset(st)      # ROS 그래프 설정 보완 등 — 재생(초기화) 전에 해야 반영된다
@@ -809,7 +846,11 @@ class BookScene:
         # base_link·link_1 은 **받침판에 붙어 있는 것이 정상**이라 검사에서 뺀다.
         self._deck_spheres = []
         try:
-            _desc = yaml.safe_load(open(BOT.lula[1]))
+            # 지원 로봇의 BOT.lula[1]은 파일 경로가 아니라 이름("Franka")이다.
+            # loader가 돌려준 실제 descriptor 경로를 써야 충돌 구 검사가 켜진다.
+            _desc_path = cfg["robot_description_path"]
+            with open(_desc_path, encoding="utf-8") as _desc_file:
+                _desc = yaml.safe_load(_desc_file)
             for _entry in (_desc.get("collision_spheres") or []):
                 for _lname, _sph in _entry.items():
                     if _lname in ("base_link", "link_1"):
@@ -921,6 +962,34 @@ class BookScene:
             say(f"**홈 자세를 바꿔 끼웠다** {np.round(self.q_home, 3).tolist()} → "
                 f"{np.round(np.asarray(_v), 3).tolist()} [SIM_HOME_Q]")
             self.q_home = np.asarray(_v, float)
+        # **책 관측 자세는 홈과 분리한다.** 손목 회전·카메라 올리기 스위치는 관측 자세(q_observe)만 바꾼다 — 홈(q_home)을
+        # 바꾸면 검증된 파지 접근 계획(plan_job 이 홈에서 시작)이 손목 특이점에 걸린다 (2026-09-23 19:01 실측).
+        self.q_observe = self.q_home.copy()
+        # **책 관측(홈) 자세에서 그리퍼만 돌리는 스위치** — `SIM_HOME_J7_DEG` (도). 트레이가 로봇 기준 90° 틀어져
+        # 실리는 레벨에서, 홈의 손목(관절 7)만 돌려 카메라·물림축을 트레이에 맞춘다 (2026-09-23 사용자 제안).
+        _j7 = float(os.environ.get("SIM_HOME_J7_DEG", "0") or 0)
+        if abs(_j7) > 1e-6:
+            _lo, _hi = -2.9671, 2.9671
+            _new = float(np.clip(self.q_observe[6] + math.radians(_j7), _lo, _hi))
+            say(f"관측 자세 손목(관절 7) {math.degrees(self.q_observe[6]):+.1f}° → {math.degrees(_new):+.1f}° 로 돌림 [SIM_HOME_J7_DEG={_j7:+.0f}] (홈은 그대로)")
+            self.q_observe[6] = _new
+        # **홈 자세를 팔 기준으로 옮기는 스위치** — `SIM_HOME_SHIFT="dx,dy,dz"` (m). 손 자세는 그대로 두고 위치만
+        # 옮겨 우리 IK(arm_kinematics)로 다시 푼다. 그리퍼가 트레이 책 윗부분을 가려 카메라를 10 cm 올릴 때 쓴다 (2026-09-23).
+        _hs = os.environ.get("SIM_HOME_SHIFT", "").strip()
+        if _hs:
+            try:
+                import arm_kinematics as _ak
+                _d = np.array([float(v) for v in _hs.split(",")], float)
+                _p, _R = _ak.fk(self.q_observe)
+                _r = _ak.ik_best(_p + _d, _R, _ak.seeds_around(self.q_observe), prefer=self.q_observe)
+                if _r.ok:
+                    say(f"관측 자세 이동 {np.round(_d, 3).tolist()} m: 손 {np.round(_p, 3).tolist()} → {np.round(_p + _d, 3).tolist()}, "
+                        f"관절 {np.round(self.q_observe, 3).tolist()} → {np.round(_r.q, 3).tolist()} (한계 여유 {_r.limit_margin:.3f}) [SIM_HOME_SHIFT] (홈은 그대로)")
+                    self.q_observe = np.asarray(_r.q, float)
+                else:
+                    say(f"홈 자세 이동 실패 — IK 안 풀림 (위치 오차 {_r.pos_err * 1000:.1f} mm, 여유 {_r.limit_margin:.3f}). 홈 그대로 [SIM_HOME_SHIFT]")
+            except Exception as _exc:      # noqa: BLE001 - 스위치 실패가 시뮬을 막지 않게
+                say(f"SIM_HOME_SHIFT 실패 {type(_exc).__name__}: {_exc} — 홈 그대로")
         _hp, _hR = self.lula.compute_forward_kinematics(BOT.ee_frame, self.q_home)
         self.home_tip = np.asarray(_hp, float)
         self.HOME_ORI = quat_from_R(np.asarray(_hR, float))
@@ -991,7 +1060,8 @@ class BookScene:
                 try:
                     self.world.add_physics_callback(
                         "bs_tray_follow",
-                        lambda _dt: (self.follow_hand(), self.deliver_tick(), self.follow_tray(),
+                        lambda _dt: (self.hold_base_tick(), self.follow_hand(),
+                                     self.deliver_tick(), self.follow_tray(),
                                      self.tray_watch(),
                                      self.diag_attach_tick()))
                 except Exception as exc:     # noqa: BLE001
@@ -1227,42 +1297,48 @@ class BookScene:
         import scan_planner as _sp
 
         self.refresh_base()
-
-        # **전제 검사 — 어긋나면 거부한다.** 자세표는 서 있는 자리에 대한 가정 위에
-        # 서 있는데, 그 가정이 주석으로만 있어서 비전팀이 주차 자리에서 스캔을 돌리고도
-        # "성공" 을 받았다 (2026-09-23). 이건 합격 문턱을 올리는 것이 아니라 **전제**다 —
-        # 넣으면 성공 보고가 줄어든다(무의미한 스캔이 거부로 바뀐다).
-        try:
-            _bb = self.aabb(SHELF)
-            _lo, _hi = self.to_arm(_bb[:3]), self.to_arm(_bb[3:])
-            _aabb_arm = [min(_lo[0], _hi[0]), min(_lo[1], _hi[1]), min(_lo[2], _hi[2]),
-                         max(_lo[0], _hi[0]), max(_lo[1], _hi[1]), max(_lo[2], _hi[2])]
-            _why = _sp.check_assumptions(_aabb_arm)
-            self.say(f"[스캔] 서가 팔기준 뒷면 y {_aabb_arm[4]:+.3f} · 좌우중심 x "
-                     f"{(_aabb_arm[0] + _aabb_arm[3]) / 2:+.3f} "
-                     f"(표 전제 {_sp.SCAN_TABLE_ASSUMES['shelf_back_y_arm']:+.3f} / "
-                     f"{_sp.SCAN_TABLE_ASSUMES['shelf_x_center_arm']:+.3f})")
-            if _why:
-                self.say(f"[스캔] **거부** — {_why}")
-                return []
-        except Exception as _exc:      # noqa: BLE001 — 검사가 못 돌면 그렇다고 말한다
-            self.say(f"[스캔] 전제 검사를 못 했다: {type(_exc).__name__}: {_exc} — "
-                     f"이 판의 스캔은 전제가 확인되지 않은 것이다")
-
         _sp_home = np.asarray(self.q_home if home is None else home, float)
         q_prev = _sp_home
         out = []
-        for name, hp, hR, meta in _sp.scan_poses(table or _sp.SCAN_TABLE,
-                                                 arm_base_z=float(self.l0p[2])):
+        # 예전 맵에서 잰 0.749 m 를 쓰지 않는다. 지금 로드한 USD의 서가 앞면을
+        # 현재 arm_base_link 좌표로 매번 바꿔 스캔 목표로 쓴다.
+        # 월드 AABB의 여덟 꼭짓점을 팔 좌표로 바꾸고, 로봇 정면(+Y)에 있는
+        # 가장 가까운 면을 앞면으로 고른다. 월드 y 최소값만 쓰면 로봇 yaw가
+        # 바뀐 맵에서 옆면/뒷면을 앞면으로 오인한다.
+        _bb = np.asarray(self.shelf_aabb_world, float)
+        _corners = [np.array([x, y, z], float)
+                    for x in (_bb[0], _bb[3])
+                    for y in (_bb[1], _bb[4])
+                    for z in (_bb[2], _bb[5])]
+        _front_candidates = [float(self.to_arm(p)[1]) for p in _corners
+                             if float(self.to_arm(p)[1]) > 0.10]
+        if not _front_candidates:
+            raise RuntimeError("선택한 서가가 arm_base_link 정면(+Y)에 없다")
+        _shelf_face_y = min(_front_candidates)
+        if not 0.35 <= _shelf_face_y <= 1.40:
+            raise RuntimeError(
+                f"서가 앞면 거리 {_shelf_face_y:.3f} m가 안전 범위 0.35~1.40 m 밖이다")
+        self.say(f"[스캔] 현재 USD 서가 앞면(팔기준) y={_shelf_face_y:.3f} m")
+        for name, hp, hR, meta in _sp.scan_poses(
+                table or _sp.SCAN_TABLE, arm_base_z=float(self.l0p[2]),
+                shelf_face_y=_shelf_face_y):
             wp = self.to_world(hp)
             wq = quat_from_R(self.Rl0 @ hR)
-            # **가드를 거친다.** 예전에는 여기서 Lula 를 직접 불러 `_arm_limits`·
-            # `_branch_ok`·`_above_deck` 가 전부 빠졌고, 그 결과 도달 불가 해(j6 3.225,
-            # 실제 한계 3.0)를 향해 관절 6 을 3.03 rad 감으며 데크와 트레이를 쓸고
-            # 지나가다 404 로 죽었다 (2026-09-23 비전팀 실측).
-            q, _ok = self.ik_joints(wp, wq, q_prev, frame=BOT.hand_link)
-            cands = [q] if _ok else []
-            if not _ok:
+            # **가드를 거친다.** 여기서 Lula 를 직접 부르면 `_arm_limits`·
+            # `_branch_ok`·`_above_deck` 가 전부 빠진다. 그 결과 도달 불가 해
+            # (관절6 이 Lula 한계 3.75 인데 실제 한계 3.0)를 향해 3.03 rad 을 감으며
+            # 데크와 트레이를 지나가다 404 로 죽었다 (2026-09-23 비전팀 실측).
+            # 다중 씨앗은 비전 브랜치에서 온 개선이라 살린다 — **가드를 거쳐서** 쓴다.
+            cands = []
+            for seed in _sp.seeds_for(q_prev, _sp_home):
+                q_c, ok_c = self.ik_joints(wp, wq, np.asarray(seed, float),
+                                           frame=BOT.hand_link)
+                if not ok_c:
+                    continue
+                if not any(float(np.max(np.abs(q_c - o))) < 1e-3 for o in cands):
+                    cands.append(q_c)
+            q = _sp.pick_closest(cands, q_prev)
+            if q is None:
                 self.say(f"[스캔] {name} 해 없음 — 건너뛴다")
                 continue
             step = _sp.step_size(q_prev, q)
@@ -1274,6 +1350,36 @@ class BookScene:
             q_prev = q
         self.say(f"[스캔] 자세 {len(out)}/{len(table or _sp.SCAN_TABLE)} 개 계획")
         return out
+
+    def set_scan_tray_guard(self, enabled):
+        """스캔 중 트레이만 키네마틱으로 고정한다.
+
+        스캔에는 트레이를 움직일 이유가 없다. 팔 반작용이나 차체의 미세 이동으로
+        별도 rigid body인 트레이가 데크에서 미끄러지는 사고를 막고, 스캔 종료 시
+        원래 동적 상태로 되돌린다.
+        """
+        prim = self.stage.GetPrimAtPath(self.tray)
+        if not prim.IsValid():
+            raise RuntimeError(f"트레이 prim 없음: {self.tray}")
+        attr = UsdPhysics.RigidBodyAPI.Apply(prim).CreateKinematicEnabledAttr()
+        if enabled:
+            if getattr(self, "_scan_tray_guard", None) is not None:
+                return
+            p, q = SingleXFormPrim(self.tray).get_world_pose()
+            self._scan_tray_guard = (bool(attr.Get()), np.asarray(p, float).copy(),
+                                     np.asarray(q, float).copy())
+            attr.Set(True)
+            SingleXFormPrim(self.tray).set_world_pose(
+                self._scan_tray_guard[1], self._scan_tray_guard[2])
+            self.say("[스캔안전] 트레이 위치를 키네마틱으로 고정했다")
+            return
+        guard = getattr(self, "_scan_tray_guard", None)
+        if guard is None:
+            return
+        SingleXFormPrim(self.tray).set_world_pose(guard[1], guard[2])
+        attr.Set(guard[0])
+        self._scan_tray_guard = None
+        self.say("[스캔안전] 트레이 고정을 풀고 원래 동적 상태로 복구했다")
 
     def to_world(self, p_arm):
         return self.l0p + self.Rl0 @ np.asarray(p_arm, float)
@@ -2496,6 +2602,213 @@ class BookScene:
             self.say(f"[베이스] {self._watch_n:5d} 스텝  루트 {np.round(np.asarray(_rp, float), 3).tolist()}  "
                      f"world링크 {np.round(np.asarray(_wp, float), 3).tolist()} q {np.round(np.asarray(_wq, float), 3).tolist()}  "
                      f"팔베이스 {np.round(np.asarray(_lp, float), 3).tolist()}")
+
+    def _tray_rigid(self):
+        """트레이를 강체로 다룰 핸들 (속도를 주려면 필요하다). 없으면 None."""
+        if getattr(self, "_tray_rp", "미설정") == "미설정":
+            try:
+                from isaacsim.core.prims import SingleRigidPrim
+                self._tray_rp = SingleRigidPrim(self.tray)
+                self._tray_rp.initialize()
+            except Exception as exc:      # noqa: BLE001
+                self.say(f"[이송] 트레이 강체 핸들 없음 ({type(exc).__name__}) — 자세로 옮긴다")
+                self._tray_rp = None
+        return self._tray_rp
+
+    def deliver_tick(self):
+        """이송 한 스텝. 끝나면 **그 자리에서 앵커를 다시 잡는다**.
+
+        컨베이어처럼 일정한 속도로 간다. 도중에는 `follow_tray()` 가 손대지 않는다 —
+        둘이 같은 물체를 서로 다른 목표로 옮기면 책이 칸에서 튄다.
+        """
+        d = self._deliver
+        if not d or d["n"] <= 1:
+            return
+        # **먼저 기다린다.** 책이 트레이 바닥에 내려앉을 시간을 준다
+        if d.get("wait", 0) > 0:
+            d["wait"] -= 1
+            if d["wait"] == 0:
+                self.say("[이송] 책 안착 대기 끝 — 트레이가 출발한다")
+            return
+        d["t"] += 1
+        # **부드럽게 붙이고 부드럽게 뗀다** (smoothstep). 선형으로 밀면 출발·도착 순간
+        # 속도가 0↔최고로 튀어 그 충격에 책이 앞으로 미끄러져 나간다
+        # (2026-09-22 실측: 선형이면 진행 방향 앞쪽 한 권이 트레이 밖으로 빠졌다).
+        # 3s²-2s³ 는 양 끝에서 속도가 0 이라 충격이 없다.
+        s = min(1.0, d["t"] / d["n"])
+        u = s * s * (3.0 - 2.0 * s)
+        want = np.asarray(d["from"] + (d["to"] - d["from"]) * u, float)
+        # **데크에 닿지 않게 띄워서 간다.** 처음 5% 구간에 걸쳐 부드럽게 들어올린다
+        # (한 번에 올리면 그 스텝만 순간이동처럼 보인다).
+        _r = min(1.0, s / 0.05)
+        want[2] += TRAY_CLEAR_M * (_r * _r * (3.0 - 2.0 * _r))
+        # **속도로 민다.** `set_world_pose` 는 순간이동이라 접촉이 생기지 않아
+        # 책이 트레이를 따라오지 못한다 (2026-09-22 실측: 트레이만 가고 책은 남았다).
+        # GUI 에서 손으로 끌 때 책이 따라오는 것은 힘으로 끌기 때문이다.
+        # 속도를 주면 마찰이 생겨 책이 칸에 담긴 채 같이 간다.
+        # 키네마틱 목표 자세를 준다. PhysX 가 (목표 − 현재)/dt 를 속도로 삼아
+        # 접촉·마찰을 만들어 주므로 책이 칸에 담긴 채 실려 온다.
+        SingleXFormPrim(self.tray).set_world_pose(want, np.asarray(d["q"], float))
+        if s >= 1.0:
+            # **다시 동적으로.** 띄워 둔 TRAY_CLEAR_M 만큼 스스로 내려앉고,
+            # 이제부터 트레이는 데크 위에 얹혀 마찰로 실려 간다
+            UsdPhysics.RigidBodyAPI.Apply(
+                self.stage.GetPrimAtPath(self.tray)).CreateKinematicEnabledAttr().Set(False)
+            self._deliver = None
+            # 도착 자리에서 앵커와의 관계를 다시 잡는다 — 이후 주행하면 따라온다
+            self.rebase_tray_to(d["to"], d["q"])
+            # **측정값을 찍는다.** 예전에는 목표값 `d["to"]` 를 찍어서, 트레이가 6.4 cm 만
+            # 가고 멈춘 실행도 "안착 [4.993…]" 이라고 초록불이 떴다 (2026-09-22).
+            _mp, _ = SingleXFormPrim(self.tray).get_world_pose()
+            _err = float(np.linalg.norm(np.asarray(_mp, float) - d["to"]))
+            self.say(f"[이송] 트레이 **실측** {np.round(np.asarray(_mp, float), 3).tolist()} "
+                     f"(목표 {np.round(d['to'], 3).tolist()}, 오차 {_err*100:.1f} cm) "
+                     f"{'OK' if _err < 0.03 else '**빗나감**'}")
+
+    def diag_attach_tick(self):
+        """`attach()` **한 스텝 뒤** 앵커 기대값과 실제 책 자세의 차이를 손 기준으로 적는다.
+
+        왜 한 스텝 뒤인가: `attach()` 는 USD 에 세운 자세를 쓰고 **그 값을 되읽어** 앵커를
+        만든다. PhysX 는 자기 상태를 따로 갖고 있어, 한 스텝 돌려야 실제 값이 드러난다.
+        이 차이가 M406(운반 중 어긋남)과 같이 움직이면 가설 H-b 가 맞는 것이다.
+
+        SIM_DIAG_M406=1 일 때만 돈다. **아무 것도 바꾸지 않는다.**
+        """
+        pending = getattr(self, "_diag_attach", None)
+        if pending is None or os.environ.get("SIM_DIAG_M406") != "1":
+            return
+        self._diag_attach = None
+        book, want_rel = pending
+        try:
+            hp, hq = SingleXFormPrim(HAND_LINK).get_world_pose()
+            bp, _ = SingleXFormPrim(book).get_world_pose()
+            got_rel = R_from_quat(np.asarray(hq, float)).T @ (
+                np.asarray(bp, float) - np.asarray(hp, float))
+            d = got_rel - want_rel
+            self.say(f"[DIAG] attach_offset_hand={np.round(d, 5).tolist()} "
+                     f"크기 {float(np.linalg.norm(d))*1000:.2f} mm ({book.rsplit('/', 1)[-1]})")
+        except Exception as exc:      # noqa: BLE001 - 계측이 작업을 막으면 안 된다
+            self.say(f"[DIAG] attach_offset 못 쟀다: {type(exc).__name__}: {exc}")
+
+    def start_delivery(self):
+        """이송을 예약한다. 앵커가 잡힌 뒤 부른다.
+
+        **출발 자리로 옮기지 않는다.** 레벨이 이미 트레이를 출발 자리에 놓아 두었다
+        (레벨의 authored translate 가 `SIM_TRAY_FROM` 과 같은 값이다). 동적 강체를
+        `set_world_pose` 로 옮기는 것은 순간이동이라, 같은 자리로 옮기더라도 속도·접촉이
+        어긋나 책이 튄다. 레벨이 정답이니 그대로 둔다 (2026-09-22).
+        """
+        if not self._deliver or self._deliver["n"] > 1:
+            return
+        d = self._deliver
+        _dt = max(1e-4, float(self.world.get_physics_dt()))
+        d["n"] = max(1, int(TRAY_DELIVERY_S / _dt))
+        d["wait"] = max(0, int(TRAY_SETTLE_S / _dt))
+        # 출발점은 **레벨에 있는 지금 자리**로 잡는다. 상수와 다르면 레벨을 따른다
+        _p_now, _q_now = SingleXFormPrim(self.tray).get_world_pose()
+        _gap = float(np.linalg.norm(np.asarray(_p_now, float) - d["from"]))
+        if _gap > 0.005:
+            self.say(f"[이송] 레벨 트레이가 상수와 {_gap*100:.1f} cm 다르다 — "
+                     f"**레벨을 따른다** {np.round(_p_now, 4).tolist()}")
+            d["to"] = d["to"] + (np.asarray(_p_now, float) - d["from"])
+            d["from"] = np.asarray(_p_now, float)
+        d["q"] = np.asarray(_q_now, float)
+        # **이송 동안만 키네마틱으로 바꾼다** (컨베이어와 같다).
+        # 동적 강체에 속도를 줘 봤더니 반납기 위 마찰이 매 스텝 상쇄해서 82.5 cm 중
+        # 6.4 cm 만 갔다 (2026-09-22 실측). 키네마틱은 물리가 밀지 못하고, 목표 자세와의
+        # 차이가 곧 속도라 **책이 마찰로 실려 온다.** 도착하면 다시 동적으로 돌린다.
+        UsdPhysics.RigidBodyAPI.Apply(
+            self.stage.GetPrimAtPath(self.tray)).CreateKinematicEnabledAttr().Set(True)
+        self.say(f"[이송] 책이 칸에 앉기를 {TRAY_SETTLE_S:.1f}초 기다린 뒤 "
+                 f"{TRAY_DELIVERY_S:.1f}초 동안 민다 (대기 {d['wait']} + 이동 {d['n']} 스텝)")
+
+    def _move_tray_group(self, world_p, world_q):
+        """트레이와 **그 위의 책을 같은 강체처럼** 옮긴다 (follow_tray 와 같은 방식)."""
+        cur_p, cur_q = SingleXFormPrim(self.tray).get_world_pose()
+        Rc = R_from_quat(np.asarray(cur_q, float))
+        Rw = R_from_quat(np.asarray(world_q, float))
+        held = getattr(self, "_held_book", None)
+        rel = {}
+        for b in getattr(self, "_tray_books", {}):
+            if b == held:
+                continue
+            bp, bq = SingleXFormPrim(b).get_world_pose()
+            rel[b] = (Rc.T @ (np.asarray(bp, float) - np.asarray(cur_p, float)),
+                      Rc.T @ R_from_quat(np.asarray(bq, float)))
+        SingleXFormPrim(self.tray).set_world_pose(np.asarray(world_p, float),
+                                                  np.asarray(world_q, float))
+        for b, (rp, rR) in rel.items():
+            SingleXFormPrim(b).set_world_pose(np.asarray(world_p, float) + Rw @ rp,
+                                              quat_from_R(Rw @ rR))
+
+    def lock_base_mass(self):
+        """차체를 **무겁게** 만들어 팔 반작용에 들리지 않게 한다. 장면 준비 때 한 번 부른다.
+
+        조인트·자세붙잡기를 둘 다 시험했고 둘 다 실패했다 (위 `BASE_MASS_KG` 주석 참조).
+        질량은 물리 그대로라 솔버와 싸우지 않고, 주행은 어차피 순간이동이라 영향이 없다.
+        """
+        if not FIX_BASE:
+            return
+        link = f"{BOT.root}/{BASE_LOCK_LINK}"
+        prim = self.stage.GetPrimAtPath(link)
+        if not prim.IsValid():
+            self.say(f"[차체] 링크를 못 찾았다: {link} — 질량을 올리지 않는다")
+            return
+        api = UsdPhysics.MassAPI.Apply(prim)
+        before = api.GetMassAttr().Get()
+        api.CreateMassAttr().Set(BASE_MASS_KG)
+        self.say(f"[차체] {BASE_LOCK_LINK} 질량 {before} → {BASE_MASS_KG} kg "
+                 f"(팔 반작용에 들리지 않게) [SIM_FIX_BASE]")
+
+    def hold_base_tick(self):
+        """작업 중에는 **아티큘레이션의 월드 자세를 매 스텝 같은 값으로** 고정한다.
+
+        앞서 두 가지를 시험하고 둘 다 실패했다 (2026-09-22):
+          - 외부 고정 조인트: 아티큘레이션과 닫힌 루프를 만들어 **덜덜 떨다 주저앉았다**
+          - 루트 XForm 붙잡기: USD 루트를 써도 **PhysX 링크는 따라오지 않아** 효과가 없었다
+        아티큘레이션 자체의 자세를 쓰면 물리 상태가 같이 갱신되므로 둘 다 피한다.
+
+        주행 중(작업이 아닐 때)에는 아무것도 하지 않는다 — 주행에 지장이 없다.
+        """
+        if not FIX_BASE or getattr(self, "robot", None) is None:
+            return
+        if not getattr(self, "job_active", False):
+            if getattr(self, "_hold_pose", None) is not None:
+                self._hold_pose = None
+                self.say("[차체고정] 작업이 끝나 고정을 풀었다 — 주행할 수 있다")
+            return
+        try:
+            if getattr(self, "_hold_pose", None) is None:
+                p_w, q_w = self.robot.get_world_pose()
+                self._hold_pose = (np.asarray(p_w, float).copy(),
+                                   np.asarray(q_w, float).copy())
+                self.say(f"[차체고정] 작업 동안 아티큘레이션을 고정한다 "
+                         f"{np.round(self._hold_pose[0], 3).tolist()} [SIM_FIX_BASE]")
+            self.robot.set_world_pose(*self._hold_pose)
+        except Exception as exc:      # noqa: BLE001 — 버전마다 API 가 다르다
+            if not getattr(self, "_hold_warned", False):
+                self._hold_warned = True
+                self.say(f"[차체고정] 고정 실패 ({type(exc).__name__}: {exc}) — 그냥 둔다")
+
+    def tray_watch(self, every=60):
+        """트레이가 어디 있는지 주기적으로 찍는다 — **떨어지면 언제 떨어졌는지** 알아야 한다.
+
+        화면으로는 "바닥에 있다" 까지만 보이고, 배치 로그는 "놓았다" 라고만 한다.
+        그 사이 어디서 어긋나는지는 **시간에 따라 찍어야** 보인다.
+        SIM_TRAY_WATCH=0 으로 끈다.
+        """
+        if not TRAY_WATCH:
+            return
+        self._watch_n = getattr(self, "_watch_n", 0) + 1
+        if self._watch_n % every:
+            return
+        p, _ = SingleXFormPrim(self.tray).get_world_pose()
+        b = self.aabb(self.tray)
+        a, _ = SingleXFormPrim(self._tray_anchor).get_world_pose() if self._tray_anchor else (p, None)
+        self.say(f"[트레이] {self._watch_n:5d} 스텝  원점 z {float(p[2]):.4f}  "
+                 f"바닥면 z {float(b[2]):.4f}  중심 ({float(p[0]):.3f}, {float(p[1]):.3f})  "
+                 f"앵커 ({float(a[0]):.3f}, {float(a[1]):.3f})  "
+                 f"이송중={bool(getattr(self, '_deliver', None))} 작업중={getattr(self, 'job_active', False)}")
 
     def _tray_rigid(self):
         """트레이를 강체로 다룰 핸들 (속도를 주려면 필요하다). 없으면 None."""

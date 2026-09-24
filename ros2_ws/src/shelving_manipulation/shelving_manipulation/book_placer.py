@@ -127,6 +127,10 @@ COMMAND_CANCEL = 'cancel'
 #: 서가를 훑어 빈칸을 찾게 한다. **베이스는 그대로**, 팔만 자세를 바꾼다.
 #: 각 자세에서 잠깐 멈춰 비전이 찍을 시간을 준다 (dwell_s, 기본 1.0초).
 COMMAND_SCAN = 'scan_shelf'
+# 서가 수평 스윕 스캔 — arm_kinematics 로 판마다 왼쪽→오른쪽 직선(moveL) 경로를 한 번에 계획해 훑는다 (2026-09-23)
+COMMAND_SWEEP = 'scan_sweep'
+#: franka 로봇팔 베이스를 90도 회전시킨다. 작업 시작 전에 호출된다.
+COMMAND_ROTATE_BASE = 'rotate_base'
 
 # 시뮬 상태 status 값
 SIM_IDLE = 'IDLE'
