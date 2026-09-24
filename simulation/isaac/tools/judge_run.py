@@ -62,6 +62,18 @@ def read(d):
     d_mm = re.findall(r"밑면−칸바닥 ([+-][\d.]+) mm", txt)
     if len(d_mm) >= 2:
         g["rise_mm"] = float(d_mm[-1]) - float(d_mm[0])
+    # **런타임 사고를 종류별로 가른다.** 완주율을 세려면 "왜 못 갔나" 가 갈려야 한다.
+    # 2026-09-24 현재 셋이 관측됐고 셋 다 검출·배치와 무관하다:
+    #   기동 크래시 · manipulation_node 사망 · rotate_base 무응답
+    for key, pat in (
+            ("boot_crash", r"previous (run|crash)|Invalid PhysX transform"),
+            ("node_died", r"feedback publisher is invalid|context is invalid")):
+        if re.search(pat, txt, re.S):
+            g.setdefault("incidents", []).append(key)
+    if "베이스 회전 명령 전송" in txt and "베이스 회전 완료" not in txt:
+        g.setdefault("incidents", []).append("rotate_hang")
+    if g.get("incidents"):
+        g["incidents"] = sorted(set(g["incidents"]))
     # 꽂기 전 차체 옆이동 — 검출된 틈을 검증된 place_x 로 가져오는 양.
     # 판마다 다르고(0.171~0.288 m), 그만큼 팔 자세가 달라져 min_margin 이 흔들린다.
     m = re.search(r"꽂기 전 차체를 옆으로 ([+-]?[\d.]+) m", txt)
@@ -83,9 +95,16 @@ def read(d):
 def verdict(g):
     """합격 여부와 사유들."""
     bad, warn = [], []
-    if g.get("code") is None:
+    inc = g.get("incidents") or []
+    names = {"boot_crash": "Isaac 기동 크래시", "node_died": "manipulation_node 사망",
+             "rotate_hang": "rotate_base 무응답"}
+    for k in inc:
+        bad.append(f"런타임 사고: {names.get(k, k)} — **배치와 무관하다**")
+    if g.get("code") is None and not inc:
         bad.append("code 를 못 읽었다")
-    elif g["code"] != 0:
+    elif g.get("code") is None:
+        pass                      # 사고로 못 갔으면 code 가 없는 게 당연하다
+    elif g.get("code") is not None and g["code"] != 0:
         bad.append(f"code {g['code']}")
     if g.get("verified") is False:
         bad.append("verified=False")
@@ -119,11 +138,13 @@ def main() -> int:
     if not dirs:
         print("판 디렉터리가 없다")
         return 2
-    n_ok = 0
+    n_ok, tally = 0, {}
     for d in dirs:
         g = read(d)
         ok, bad, warn = verdict(g)
         n_ok += int(ok)
+        for k in (g.get("incidents") or []):
+            tally[k] = tally.get(k, 0) + 1
         name = os.path.basename(d.rstrip("/"))
         head = f"{'합격' if ok else '불합격'}  {name:<16}"
         nums = (f"code {g.get('code', '?')} · min_margin {g.get('min_margin', float('nan')):.3f} · "
@@ -146,6 +167,12 @@ def main() -> int:
             print(f"    레벨 {g.get('md5', '?')[:8]} · 코드 {g.get('git', '?')[:8]}")
     if len(dirs) > 1:
         print(f"\n{n_ok}/{len(dirs)} 합격")
+        if tally:
+            names = {"boot_crash": "Isaac 기동 크래시", "node_died": "manipulation_node 사망",
+                     "rotate_hang": "rotate_base 무응답"}
+            print("런타임 사고 (배치와 무관):")
+            for k, v in sorted(tally.items(), key=lambda kv: -kv[1]):
+                print(f"  {names.get(k, k):<24} {v}/{len(dirs)}")
     return 0 if n_ok == len(dirs) else 1
 
 
