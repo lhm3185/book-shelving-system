@@ -24,7 +24,7 @@ from geometry_msgs.msg import PointStamped
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.node import Node
-from shelving_interfaces.action import PlaceBook
+from shelving_interfaces.action import DetectTargetSlot, PlaceBook
 from std_msgs.msg import Bool
 
 # 검증된 Franka 꽂을 좌표 (팔 기준). test_contract_coords.py 가 지키는 값이다
@@ -60,6 +60,11 @@ def main():
     ap.add_argument('--book-id', default='book_0')
     ap.add_argument('--wait', type=float, default=20.0, help='비전 좌표를 기다릴 시간(초)')
     ap.add_argument('--dry-run', action='store_true', help='좌표만 보고 보내지 않는다')
+    ap.add_argument('--detect-slot', action='store_true',
+                    help='꽂을 칸을 **비전에게 묻는다** (DetectTargetSlot 먼저). '
+                         '안 주면 --goal-x/y/z 상수를 쓴다')
+    ap.add_argument('--slot-wait', type=float, default=120.0,
+                    help='빈칸 검출을 기다릴 시간(초). 스캔이 들어가 오래 걸린다')
     a = ap.parse_args()
 
     rclpy.init()
@@ -92,6 +97,61 @@ def main():
         print('--dry-run: 보내지 않는다')
         return 0
 
+    # **꽂을 칸을 비전에게 묻는다** (`--detect-slot`).
+    #
+    # 왜 필요한가: 아래 `--goal-x/y/z` 는 **상수**다. 그리고 그 값은 "주행 경유점에
+    # 선 자세" 에 묶여 있다 — 2026-09-24 이전 열다섯 판을 그 자세에서 쟀다.
+    # 그런데 스캔은 서가 전체를 보려고 차체를 **서가 중심으로 266 mm 옮긴다**
+    # (`align_base_before_work`). 옮긴 뒤 같은 팔 기준 상수를 쓰면 26 cm 떨어진
+    # 데를 가리키고, 실제로 남의 자리(책이 꽉 찬 칸)에 35.2 mm 겹쳐 꽂았다.
+    #
+    # 검출값을 받으면 **옮긴 자세 기준으로 나오므로 자동으로 맞는다.** 상수를
+    # 옮긴 자세에 맞춰 다시 재는 길도 있지만, 그러면 또 하나의 썩을 상수가 는다.
+    detected = None
+    if a.detect_slot:
+        det = ActionClient(node, DetectTargetSlot, '/detect_target_slot')
+        if not det.wait_for_server(timeout_sec=10.0):
+            print('**/detect_target_slot 액션 서버가 없다** — '
+                  'manipulation_node 의 enable_perception_bridge 를 볼 것')
+            return 2
+        dg = DetectTargetSlot.Goal()
+        dg.job_id = f'slot_{node.get_clock().now().nanoseconds // 10**9}'
+        dg.book_id = a.book_id
+        dg.book_width, dg.book_height = BOOK['width'], BOOK['height']
+        dg.book_thickness = BOOK['thickness']
+        print('빈칸을 찾는다 (스캔이 들어가 오래 걸린다) …')
+        _s = det.send_goal_async(dg, feedback_callback=lambda f: print(
+            f'  {f.feedback.phase} 후보 {f.feedback.candidate_count}'))
+        rclpy.spin_until_future_complete(node, _s, timeout_sec=30.0)
+        if not (_s.done() and _s.result() and _s.result().accepted):
+            print('**빈칸 검출 목표가 거부됐다**')
+            return 2
+        _r = _s.result().get_result_async()
+        rclpy.spin_until_future_complete(node, _r, timeout_sec=a.slot_wait)
+        if not _r.done():
+            print(f'**빈칸 검출이 {a.slot_wait:.0f}초 안에 안 끝났다**')
+            return 2
+        res = _r.result().result
+        if not res.success:
+            print(f'**빈칸 검출 실패** {res.error_code} {res.message}')
+            return 2
+        detected = res.target_slot
+        _pp = detected.pose.position
+        print(f'빈칸 검출: frame={detected.header.frame_id} '
+              f'({_pp.x:+.4f}, {_pp.y:+.4f}, {_pp.z:+.4f}) '
+              f'폭 {detected.available_width*1000:.1f} mm · '
+              f'높이 {detected.available_height*1000:.1f} mm · '
+              f'후보 {res.candidate_count} · 신뢰도 {detected.confidence:.2f}')
+        print(f'  상수와의 차이  x {(_pp.x - a.goal_x)*1000:+.1f} · '
+              f'y {(_pp.y - a.goal_y)*1000:+.1f} · z {(_pp.z - a.goal_z)*1000:+.1f} mm '
+              f'(상수 {a.goal_x:+.4f}, {a.goal_y:+.4f}, {a.goal_z:+.4f})')
+        # **폭을 꼭 본다.** 겹침 예비는 빈칸 폭에서 나온다 — 어제 잰 3.7 mm 는
+        # 폭 59.9 mm 기준이고, 더 좁은 칸이 잡히면 그만큼 깎인다.
+        _need = BOOK['thickness'] + 0.010
+        if detected.available_width > 0 and detected.available_width < _need:
+            print(f'  **주의: 검출 폭 {detected.available_width*1000:.1f} mm 가 '
+                  f'책 두께 + 여유 {_need*1000:.1f} mm 보다 좁다**')
+
     client = ActionClient(node, PlaceBook, '/place_book')
     if not client.wait_for_server(timeout_sec=10.0):
         print('**/place_book 액션 서버가 없다** — manipulation_node 를 볼 것')
@@ -100,13 +160,18 @@ def main():
     goal = PlaceBook.Goal()
     goal.job_id = f'vision_{msg.header.stamp.sec}'
     goal.book_id = a.book_id
-    goal.target_slot.header.frame_id = 'arm_base_link'
-    goal.target_slot.pose.position.x = a.goal_x
-    goal.target_slot.pose.position.y = a.goal_y
-    goal.target_slot.pose.position.z = a.goal_z
-    goal.target_slot.pose.orientation.z = 0.7071068      # yaw +90° (서가 방향)
-    goal.target_slot.pose.orientation.w = 0.7071068
-    goal.target_slot.confidence = 1.0
+    if detected is not None:
+        # 검출값을 **그대로** 싣는다. 우리가 고쳐 쓰면 무엇이 검출이고 무엇이
+        # 우리 보정인지 못 가린다 — 오늘 그 구분을 못 해 두 번 헤맸다.
+        goal.target_slot = detected
+    else:
+        goal.target_slot.header.frame_id = 'arm_base_link'
+        goal.target_slot.pose.position.x = a.goal_x
+        goal.target_slot.pose.position.y = a.goal_y
+        goal.target_slot.pose.position.z = a.goal_z
+        goal.target_slot.pose.orientation.z = 0.7071068      # yaw +90° (서가 방향)
+        goal.target_slot.pose.orientation.w = 0.7071068
+        goal.target_slot.confidence = 1.0
     goal.book_thickness = BOOK['thickness']
     goal.book_height = BOOK['height']
     goal.book_width = BOOK['width']

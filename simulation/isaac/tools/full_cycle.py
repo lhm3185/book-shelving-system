@@ -174,7 +174,15 @@ def main():
         print(f"       짝 규칙: 선 자리 y {a.pick_y:+.4f} → 팔 기준 목표 y "
               f"{0.5495 + (-3.019 - float(a.pick_y)):.4f} "
               f"{'(SIM_GOAL_Y 로 덮어씀)' if os.environ.get('SIM_GOAL_Y') else ''}")
-        r = subprocess.run([sys.executable, os.path.join(here, "pick_from_vision.py")], env=_env)
+        # **꽂을 칸을 비전에게 묻게 한다** (`SIM_DETECT_SLOT=1`, 기본 꺼짐).
+        # 안 켜면 pick_from_vision 이 상수 `--goal-x/y/z` 를 쓴다. 그 상수는
+        # "주행 경유점에 선 자세" 에 묶여 있어서, 스캔이 차체를 서가 중심으로
+        # 266 mm 옮긴 뒤에는 26 cm 떨어진 데를 가리킨다 (2026-09-24 실측).
+        _pfv = [sys.executable, os.path.join(here, "pick_from_vision.py")]
+        if os.environ.get("SIM_DETECT_SLOT", "0") != "0":
+            _pfv.append("--detect-slot")
+            print("       꽂을 칸을 비전에게 묻는다 [SIM_DETECT_SLOT]")
+        r = subprocess.run(_pfv, env=_env)
         ok = r.returncode == 0
         print("       " + ("파지·반납 성공" if ok else f"**파지 실패 (코드 {r.returncode})**"))
         rclpy.init()

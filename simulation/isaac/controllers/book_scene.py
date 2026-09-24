@@ -152,6 +152,9 @@ FIX_BASE = os.environ.get("SIM_FIX_BASE", "1") != "0"
 #:
 #: 차체 고정은 `lock_base_mass()`(질량을 올려 팔 반작용에 안 들리게)가 한다. 그쪽은
 #: 물리 그대로라 솔버와 싸우지 않는다 — 열다섯 판이 그 방식으로 통과했다.
+#: **떠 있는 베이스에서는 켜지 말 것.** 2026-09-24 에 켠 판(V3)과 끈 판(V4)을 견줬다:
+#:     켜짐   `Invalid PhysX transform` **28,202줄** · 관절 7개 NaN · articulation 붕괴
+#:     꺼짐   **0줄** · 삽입까지 정상 진행
 #: 켜려면 `SIM_HOLD_BASE_TICK=1`. 떠 있는 베이스가 아닌 로봇에서만 의미가 있다.
 HOLD_BASE_TICK = os.environ.get("SIM_HOLD_BASE_TICK", "0") != "0"
 #: 고정할 차체 링크
