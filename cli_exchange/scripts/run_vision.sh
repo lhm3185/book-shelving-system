@@ -46,17 +46,40 @@ for kv in ${1:-}; do export "$kv"; done
 env | grep -E '^SIM_' | sort > "$D/env.txt"
 
 MODE=--gui; [ "${SIM_HEADLESS:-0}" != 0 ] && MODE=--headless
-./scripts/run_isaac_sim.sh $MODE --books 5 \
-  --camera-prim /World/ridgeback_franka/panda_hand/rsd455/RSD455/Camera_OmniVision_OV9782_Color \
-  --amr-test-overrides --drive-speed 0.6 ${SIM_EXTRA_ARGS:-} > "$D/sim.log" 2>&1 &
-echo $! > "$D/sim.pid"
 
-# 시뮬 준비(명령 대기) — 시간이 아니라 상태로 기다린다
-for i in $(seq 1 180); do
-  grep -q '준비 완료' "$D/sim.log" && break
-  sleep 2
+# **기동에 실패하면 다시 띄운다** (`SIM_BOOT_RETRY`, 기본 2회).
+# Isaac 이 `SimulationApp(...)` 생성자 안 `libgpu.foundation.plugin` 에서 죽는 일이
+# 2026-09-22~24 에 7회 있었다 (breakpad 스택, 우리 코드 밖이다). 원인은 못 고치지만
+# **7회 모두 재시도 한 번에 떴다.** 발표 당일 한 번에 떠야 하므로 감싼다.
+#   - 조용히 재시도하지 않는다. "한 번에 떴다" 와 "세 번 만에 떴다" 는 다른 사실이다
+#   - 매 시도의 실패 지점을 night/boot_log.csv 에 쌓는다. 발표 뒤에 원인을 볼 자료다
+BOOT_CSV=$R/night/boot_log.csv
+[ -f "$BOOT_CSV" ] || echo "시각,실행ID,시도,성공,준비까지초,GPU_MiB,마지막줄" > "$BOOT_CSV"
+_booted=0
+for _try in $(seq 1 $(( ${SIM_BOOT_RETRY:-2} + 1 ))); do
+  [ "$_try" -gt 1 ] && {
+    echo "**기동 실패 — 다시 띄운다 ($_try/$(( ${SIM_BOOT_RETRY:-2} + 1 )))**"
+    mv "$D/sim.log" "$D/sim.boot$(( _try - 1 )).log" 2>/dev/null
+    bash night/cleanup_demo.sh > /dev/null 2>&1; sleep 10
+  }
+  _t0=$(date +%s)
+  _gpu=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -1)
+  ./scripts/run_isaac_sim.sh $MODE --books 5 \
+    --camera-prim /World/ridgeback_franka/panda_hand/rsd455/RSD455/Camera_OmniVision_OV9782_Color \
+    --amr-test-overrides --drive-speed 0.6 ${SIM_EXTRA_ARGS:-} > "$D/sim.log" 2>&1 &
+  echo $! > "$D/sim.pid"
+  # 시뮬 준비(명령 대기) — 시간이 아니라 상태로 기다린다.
+  # 죽었으면 180번을 다 세지 않는다 — 프로세스가 사라지면 바로 나온다.
+  for i in $(seq 1 180); do
+    grep -q '준비 완료' "$D/sim.log" && { _booted=1; break; }
+    kill -0 "$(cat "$D/sim.pid")" 2>/dev/null || break
+    sleep 2
+  done
+  echo "$(date -Is),$ID,$_try,$_booted,$(( $(date +%s) - _t0 )),${_gpu:-},\"$(tail -1 "$D/sim.log" | tr -d '\r' | cut -c1-70 | tr ',' ';')\"" >> "$BOOT_CSV"
+  [ "$_booted" = 1 ] && break
 done
-grep -q '준비 완료' "$D/sim.log" || { echo "시뮬 준비 실패"; tail -30 "$D/sim.log"; bash night/cleanup_demo.sh; exit 2; }
+[ "$_booted" = 1 ] || { echo "시뮬 준비 실패 ($(( ${SIM_BOOT_RETRY:-2} + 1 ))회 모두)"; tail -30 "$D/sim.log"; bash night/cleanup_demo.sh; exit 2; }
+[ "$_try" -gt 1 ] && echo "**주의: $_try 번째 시도에 떴다** — night/boot_log.csv 참고" 
 
 (
   unset PYTHONPATH LD_LIBRARY_PATH
