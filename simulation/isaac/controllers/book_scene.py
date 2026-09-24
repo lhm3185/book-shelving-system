@@ -135,6 +135,25 @@ GRIP_ROT90 = os.environ.get("SIM_GRIP_ROT90", "0") != "0"
 #: 도는 동안 AMR 이 바닥에서 떴다). **주행 중에는 풀어 둔다** — 고정한 채 순간이동시키면
 #: 조인트와 싸워 주행이 깨진다.
 FIX_BASE = os.environ.get("SIM_FIX_BASE", "1") != "0"
+#: 작업 중 **아티큘레이션 자세를 매 스텝 다시 쓰는** 방식으로도 차체를 고정할 것인가.
+#: **기본 꺼짐.** 이 로봇에는 맞지 않는다.
+#:
+#: 이 AMR 은 **떠 있는 베이스**라 차체가 루트 변환이 아니라 `dummy_base_x/y` 프리즈매틱
+#: 조인트로 움직인다 (`base_idx`). 그런데 `hold_base_tick` 은 `robot.set_world_pose()` 로
+#: **아티큘레이션 프레임 자체**를 붙잡는다. 조인트는 그대로 값을 들고 있으므로 둘이
+#: 싸우고, 팔 베이스가 차대 원점 쪽으로 끌려간다.
+#:
+#: 2026-09-24 실측 (비전 브랜치를 합친 뒤 이 호출이 처음 살아났다):
+#:     팔 베이스 월드 x  2.8349 → 2.5730   (**262 mm**)
+#:     팔–차대 오프셋    +0.300 → +0.038   (같은 262 mm — 오프셋이 통째로 먹혔다)
+#:     꽂을 월드 x       2.496 → 2.234
+#:     그 뒤 관절 7개 NaN · articulation 붕괴 (panda_link0 · base_link · world ·
+#:     dummy_base_x/y 까지 `Invalid PhysX transform`)
+#:
+#: 차체 고정은 `lock_base_mass()`(질량을 올려 팔 반작용에 안 들리게)가 한다. 그쪽은
+#: 물리 그대로라 솔버와 싸우지 않는다 — 열다섯 판이 그 방식으로 통과했다.
+#: 켜려면 `SIM_HOLD_BASE_TICK=1`. 떠 있는 베이스가 아닌 로봇에서만 의미가 있다.
+HOLD_BASE_TICK = os.environ.get("SIM_HOLD_BASE_TICK", "0") != "0"
 #: 고정할 차체 링크
 BASE_LOCK_LINK = os.environ.get("SIM_BASE_LOCK_LINK", "base_link")
 #: 차체 링크에 줄 질량 (kg). 팔 반작용으로 들리지 않을 만큼 무겁게 한다.
@@ -1060,7 +1079,8 @@ class BookScene:
                 try:
                     self.world.add_physics_callback(
                         "bs_tray_follow",
-                        lambda _dt: (self.hold_base_tick(), self.follow_hand(),
+                        lambda _dt: (self.hold_base_tick() if HOLD_BASE_TICK else None,
+                                     self.follow_hand(),
                                      self.deliver_tick(), self.follow_tray(),
                                      self.tray_watch(),
                                      self.diag_attach_tick()))
