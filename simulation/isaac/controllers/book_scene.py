@@ -11,7 +11,7 @@ import sys
 
 import numpy as np
 
-from shelf_gap import classify_place, side_clearances, skew_deg_from_spans
+from shelf_gap import nearest_board, classify_place, side_clearances, skew_deg_from_spans
 from pxr import Gf, Usd, UsdGeom, UsdPhysics
 from isaacsim.core.api import World
 from isaacsim.core.prims import SingleArticulation, SingleXFormPrim
@@ -1174,6 +1174,48 @@ class BookScene:
     def _prim_valid(self, p):
         # 확인할 수 없으면 **유효하지 않다**고 본다. 검사의 기본값이 '통과' 면 검사가 아니다
         return self.stage.GetPrimAtPath(p).IsValid() if getattr(self, "stage", None) else False
+
+    def known_boards(self):
+        """지금까지 아는 **선반 판 윗면 z(월드) 목록** — 설정/실측한 아래 판 + 꽂으면서 잰 판들."""
+        out = {round(float(self.shelf_floor_z), 4)}
+        out.update(round(float(b), 4) for b in getattr(self, "_boards_seen", ()))
+        return sorted(out)
+
+    def snap_floor(self, z_cmd, tol=0.08):
+        """명령이 가리키는 칸 바닥 z(월드) → **실제 판 윗면**으로 맞춘다.
+
+        칸 바닥은 명령의 칸 중심 z 에서 책 반높이를 뺀 **계산값**이다. 그 계산은 아래 판에서
+        55 mm 위로 나오는데(칸 중심 0.3399 는 판+반높이가 아니다), 지금까지는 스칼라
+        `shelf_floor_z` 로 스냅해 조용히 지워 왔다. **위 판에서는 60 cm 차이라 스냅이 안
+        걸렸고** 계산값이 그대로 나가 손을 뗀 순간 책이 59 mm 떨어져 5.4° 틀어졌다
+        (2026-09-25 01:02, 한 판에 두 선반을 쓴 첫날). 판은 목록이다:
+
+          1. 아래 판(`shelf_floor_z`) 7 cm 안이면 그대로 — **지금까지의 동작, 안 바뀐다**
+          2. 아니면 아는 판 목록에서 `tol` 안의 가장 가까운 판
+          3. 없으면 서가 메시에서 `z_cmd` 근처 수평면을 잰다(`measure_shelf_board_z`) — 잰 값은
+             목록에 넣어 둔다(조사·판정도 같은 판을 쓴다)
+          4. 그래도 없으면 계산값 그대로 — 그리고 **떨어진다고** 경고한다
+        """
+        z_cmd = float(z_cmd)
+        if abs(z_cmd - self.shelf_floor_z) < 0.07:
+            return float(self.shelf_floor_z)
+        b = nearest_board(z_cmd, self.known_boards(), tol)
+        if b is None:
+            try:
+                b = self.measure_shelf_board_z(z_cmd, tol=tol)
+            except Exception as exc:      # noqa: BLE001 - 계측이 작업을 막으면 안 된다
+                self.say(f"[선반] 판을 못 쟀다: {type(exc).__name__}: {exc}")
+                b = None
+            if b is not None:
+                self._boards_seen = set(getattr(self, "_boards_seen", set())) | {round(float(b), 4)}
+        if b is None:
+            self.say(f"[경고] 명령이 가리키는 칸 바닥 {z_cmd:.4f} 근처 {tol * 100:.0f} cm 안에 판이 없다 "
+                     f"(아는 판 {self.known_boards()}). 계산값대로 놓으면 **책이 그 차이만큼 떨어져 틀어진다** "
+                     f"— 판 z 를 확인할 것")
+            return z_cmd
+        self.say(f"[선반] 칸 바닥 계산값 {z_cmd:.4f} → 실측 판 윗면 {b:.4f} 로 맞춤 "
+                 f"({(b - z_cmd) * 1000:+.1f} mm) [snap_floor]")
+        return float(b)
 
     def measure_shelf_board_z(self, near_z, tol=0.08, min_pts=4):
         """서가 메시에서 `near_z` 에 가장 가까운 **수평면**의 z (월드). 못 찾으면 None.
@@ -2417,18 +2459,7 @@ class BookScene:
         y_front = float(_pc[1]) - W / 2 - MEASURED_INSET       # 꽂힌 책 중심 → 서가 앞면
         # 꽂힌 책 중심 → 칸 바닥. 목표 z 는 표준 책 높이를 가정하고 오므로, 책 높이가 다르면
         # 그대로 쓰면 책이 칸 바닥에서 뜨거나 파묻힌다. 같은 칸으로 볼 수 있으면 실제 칸 바닥에 맞춘다.
-        floor_z = float(_pc[2]) - Lb / 2
-        if abs(floor_z - self.shelf_floor_z) < 0.07:
-            floor_z = self.shelf_floor_z
-        else:
-            # 명령이 가리키는 단과 SHELF_ROW_Z 가 다르다. 책은 명령대로 꽂히지만
-            # **survey() 가 그 책을 '바닥/기타' 로 분류해 성공을 실패로 보고**하고,
-            # 북엔드도 엉뚱한 높이에 만들어진다. SIM_SHELF_ROW_Z 를 안 넘겼을 때 생긴다
-            # (2026-09-21 점검). 조용히 지나가지 않게 한다.
-            self.say(f"[경고] 명령이 가리키는 선반판 {floor_z:.3f} 가 "
-                     f"SIM_SHELF_ROW_Z({self.shelf_floor_z:.3f}) 와 {abs(floor_z-self.shelf_floor_z)*100:.1f} cm 다르다. "
-                     f"꽂기는 되지만 **성공을 실패로 보고**하고 북엔드 높이가 틀린다 — "
-                     f"SIM_SHELF_ROW_Z={floor_z:.3f} 로 다시 띄울 것")
+        floor_z = self.snap_floor(float(_pc[2]) - Lb / 2)
         spine_final = y_front + SPINE_INSET
         grasp = self.yaw_to_arm([bc[0], bc[1], bb[5] - TIP_DOWN])
         if book in self.grasp_local:
@@ -3509,7 +3540,10 @@ class BookScene:
                 _sx = (_bb[0], _bb[3], _bb[1], _bb[4])
             except Exception:      # noqa: BLE001 - 서가 상자를 모르면 옛 판정 그대로
                 _sx = None
-            where = classify_place(bb, self.shelf_floor_z, self.tray_floor_z, _sx)
+            # 판은 목록이다 — 위 판에 꽂힌 책을 아래 판 높이로 재면 '바닥/기타' 가 된다
+            _fz = nearest_board(z0, self.known_boards(), 0.08)
+            where = classify_place(bb, self.shelf_floor_z if _fz is None else _fz,
+                                   self.tray_floor_z, _sx)
             # **자리마다 '바른 자세'가 다르다.**
             #   트레이: 책등이 위 → **깊이(W)** 가 수직
             #   서가  : 세워 꽂음 → **높이(L)** 가 수직

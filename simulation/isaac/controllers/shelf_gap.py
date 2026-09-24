@@ -199,6 +199,17 @@ def side_clearances(bb, boxes):
     return left, left_name, right, right_name
 
 
+def nearest_board(z, boards, tol=0.08):
+    """`z` 에서 `tol` 안에 있는 **가장 가까운 판 윗면** z. 없으면 None.
+
+    2026-09-25 01:02 실측: 위 판에 꽂을 때 칸 바닥을 스칼라 `SIM_SHELF_ROW_Z`(아래 판) 하나로
+    스냅해서, 60 cm 차이라 스냅이 안 걸리고 계산값(1.1007)이 그대로 쓰였다. 실제 판은 1.0417 —
+    손을 떼자 책이 59 mm 떨어져 5.4° 틀어졌다. 판은 하나가 아니라 **목록**이다.
+    """
+    cands = [float(b) for b in boards if abs(float(b) - float(z)) <= tol]
+    return min(cands, key=lambda b: abs(b - float(z))) if cands else None
+
+
 def classify_place(bb, shelf_floor_z, tray_floor_z, shelf_xy=None):
     """책이 **어디 있는가** — `"서가"` / `"트레이"` / `"서가높이·서가밖"` / `"바닥/기타"`.
 
