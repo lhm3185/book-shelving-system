@@ -94,6 +94,75 @@ done
 [ "$_booted" = 1 ] || { echo "시뮬 준비 실패 ($(( ${SIM_BOOT_RETRY:-2} + 1 ))회 모두)"; tail -30 "$D/sim.log"; bash night/cleanup_demo.sh; exit 2; }
 [ "$_try" -gt 1 ] && echo "**주의: $_try 번째 시도에 떴다** — night/boot_log.csv 참고" 
 
+# **rqt 를 같이 띄운다** (`SIM_RQT`, 기본 꺼짐 — 켜야만 뜬다).
+#
+#   SIM_RQT=1                      → debug,depth,console  (기본 묶음)
+#   SIM_RQT="debug,depth,rgb,console,topic,graph"
+#
+# 토픽 이름은 **지어내지 않는다.** 비전 설정(`shelving_perception/config/perception.yaml`)
+# 에 적힌 그대로다:
+#
+#   /rgb /depth /camera_info          손목 카메라 → 액션그래프 → ROS (비전의 입력)
+#   /perception/debug_image           비전이 **판단을 그려서** 내놓는 것
+#   /perception/depth_debug_image     깊이 시각화
+#
+# 확인할 때는 `debug` 가 제일 쓸모 있다 — 무엇을 보고 그렇게 판단했는지가 그림에 있다.
+# 원본(`rgb`)은 "카메라가 살아 있나" 를 볼 때다.
+#
+# 노드와 **같은 도메인·같은 DDS 프로필**로 띄워야 토픽이 보인다.
+RQT_TOPIC_debug=/perception/debug_image
+RQT_TOPIC_depth=/perception/depth_debug_image
+RQT_TOPIC_rgb=/rgb
+RQT_TOPIC_raw_depth=/depth
+
+start_rqt() {
+  [ "${SIM_RQT:-0}" = 0 ] && return 0
+  rm -f "$D/rqt.pids"          # 앞 판의 PID 가 남아 있으면 남의 것을 죽인다
+  local want=${SIM_RQT}
+  [ "$want" = 1 ] && want="debug,depth,console"
+  command -v rqt >/dev/null 2>&1 || {
+    echo "**rqt 가 없다** — 설치: sudo apt install ros-jazzy-rqt ros-jazzy-rqt-common-plugins"
+    return 0; }
+  (
+    unset PYTHONPATH LD_LIBRARY_PATH
+    export ROS_DOMAIN_ID=130 RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+    export FASTRTPS_DEFAULT_PROFILES_FILE=$R/config/fastdds_local.xml
+    . /opt/ros/jazzy/setup.bash; . ros2_ws/install/setup.bash
+    _live=$(ros2 topic list 2>/dev/null)
+    _img() {   # $1 = 이름, $2 = 토픽
+      if ! echo "$_live" | grep -qx "$2"; then
+        echo "  [$1] $2 **아직 없다** — 창은 띄운다. 나오면 저절로 붙는다"
+      else
+        echo "  [$1] $2"
+      fi
+      ros2 run rqt_image_view rqt_image_view "$2" > "$D/rqt_$1.log" 2>&1 &
+      echo $! >> "$D/rqt.pids"
+    }
+    for _w in ${want//,/ }; do
+      case $_w in
+        debug)     _img debug     "$RQT_TOPIC_debug" ;;
+        depth)     _img depth     "$RQT_TOPIC_depth" ;;
+        rgb)       _img rgb       "$RQT_TOPIC_rgb" ;;
+        raw_depth) _img raw_depth "$RQT_TOPIC_raw_depth" ;;
+        console)   echo "  [console] 로그"
+                   ros2 run rqt_console rqt_console > "$D/rqt_console.log" 2>&1 &
+                   echo $! >> "$D/rqt.pids" ;;
+        topic)     echo "  [topic] 토픽 값 보기"
+                   rqt --standalone rqt_topic > "$D/rqt_topic.log" 2>&1 &
+                   echo $! >> "$D/rqt.pids" ;;
+        graph)     echo "  [graph] 노드·토픽 그림"
+                   ros2 run rqt_graph rqt_graph > "$D/rqt_graph.log" 2>&1 &
+                   echo $! >> "$D/rqt.pids" ;;
+        *) echo "  모르는 rqt 이름: $_w (debug,depth,rgb,raw_depth,console,topic,graph)" ;;
+      esac
+      sleep 1
+    done
+  )
+  # **PID 는 파일로 넘긴다.** 이 함수는 서브셸 안에서 불리므로 변수 대입이
+  # 부모로 안 돌아온다 — 파일이 유일하게 건너가는 길이다.
+  echo "rqt PID: $(tr '\n' ' ' < "$D/rqt.pids" 2>/dev/null || echo 없음)"
+}
+
 (
   unset PYTHONPATH LD_LIBRARY_PATH
   export ROS_DOMAIN_ID=130 RMW_IMPLEMENTATION=rmw_fastrtps_cpp
@@ -108,10 +177,37 @@ done
   sleep 10
   timeout 300 ros2 topic pub -r 1 /perception/detect_request std_msgs/Bool "{data: true}" > /dev/null 2>&1 &
   sleep 5
+  start_rqt
+  # **사람이 볼 시간을 준다** (`SIM_PAUSE`, 기본 꺼짐). 켜면 Enter 를 칠 때까지
+  # 사이클을 시작하지 않는다 — 창 배치하고 토픽 고르는 동안 판이 지나가지 않게.
+  # 터미널이 아닐 때는 멈추지 않는다 — 무인 실행에서 영영 기다리게 된다
+  if [ "${SIM_PAUSE:-0}" != 0 ] && [ -t 0 ]; then
+    echo "==============================================================="
+    echo "  준비됐다. 창을 배치하고 **Enter** 를 치면 풀사이클을 시작한다."
+    echo "  (그냥 끝내려면 Ctrl-C)"
+    echo "==============================================================="
+    read -r _ || true
+  elif [ "${SIM_PAUSE:-0}" != 0 ]; then
+    echo "SIM_PAUSE 를 켰지만 **터미널이 아니라서 안 멈춘다** — 그대로 진행한다"
+  fi
   timeout ${CYC_TIMEOUT:-1500} python3 simulation/isaac/tools/full_cycle.py --speed 0.6 ${CYC_ARGS:-} > "$D/cyc.log" 2>&1
   echo "cycle rc=$?" >> "$D/cyc.log"
 )
 sleep 5
+# **끝나고도 살려 둔다** (`SIM_KEEP`, 기본 꺼짐). 결과를 눈으로 보려면 시뮬이 떠
+# 있어야 한다. 끄는 명령을 같이 찍는다 — **PID 로만 죽인다**(패턴으로 훑으면
+# 자기 셸까지 잡은 적이 있다).
+if [ "${SIM_KEEP:-0}" != 0 ]; then
+  echo "==============================================================="
+  echo "  시뮬을 **켜 둔 채로 끝낸다** [SIM_KEEP]"
+  echo "  끄기:  kill -INT $(cat "$D/sim.pid" 2>/dev/null) $(tr '\n' ' ' < "$D/rqt.pids" 2>/dev/null)"
+  echo "         그 뒤  bash $R/night/cleanup_demo.sh"
+  echo "  로그:  $D"
+  echo "==============================================================="
+  grep -hE 'code=|error_code|결과|성공|실패|rc=' "$D/cyc.log" | tail -8 | cut -c1-400
+  exit 0
+fi
+[ -f "$D/rqt.pids" ] && kill $(cat "$D/rqt.pids") 2>/dev/null   # 우리가 띄운 것만, PID 로
 kill -INT $(cat "$D/sim.pid") 2>/dev/null; sleep 8
 bash night/cleanup_demo.sh >> "$D/cleanup.txt" 2>&1
 date +%s > "$R/night/runs/.last_end"      # 다음 판이 이만큼 띄우고 시작한다
