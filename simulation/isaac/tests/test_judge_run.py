@@ -186,3 +186,35 @@ def test_a_run_without_the_line_is_not_guessed_at(tmp_path):
     d = _run(tmp_path, sim__log=OK_SIM + PASS + "[겹침] 옆 책과 겹치지 않음\n",
              cyc__log="code=0\ncycle rc=0\n")
     assert read(d).get("side_min_mm") is None
+
+
+# ------------------------------ 눕혀 꽂힘 (2026-09-24 LIVE4)
+
+POSE = "[꽂은 자세] 중심이 목표에서 {o:+.1f} mm · 가로 {sx:.1f} x {sy:.1f} mm → 수평 기울기 {d:+.2f}°\n"
+
+
+def test_a_sideways_book_is_a_failure_not_a_warning(tmp_path):
+    """85.8° 는 '조금 기울었다' 가 아니라 **누운 것**이다 — 합격을 준다면 틀렸다."""
+    d = _run(tmp_path, sim__log=OK_SIM + PASS + NOJAM.format(l=49.4, r=49.4)
+             + POSE.format(o=-6.3, sx=154.9, sy=45.0, d=85.80),
+             cyc__log="code=0\ncycle rc=0\n")
+    ok, bad, _warn = verdict(read(d))
+    assert not ok
+    assert any("눕혀 꽂혔다" in b for b in bad)
+
+
+def test_a_small_tilt_is_still_only_a_warning(tmp_path):
+    """1~30° 사이는 경고다 — 합격을 뒤집지 않는다. 둘을 섞으면 뜻이 없어진다."""
+    d = _run(tmp_path, sim__log=OK_SIM + PASS + NOJAM.format(l=12.5, r=11.0)
+             + POSE.format(o=1.5, sx=45.3, sy=152.0, d=3.57),
+             cyc__log="code=0\ncycle rc=0\n")
+    ok, _bad, warn = verdict(read(d))
+    assert ok and any("기울기" in w for w in warn)
+
+
+def test_the_normal_run_says_nothing_about_tilt(tmp_path):
+    d = _run(tmp_path, sim__log=OK_SIM + PASS + NOJAM.format(l=12.5, r=11.0)
+             + POSE.format(o=1.5, sx=36.4, sy=153.2, d=0.36),
+             cyc__log="code=0\ncycle rc=0\n")
+    ok, _bad, warn = verdict(read(d))
+    assert ok and not any("기울기" in w or "눕혀" in w for w in warn)

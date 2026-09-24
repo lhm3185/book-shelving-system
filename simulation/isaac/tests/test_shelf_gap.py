@@ -266,3 +266,44 @@ def test_the_tray_wins_when_heights_are_close():
     """트레이를 먼저 본다 — 두 높이가 가까우면 트레이 쪽이 좁은 조건이다."""
     from shelf_gap import classify_place
     assert classify_place(_at(2.1, -3.05, TRAY_Z + 0.01), SHELF_Z, TRAY_Z, SHELF_XY) == "트레이"
+
+
+# ------------------------- 눕혀 꽂힘 (2026-09-24 LIVE4)
+#
+#   `upright` 는 z 높이만 본다. 책이 z 축 둘레로 90° 돌아 누워도 높이는 그대로라
+#   통과한다. LIVE4 cycle2 가 **85.8°** 로 꽂혔는데 upright True 였고, 다섯 검사 중
+#   `depth` 하나가 잡았다. **하나뿐이면 여유가 없다.**
+
+TH, DP = 0.0352, 0.1517
+
+
+def test_a_straight_book_has_no_skew():
+    from shelf_gap import skew_deg_from_spans
+    assert skew_deg_from_spans(TH, DP, TH, DP) == pytest.approx(0.0, abs=1e-9)
+
+
+def test_the_live4_case_comes_out_near_ninety():
+    """실측 `154.9 x 45.0` (규격 33.6 x 151.6) → 85.8°."""
+    from shelf_gap import skew_deg_from_spans
+    deg = skew_deg_from_spans(0.1549, 0.0450, 0.0336, 0.1516)
+    assert deg == pytest.approx(85.8, abs=0.5)
+
+
+def test_a_normal_run_is_well_inside_the_tolerance():
+    """실측 정상은 0.34~0.40° — 계약 허용치 5.73° 의 14분의 1이다."""
+    from shelf_gap import skew_deg_from_spans, span_for
+    sx = span_for(TH, DP, 0.40)
+    sy = span_for(DP, TH, 0.40)      # y 쪽은 두 폭을 바꿔 넣는다
+    assert skew_deg_from_spans(sx, sy, TH, DP) == pytest.approx(0.40, abs=0.02)
+
+
+def test_a_square_section_says_it_cannot_tell():
+    """정사각 단면은 **모른다**고 말한다 — 돌린 것과 안 돌린 것이 같아 보인다.
+
+    예전 식은 여기서 45° 를 냈다. 그건 모르는 것을 아는 척하는 것이다.
+    """
+    import math
+
+    from shelf_gap import skew_deg_from_spans
+    assert math.isnan(skew_deg_from_spans(0.05, 0.05, 0.05, 0.05))
+    assert math.isnan(skew_deg_from_spans(0.07, 0.07, 0.05, 0.05))

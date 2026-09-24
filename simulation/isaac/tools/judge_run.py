@@ -221,7 +221,10 @@ def verdict(g):
     if sm is not None and sm < JAM_MM_FLOOR:
         warn.append(f"옆 여유가 {sm:+.1f} mm — 겹침은 0 이지만 관측 바닥값 "
                     f"{JAM_MM_FLOOR:.0f} mm 안쪽이다. **통과가 안전을 뜻하지 않는다**")
-    if g.get("tilt_deg") is not None and abs(g["tilt_deg"]) > 1.0:
+    if g.get("tilt_deg") is not None and abs(g["tilt_deg"]) > 30.0:
+        bad.append(f"**눕혀 꽂혔다** — 수평 기울기 {g['tilt_deg']:+.1f}°. "
+                   f"`upright` 는 z 높이만 보므로 이걸 통과시킨다")
+    elif g.get("tilt_deg") is not None and abs(g["tilt_deg"]) > 1.0:
         warn.append(f"기울기 {g['tilt_deg']:+.2f}° — 1° 를 넘으면 옆 여유를 먹는다")
     if g.get("rise_mm") is not None and abs(g["rise_mm"]) > 5.0:
         warn.append(f"놓을 때 {g['rise_mm']:+.1f} mm 움직였다 — 콜라이더 면을 볼 것")

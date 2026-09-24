@@ -11,7 +11,7 @@ import sys
 
 import numpy as np
 
-from shelf_gap import classify_place, side_clearances
+from shelf_gap import classify_place, side_clearances, skew_deg_from_spans
 from pxr import Gf, Usd, UsdGeom, UsdPhysics
 from isaacsim.core.api import World
 from isaacsim.core.prims import SingleArticulation, SingleXFormPrim
@@ -103,6 +103,13 @@ USE_LEVEL_TRAY = os.environ.get("SIM_USE_LEVEL_TRAY", "1") != "0"
 JAM_CHECK = os.environ.get("SIM_JAM_CHECK", "1") != "0"
 #: 허용 침투 (m). 서가 책들끼리 이미 0.7~4.6 mm 겹쳐 있어서(9/23 실측) 그보다 낮출 수 없다.
 JAM_TOL = float(os.environ.get("SIM_JAM_TOL", "0.005"))
+#: 꽂힌 책의 **수평 비뚤어짐** 허용치(도). 계약의 `yaw_tolerance` 0.10 rad = 5.73° 를
+#: 그대로 쓴다 — 새로 지어낸 값이 아니라 계획이 이미 쓰던 값이다.
+#: 실측 정상은 0.34~0.40° 라 14배 여유가 있다.
+#: 왜 따로 보나: `upright` 는 **z 높이만** 본다. 책이 z 축 둘레로 90° 돌아 누워도
+#: 높이는 그대로라 통과한다 (2026-09-24 LIVE4: 85.8° 로 꽂혔는데 upright True).
+#: 그때 `depth` 하나가 잡았다 — **다섯 중 하나뿐**이면 여유가 없다.
+SKEW_TOL_DEG = float(os.environ.get("SIM_SKEW_TOL_DEG", "5.73"))
 #: 서가에 **빈칸을 더 만든다** — `SIM_SHELF_GAP="<시작 인덱스>,<목표 폭 mm>[,<층>]"`.
 #:
 #: **레벨에는 이미 빈칸이 있다.** 판 z 1.581 에 81.1 / 59.9 / 36.8 / 36.1 mm,
@@ -3134,6 +3141,8 @@ class BookScene:
         """꽂힌 책 판정 (multi_book 과 같은 기준)"""
         bb = self.aabb(plan["book"])
         _, Lb, W = plan.get("dims", (self.T, self.L, self.W))
+        T0 = plan.get("dims", (self.T, self.L, self.W))[0]
+        skew = skew_deg_from_spans(float(bb[3] - bb[0]), float(bb[4] - bb[1]), T0, W)
         checks = {
             "upright": abs((bb[5] - bb[2]) - Lb) < 0.02,
             "depth": abs((bb[4] - bb[1]) - W) < 0.02,
@@ -3141,6 +3150,15 @@ class BookScene:
             "x": abs((bb[0] + bb[3]) / 2 - plan["place_x"]) < 0.015,
             "floor": abs(bb[2] - plan["floor_z"]) < 0.03,
         }
+        # **눕혀 꽂힌 것을 이름으로 잡는다.** `upright` 는 z 높이만 보므로 z 축 둘레
+        # 90° 회전을 통과시킨다 (2026-09-24 LIVE4: 85.8° 인데 upright True). 그때
+        # `depth` 가 잡긴 했지만 "깊이가 안 맞다" 보다 "비뚤어졌다" 가 무슨 일인지를
+        # 말해 준다. **정사각 단면이면 각을 못 재므로 검사하지 않는다** — 모르는 것을
+        # 통과·불통과 어느 쪽으로도 세지 않는다.
+        if not math.isnan(skew):
+            checks["skew"] = abs(skew) <= SKEW_TOL_DEG
+        else:
+            self.say("[꽂은 자세] 단면이 정사각이라 비뚤어짐을 못 잰다 — skew 검사 건너뜀")
         # 옆 책과 겹쳤는가 (T1). 물리가 막아 주지 않으므로 기하로 잰다 — 위 머리말 참조.
         if JAM_CHECK:
             jam, who, axes = self.jam_report(bb, plan.get("floor_z"))
@@ -3156,9 +3174,7 @@ class BookScene:
             # 어느 쪽이 지렛대인지 고를 필요가 없다. 수평 yaw 를 t 라 하면
             #   Sx = T·cos t + W·sin t ,  Sy = T·sin t + W·cos t
             # 두 식을 더하고 빼면 (cos t + sin t) 와 (cos t − sin t) 가 바로 나온다.
-            _a = (_sx + _sy) / (_T + _W) if (_T + _W) else 0.0
-            _b = (_sx - _sy) / (_T - _W) if abs(_T - _W) > 1e-9 else 0.0
-            _skew = math.degrees(math.atan2(_a - _b, _a + _b))
+            _skew = skew                  # 위에서 이미 쟀다 — 두 번 재면 갈라진다
             self.say(f"[꽂은 자세] 중심이 목표에서 {_off*1000:+.1f} mm · "
                      f"가로 {_sx*1000:.1f} x {_sy*1000:.1f} mm "
                      f"(규격 두께 {_T*1000:.1f} · 폭 {_W*1000:.1f} mm) "

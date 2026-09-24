@@ -226,3 +226,28 @@ def classify_place(bb, shelf_floor_z, tray_floor_z, shelf_xy=None):
     inside = (min(sx0, sx1) <= x <= max(sx0, sx1)
               and min(sy0, sy1) <= y <= max(sy0, sy1))
     return "서가" if inside else "서가높이·서가밖"
+
+
+def skew_deg_from_spans(span_x, span_y, thickness, depth):
+    """가로 두 폭에서 **수평 비뚤어짐**(도)을 낸다.
+
+    수평 yaw 를 t 라 하면
+
+        Sx = T·cos t + W·sin t ,   Sy = T·sin t + W·cos t
+
+    두 식을 더하고 빼면 `(cos t + sin t)` 와 `(cos t − sin t)` 가 바로 나온다.
+    **지렛대를 고를 필요가 없다** — 폭이 둘 다 있으니 어느 쪽이 축인지 안 물어도 된다.
+
+    `T == W` 인 **정사각 단면이면 `nan` 을 돌려준다.** 두 폭이 같으면 돌린 것과 안
+    돌린 것이 같아 보여서, 두 폭만으로는 각을 알 수 없다. 거기서 아무 숫자나 내면
+    (예전 식은 45° 를 냈다) **모르는 것을 아는 척하는 것**이다. 부르는 쪽이 `nan` 을
+    보고 "이 판은 각을 못 잰다" 로 다루게 한다.
+
+    이 레벨의 책은 35.2 × 151.7 mm 라 그 경우에 걸리지 않는다.
+    """
+    T, W = float(thickness), float(depth)
+    if abs(T - W) <= 1e-9 or (T + W) == 0.0:
+        return float("nan")
+    a = (float(span_x) + float(span_y)) / (T + W)
+    b = (float(span_x) - float(span_y)) / (T - W)
+    return math.degrees(math.atan2(a - b, a + b))
