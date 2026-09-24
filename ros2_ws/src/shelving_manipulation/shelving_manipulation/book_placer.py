@@ -157,6 +157,38 @@ def cancel_command(token: str, job_id: str) -> dict:
     return {'type': COMMAND_CANCEL, 'token': token, 'job_id': job_id}
 
 
+def publish_feedback_safely(goal_handle, message, on_error=None):
+    """피드백을 보낸다. **실패해도 작업을 죽이지 않는다.**
+
+    `(보냈나, 왜 안 보냈나)` 를 돌려준다.
+
+    왜: 2026-09-24 에 `manipulation_node` 가 판 도중 죽었다. 스택이 잘린 줄 알았는데
+    아니었다 — `_execute → _feedback → publish_feedback` 이 **전체**였고, rclpy 가
+    `RCLError` 를 던진 자리가 바로 거기였다. 목표가 이미 끝났거나(취소·중단) 노드가
+    내려가는 중이면 핸들이 무효가 되고, 그 예외가 `_execute` 밖으로 튀어 실행
+    스레드를 끝낸다.
+
+    **피드백은 진행 상황을 알리는 장식이다.** 그것 때문에 책을 쥔 채로 노드가
+    죽으면 안 된다. 그래서 두 겹으로 막는다:
+
+    1. 목표가 이미 끝났으면 **보내지 않는다** (`is_active` 가 있으면 본다)
+    2. 그래도 터지면 **삼키고 이유만 남긴다**
+
+    조용히 삼키지는 않는다 — 몇 번 못 보냈는지가 보여야 나중에 원인을 판다.
+    """
+    active = getattr(goal_handle, 'is_active', True)
+    if not active:
+        return False, '목표가 이미 끝났다'
+    try:
+        goal_handle.publish_feedback(message)
+        return True, ''
+    except Exception as exc:      # noqa: BLE001 - 장식이 작업을 죽이면 안 된다
+        why = f'{type(exc).__name__}: {exc}'
+        if on_error is not None:
+            on_error(why)
+        return False, why
+
+
 def pick_cancel(inbox, token):
     """대기 중인 명령들에서 **내 토큰의 취소만** 꺼낸다.
 

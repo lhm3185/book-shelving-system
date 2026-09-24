@@ -27,6 +27,9 @@ MIN_MARGIN = 0.15
 JAM_MM = 0.0
 #: 통과해도 **이만큼 안쪽이면 말한다** — "합격" 과 "여유가 있다" 는 다르다
 THIN_MARGIN = 0.05
+#: 서가 책들끼리 이미 −0.7~−4.6 mm 겹쳐 있다(9/23 실측 43권). 옆 여유가 이 안쪽이면
+#: 겹침 판정이 0 이어도 **관측 잡음과 구분이 안 된다.** 합격을 뒤집지는 않고 말만 한다
+JAM_MM_FLOOR = 5.0
 
 
 #: 기동 성공의 **유일한 표시**. Isaac 이 명령 대기까지 왔다는 뜻이고,
@@ -141,6 +144,11 @@ def read(d):
         g["jam_mm"], g["jam_with"] = float(m.group(2)), m.group(1)
     elif "옆 책과 겹치지 않음" in txt:
         g["jam_mm"] = 0.0
+    # **옆 실측 여유.** "겹침 0" 과 "여유가 있다" 는 다르다 — 겹침 0 으로 통과한 판의
+    # 실제 여유가 한쪽 4.9 mm 였던 적이 있다(임계 5 mm). 통과해도 얇으면 말한다.
+    side = [float(v) for v in re.findall(r"[좌우] ([+-][\d.]+) mm \(", txt)]
+    if side:
+        g["side_min_mm"] = min(side)
     # 꽂은 자세
     m = re.search(r"가로 ([\d.]+) x ([\d.]+) mm.*?기울기 ([+-][\d.]+)", txt, re.S)
     if m:
@@ -209,6 +217,10 @@ def verdict(g):
         bad.append(f"멈춘 자리: {g['rotate_last']}")
     if g.get("boot_retry"):
         warn.append(f"기동이 {g['boot_retry']}번째 시도에 떴다 — 감싸서 넘겼지만 한 번에 뜬 것은 아니다")
+    sm = g.get("side_min_mm")
+    if sm is not None and sm < JAM_MM_FLOOR:
+        warn.append(f"옆 여유가 {sm:+.1f} mm — 겹침은 0 이지만 관측 바닥값 "
+                    f"{JAM_MM_FLOOR:.0f} mm 안쪽이다. **통과가 안전을 뜻하지 않는다**")
     if g.get("tilt_deg") is not None and abs(g["tilt_deg"]) > 1.0:
         warn.append(f"기울기 {g['tilt_deg']:+.2f}° — 1° 를 넘으면 옆 여유를 먹는다")
     if g.get("rise_mm") is not None and abs(g["rise_mm"]) > 5.0:
@@ -240,6 +252,8 @@ def main() -> int:
                 f"겹침 {g.get('jam_mm', float('nan')):.1f} mm")
         if g.get("span_mm"):
             nums += f" · 가로 {g['span_mm']:.1f} mm {g.get('tilt_deg', 0):+.2f}°"
+        if g.get("side_min_mm") is not None:
+            nums += f" · 옆여유 {g['side_min_mm']:+.1f} mm"
         if g.get("shift_m") is not None:
             nums += f" · 옆이동 {g['shift_m']:+.3f} m"
         print(f"{head} {nums}")

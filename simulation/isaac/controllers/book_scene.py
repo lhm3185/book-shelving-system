@@ -10,6 +10,8 @@ import os
 import sys
 
 import numpy as np
+
+from shelf_gap import side_clearances
 from pxr import Gf, Usd, UsdGeom, UsdPhysics
 from isaacsim.core.api import World
 from isaacsim.core.prims import SingleArticulation, SingleXFormPrim
@@ -3172,8 +3174,17 @@ class BookScene:
                          f"기울기 {_skew:+.2f}° 로 x 폭이 {(_sx - _T)*1000:+.1f} mm 부풀었다 → "
                          f"{'비뚤어짐' if (_sx - _T) > abs(_off) else '옆으로 밀림'}")
             else:
-                n = len(self.shelf_book_boxes(plan.get("floor_z")))
-                self.say(f"[겹침] 옆 책과 겹치지 않음 (그 판의 서가 책 {n}권과 대조)")
+                _boxes = self.shelf_book_boxes(plan.get("floor_z"))
+                n = len(_boxes)
+                # **겹침 0 이 "여유가 있다" 를 뜻하지 않는다.** 겹침 0 으로 통과한 판의
+                # 실제 여유가 한쪽 4.9 mm 였던 적이 있다(임계 5 mm). 통과와 아슬아슬함을
+                # 가르려면 숫자가 있어야 하는데, 여기 그 숫자가 없었다 — 침투량은
+                # 겹쳤을 때만 찍히고 안 겹쳤을 때의 여유는 아무 데도 안 남았다.
+                _lo, _ln, _ro, _rn = side_clearances(bb, _boxes)
+                _fmt = (lambda d, who: "이웃 없음" if d is None
+                        else f"{d*1000:+.1f} mm ({who.rsplit('/', 1)[-1]})")
+                self.say(f"[겹침] 옆 책과 겹치지 않음 (그 판의 서가 책 {n}권과 대조) · "
+                         f"좌 {_fmt(_lo, _ln)} · 우 {_fmt(_ro, _rn)}")
         return all(checks.values()), checks, bb
 
     def survey(self):

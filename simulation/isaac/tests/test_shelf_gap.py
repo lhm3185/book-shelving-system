@@ -153,3 +153,68 @@ def test_the_gap_tolerates_less_skew_than_it_looks():
     left = [x for x in gaps(FORTH, *INNER) if x.left == ""][0]
     assert left.max_skew_deg(0.0352, DEPTH) == pytest.approx(3.82, abs=0.05)
     assert left.max_skew_deg(0.0352, DEPTH) - 3.57 < 0.3
+
+
+# ------------------------------------------- 좌우 실측 여유 (2026-09-24 데스크탑 요청)
+#
+#   "겹침 0" 이 "여유가 있다" 를 뜻하지 않는다. 겹침 0 으로 통과한 판의 실제 여유가
+#   한쪽 4.9 mm 였던 적이 있다(임계 5 mm). 통과와 아슬아슬함을 가르려면 숫자가 있어야
+#   하는데, 지금 로그에는 겹쳤을 때의 침투량만 있고 안 겹쳤을 때의 여유가 없다.
+
+def _box(x0, x1, y=(0.0, 0.16), z=(0.50, 0.73)):
+    return (x0, y[0], z[0], x1, y[1], z[1])
+
+
+OURS = _box(2.4790, 2.5142)        # 폭 35.2 mm 짜리 책 한 권
+
+
+def test_clearance_is_measured_on_both_sides():
+    """좌우 각각 가장 가까운 이웃까지의 거리를 낸다."""
+    from shelf_gap import side_clearances
+    boxes = [("left_book", _box(2.4600, 2.4665)), ("right_book", _box(2.5262, 2.5600))]
+    lo, ln, ro, rn = side_clearances(OURS, boxes)
+    assert lo * 1000 == pytest.approx(12.5, abs=0.1) and ln == "left_book"
+    assert ro * 1000 == pytest.approx(12.0, abs=0.1) and rn == "right_book"
+
+
+def test_the_nearest_neighbour_wins_not_the_first_one():
+    """더 가까운 책이 뒤에 나와도 그쪽을 쓴다 — 순서에 기대지 않는다."""
+    from shelf_gap import side_clearances
+    boxes = [("far", _box(2.3000, 2.4000)), ("near", _box(2.4600, 2.4665))]
+    lo, ln, _ro, _rn = side_clearances(OURS, boxes)
+    assert ln == "near" and lo * 1000 == pytest.approx(12.5, abs=0.1)
+
+
+def test_a_book_on_another_shelf_is_not_a_neighbour():
+    """**x 만 보면 아래 칸 책이 이웃으로 잡힌다.** z 가 안 겹치면 옆이 아니다."""
+    from shelf_gap import side_clearances
+    below = [("lower_shelf", _box(2.4600, 2.4665, z=(0.20, 0.43)))]
+    lo, _ln, ro, _rn = side_clearances(OURS, below)
+    assert lo is None and ro is None
+
+
+def test_a_book_behind_is_not_a_neighbour():
+    """뒤쪽에 있는 책도 옆이 아니다 — y 도 본다."""
+    from shelf_gap import side_clearances
+    behind = [("back_row", _box(2.4600, 2.4665, y=(0.30, 0.46)))]
+    assert side_clearances(OURS, behind)[0] is None
+
+
+def test_no_neighbour_on_a_side_is_said_as_none():
+    """이웃이 없으면 0 이 아니라 **없음**이다. 0 으로 쓰면 '딱 붙었다' 로 읽힌다."""
+    from shelf_gap import side_clearances
+    lo, _ln, ro, _rn = side_clearances(OURS, [("right_book", _box(2.5262, 2.5600))])
+    assert lo is None and ro is not None
+
+
+def test_the_tight_run_would_have_been_visible():
+    """한쪽 4.9 mm 였던 판 — 겹침은 0 인데 여유는 임계(5 mm) 아래다.
+
+    이 줄이 있었으면 "겹침 0 이라 안전하다" 고 읽지 않았을 것이다.
+    """
+    from shelf_gap import side_clearances
+    tight = [("book20", _box(2.4600, 2.4741)), ("cover07", _box(2.5191, 2.5600))]
+    lo, _ln, ro, _rn = side_clearances(OURS, tight)
+    assert lo * 1000 == pytest.approx(4.9, abs=0.1)
+    assert ro * 1000 == pytest.approx(4.9, abs=0.1)
+    assert min(lo, ro) * 1000 < 5.0        # ← 임계 아래인데 겹침은 0 이다

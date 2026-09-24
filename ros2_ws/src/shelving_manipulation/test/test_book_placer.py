@@ -161,3 +161,69 @@ def test_pick_cancel_survives_garbage():
     from shelving_manipulation.book_placer import pick_cancel
     keep, hit = pick_cancel(['{쓰레기', ''], 'tok-A')
     assert not hit and keep == ['{쓰레기', '']
+
+
+# --------------------------------- 피드백이 작업을 죽이지 않게 (2026-09-24 노드 사망)
+#
+#   스택이 잘린 줄 알았는데 아니었다. `_execute → _feedback → publish_feedback` 이
+#   **전체**였고 rclpy 가 RCLError 를 던진 자리가 바로 거기였다. 목표가 이미 끝났거나
+#   노드가 내려가는 중이면 핸들이 무효가 되고, 그 예외가 `_execute` 밖으로 튀어
+#   실행 스레드를 끝낸다. **피드백은 장식이다. 그것 때문에 죽으면 안 된다.**
+
+class _Handle:
+    def __init__(self, active=True, raises=None):
+        self.is_active = active
+        self.raises = raises
+        self.sent = []
+
+    def publish_feedback(self, msg):
+        if self.raises is not None:
+            raise self.raises
+        self.sent.append(msg)
+
+
+def test_feedback_goes_out_when_the_goal_is_alive():
+    from shelving_manipulation.book_placer import publish_feedback_safely
+    h = _Handle()
+    ok, why = publish_feedback_safely(h, 'fb')
+    assert ok and why == '' and h.sent == ['fb']
+
+
+def test_a_finished_goal_is_not_published_to():
+    """끝난 목표에 보내면 rclpy 가 던진다 — **보내기 전에 본다.**"""
+    from shelving_manipulation.book_placer import publish_feedback_safely
+    h = _Handle(active=False)
+    ok, why = publish_feedback_safely(h, 'fb')
+    assert not ok and '이미 끝났다' in why and h.sent == []
+
+
+def test_an_exception_is_swallowed_not_raised():
+    """**여기서 터져도 작업은 계속된다.** 이게 노드를 죽이던 자리다."""
+    from shelving_manipulation.book_placer import publish_feedback_safely
+    h = _Handle(raises=RuntimeError('failed to publish'))
+    ok, why = publish_feedback_safely(h, 'fb')       # 예외가 밖으로 안 나온다
+    assert not ok and 'RuntimeError' in why
+
+
+def test_the_reason_is_reported_not_hidden():
+    """**조용히 삼키지 않는다.** 몇 번 못 보냈는지가 보여야 원인을 판다."""
+    from shelving_manipulation.book_placer import publish_feedback_safely
+    seen = []
+    publish_feedback_safely(_Handle(raises=RuntimeError('boom')), 'fb', on_error=seen.append)
+    assert seen and 'boom' in seen[0]
+
+
+def test_a_handle_without_is_active_still_works():
+    """`is_active` 가 없는 핸들(가짜 시뮬·옛 rclpy)도 막지 않는다."""
+    from shelving_manipulation.book_placer import publish_feedback_safely
+
+    class Bare:
+        def __init__(self):
+            self.sent = []
+
+        def publish_feedback(self, msg):
+            self.sent.append(msg)
+
+    b = Bare()
+    ok, _why = publish_feedback_safely(b, 'fb')
+    assert ok and b.sent == ['fb']

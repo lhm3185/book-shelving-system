@@ -123,6 +123,7 @@ class ManipulationNode(Node):
         self._shelf_box = None       # 시뮬이 스캔 계획 때 알려주는 서가 상자(팔 기준). 빈칸은 이 안에서만 인정
         self._book_observations = []
         self._status = ('IDLE', '', 0.0, 0, '')    # state, job, progress, error_code, message
+        self._feedback_skipped = 0   # 피드백을 못 보낸 횟수. 조용히 삼키지 않는다
 
         group = ReentrantCallbackGroup()
         self.status_pub = self.create_publisher(RobotStatus, self.status_topic, 10)
@@ -325,7 +326,10 @@ class ManipulationNode(Node):
         feedback.phase = phase
         feedback.candidate_count = int(count)
         feedback.best_confidence = float(confidence)
-        goal_handle.publish_feedback(feedback)
+        ok, why = publish_feedback_safely(goal_handle, feedback)
+        if not ok:
+            self._feedback_skipped += 1
+            self.get_logger().warning(f'검출 피드백 못 보냄 ({why}) — 누적 {self._feedback_skipped}회')
 
     def _scan_for_empty_slots(self, goal_handle, job_id, feedback):
         token = uuid.uuid4().hex
@@ -909,10 +913,16 @@ class ManipulationNode(Node):
                             canceled=outcome.error_code == 412)
 
     def _feedback(self, goal_handle, phase, progress):
+        # **피드백이 작업을 죽이지 않게 한다.** 목표가 이미 끝난 뒤에 보내면 rclpy 가
+        # RCLError 를 던지고, 그 예외가 `_execute` 밖으로 튀어 실행 스레드를 끝낸다
+        # (2026-09-24 노드 사망 1/16). 장식 때문에 책을 쥔 채로 죽을 수는 없다.
         fb = PlaceBook.Feedback()
         fb.phase = phase
         fb.progress = float(progress)
-        goal_handle.publish_feedback(fb)
+        ok, why = publish_feedback_safely(goal_handle, fb)
+        if not ok:
+            self._feedback_skipped += 1
+            self.get_logger().warning(f'피드백 못 보냄 ({why}) — 누적 {self._feedback_skipped}회')
 
     # -------------------------------------------------------------- 상태
 

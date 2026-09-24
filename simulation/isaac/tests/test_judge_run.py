@@ -143,3 +143,46 @@ def test_matched_rotations_are_not_a_hang(tmp_path):
     d = _run(tmp_path, sim__log=OK_SIM + "베이스 회전 완료\n" * 2,
              man__log="베이스 회전 명령 전송 0도\n" * 2, cyc__log="code=0\ncycle rc=0\n")
     assert incidents(load(d))[0] == []
+
+
+# ------------------------------------- 옆 실측 여유 (2026-09-24)
+#
+#   "겹침 0" 과 "여유가 있다" 는 다르다. 겹침 0 으로 통과한 판의 실제 여유가
+#   한쪽 4.9 mm 였던 적이 있다 — 임계 5 mm 아래인데 판정은 합격이었다.
+
+NOJAM = ("[겹침] 옆 책과 겹치지 않음 (그 판의 서가 책 40권과 대조) · "
+         "좌 {l:+.1f} mm (book20) · 우 {r:+.1f} mm (cover07)\n")
+PASS = "한계 최소여유 0.208 rad\n"
+
+
+def _judged(tmp_path, left, right):
+    d = _run(tmp_path, sim__log=OK_SIM + PASS + NOJAM.format(l=left, r=right),
+             cyc__log="code=0\ncycle rc=0\n")
+    g = read(d)
+    return g, verdict(g)
+
+
+def test_a_comfortable_run_says_nothing_extra(tmp_path):
+    g, (ok, _bad, warn) = _judged(tmp_path, 12.5, 12.0)
+    assert ok and g["side_min_mm"] == 12.0
+    assert not any("옆 여유" in w for w in warn)
+
+
+def test_a_thin_run_passes_but_is_said(tmp_path):
+    """**합격을 뒤집지 않는다. 말만 한다.** 문턱을 올려 통과시키는 것과 반대다."""
+    g, (ok, _bad, warn) = _judged(tmp_path, 4.9, 12.0)
+    assert ok                                   # 겹침 0 이므로 합격이다
+    assert g["side_min_mm"] == 4.9
+    assert any("옆 여유" in w and "안전을 뜻하지 않는다" in w for w in warn)
+
+
+def test_the_narrower_side_is_the_one_reported(tmp_path):
+    g, _v = _judged(tmp_path, 12.5, 3.1)
+    assert g["side_min_mm"] == 3.1
+
+
+def test_a_run_without_the_line_is_not_guessed_at(tmp_path):
+    """옛 판에는 그 줄이 없다 — 없으면 **없다고 둔다.** 0 으로 채우지 않는다."""
+    d = _run(tmp_path, sim__log=OK_SIM + PASS + "[겹침] 옆 책과 겹치지 않음\n",
+             cyc__log="code=0\ncycle rc=0\n")
+    assert read(d).get("side_min_mm") is None

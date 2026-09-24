@@ -166,3 +166,34 @@ def choose_gap(all_gaps: Sequence[Gap], want_x: float, thickness: float,
                   f"(왼쪽 '{best.left or '서가끝'}' 오른쪽 '{best.right or '서가끝'}') "
                   f"→ 꽂을 x {want_x:+.4f} → {best.center:+.4f} ({move*1000:+.1f} mm), "
                   f"한쪽 여유 {best.clearance(thickness)*1000:.1f} mm")
+
+
+def side_clearances(bb, boxes):
+    """꽂은 책의 **좌우 실측 여유** (m). `(왼여유, 왼이름, 오른여유, 오른이름)`.
+
+    이웃이 없는 쪽은 `None` 이다.
+
+    왜 필요한가: 겹침 판정은 `겹쳤다 / 안 겹쳤다` 만 말한다. 그런데 **"겹침 0" 이
+    "여유가 있다" 를 뜻하지 않는다** — 2026-09-24 에 겹침 0 으로 통과한 판의 실제
+    여유가 한쪽 4.9 mm 였다(임계 5 mm). 통과와 아슬아슬함을 가르려면 **숫자**가
+    있어야 하고, 지금 로그에는 그 숫자가 없다.
+
+    **y·z 가 겹치는 책만 이웃으로 센다.** 다른 칸이나 뒤쪽에 있는 책은 옆에 있는
+    것이 아니다 — x 만 보면 아래 칸 책이 이웃으로 잡힌다.
+    """
+    left = right = None
+    left_name = right_name = ""
+    for name, nb in boxes:
+        if nb[4] <= bb[1] or nb[1] >= bb[4]:      # y 가 안 겹친다
+            continue
+        if nb[5] <= bb[2] or nb[2] >= bb[5]:      # z 가 안 겹친다 (다른 칸)
+            continue
+        if nb[3] <= bb[0]:                        # 왼쪽에 있다
+            d = bb[0] - nb[3]
+            if left is None or d < left:
+                left, left_name = d, name
+        elif nb[0] >= bb[3]:                      # 오른쪽에 있다
+            d = nb[0] - bb[3]
+            if right is None or d < right:
+                right, right_name = d, name
+    return left, left_name, right, right_name
