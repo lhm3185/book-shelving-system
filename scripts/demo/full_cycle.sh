@@ -23,6 +23,11 @@
 # 홈 자세를 10 cm 올린다(SIM_HOME_SHIFT): 그리퍼가 트레이 책 윗부분을 가렸다 (2026-09-23 스냅샷).
 # 키네마틱 파지(SIM_GRASP_KINEMATIC=1): 마찰 파지는 판마다 미끄러짐이 달라 운반 중 3.1 cm 어긋남(406)이 났다 (2026-09-23 19:29).
 #   .4 팀 검증 조합도 키네마틱 파지다. 마찰 파지 검증은 별도 과제.
+# 속도 0.5 배(SIM_SPEED_SCALE): 기본 1.0 으로 돌리면 **빠져 나오는 구간(RETREATING)에서
+#   관절 각속도가 URDF 한계의 100% 까지 올라가 403 이 난다** (2026-09-24 실측, 8스텝 초과).
+#   책은 이미 제대로 꽂혔고 검사 일곱 개가 전부 통과한 뒤인데 작업만 실패로 보고된다.
+#   0.5 는 우리 16판이 쓴 값이고 `PRESET_DEMO.speed_scale` 과 같다 — 문턱을 낮춘 게
+#   아니라 **천천히 움직이는 것**이다. 403 검사(80%)는 그대로 둔다.
 # 차체고정(SIM_FIX_BASE)은 끈다: 매 스텝 아티큘레이션 자세를 다시 쓰는 방식이라, 작업 위치에서 루트를 옮긴 뒤엔
 #   파지 접근이 0.4 rad 남긴 채 멈췄다 (2026-09-23). 차체 질량 300 kg 은 그대로라 팔 반작용은 버틴다.
 # 끝나도 Isaac·노드는 내리지 않는다 (화면으로 확인하려고).
@@ -53,6 +58,7 @@ pkill -f "detect_request" 2>/dev/null || true
 sleep 1
 echo "[1/4] Isaac 시작 (약 3~4분) — 레벨 $(basename "$LEVEL")  $(date +%T)"
 spawn env SIM_USD="$LEVEL" SIM_FIX_BASE="${SIM_FIX_BASE:-0}" SIM_GRIP_ROT90="${SIM_GRIP_ROT90:-1}" SIM_GRASP_KINEMATIC="${SIM_GRASP_KINEMATIC:-1}" SIM_HOME_J7_DEG="${SIM_HOME_J7_DEG:-90}" SIM_HOME_SHIFT="${SIM_HOME_SHIFT:-0,0,0.10}" SIM_ROBOT_YAW="${SIM_ROBOT_YAW:-}" SIM_TRAY_TO="${SIM_TRAY_TO:-4.907,-5.782,0.3365}" \
+    SIM_SPEED_SCALE="${SIM_SPEED_SCALE:-0.5}" SIM_MAX_STEP="${SIM_MAX_STEP:-0.12}" \
     "$REPO/scripts/run_isaac_sim.sh" --gui --camera-prim "$CAM" --amr-test-overrides \
     --drive-speed "$SPEED" --record-dir "$LOG/rec" --record-every "${REC_EVERY:-30}" > "$LOG/isaac.log" 2>&1
 echo -n "      준비 대기"
