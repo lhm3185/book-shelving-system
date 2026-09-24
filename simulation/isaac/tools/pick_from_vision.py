@@ -51,6 +51,36 @@ def _goal_y_default():
     return PAIR_GOAL_Y + (PAIR_PICK_Y - pick_y)
 
 
+def reclaim(node, handle, why, wait_s=10.0):
+    """떠나기 전에 **남긴 목표를 거둬들인다.**
+
+    안 하면 이 프로세스가 끝나도 목표는 조작 노드에서 계속 돈다. 그리고 바깥
+    사이클이 "파지 실패" 로 판단해 로봇을 집으로 보낸 **뒤에**, 살아 있던 그 목표의
+    회전 명령이 나간다. 2026-09-24 VD2 가 그랬다 — 키오스크에 선 채로 서가 자리를
+    맞추려 차체를 2.676 m 끌고 가려 했고, 그 판은 418초를 먹었다.
+
+    **거두는 데 실패해도 이 프로세스는 끝난다.** 여기서 막히면 사이클이 더 오래
+    멈춘다. 그래서 짧게 기다리고, 됐는지 안 됐는지를 **로그에 남긴다** —
+    "취소했다" 와 "취소를 보냈다" 는 다른 사실이다.
+    """
+    if handle is None:
+        return
+    print(f'  남긴 목표를 거둔다 ({why})')
+    try:
+        fut = handle.cancel_goal_async()
+        rclpy.spin_until_future_complete(node, fut, timeout_sec=wait_s)
+        r = fut.result()
+        if r is None:
+            print('  **취소 응답이 없다** — 목표가 아직 돌고 있을 수 있다')
+        elif getattr(r, 'goals_canceling', None):
+            print('  취소 받아들여짐')
+        else:
+            print(f'  **취소가 거절됐다** (return_code={getattr(r, "return_code", "?")}) '
+                  '— 목표가 아직 돌고 있을 수 있다')
+    except Exception as exc:      # noqa: BLE001 - 거두기 실패가 종료를 막으면 안 된다
+        print(f'  **취소 실패** {type(exc).__name__}: {exc}')
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--goal-x', type=float, default=float(os.environ.get('SIM_GOAL_X', FRANKA_SLOTS[0])), help='꽂을 칸 x (팔 기준)')
@@ -125,10 +155,18 @@ def main():
         if not (_s.done() and _s.result() and _s.result().accepted):
             print('**빈칸 검출 목표가 거부됐다**')
             return 2
-        _r = _s.result().get_result_async()
-        rclpy.spin_until_future_complete(node, _r, timeout_sec=a.slot_wait)
+        _handle = _s.result()
+        _r = _handle.get_result_async()
+        try:
+            rclpy.spin_until_future_complete(node, _r, timeout_sec=a.slot_wait)
+        except KeyboardInterrupt:
+            reclaim(node, _handle, '중단됨')
+            raise
         if not _r.done():
             print(f'**빈칸 검출이 {a.slot_wait:.0f}초 안에 안 끝났다**')
+            # **이쪽도 거둔다.** 빈칸 검출도 베이스 회전을 낸다 — 살려 두면
+            # PlaceBook 과 똑같이 철 지난 회전 명령이 뒤늦게 나간다
+            reclaim(node, _handle, '빈칸 검출 시간 초과')
             return 2
         res = _r.result().result
         if not res.success:
@@ -211,10 +249,16 @@ def main():
         print('**목표가 거절됐다**')
         return 2
     result_future = handle.get_result_async()
-    rclpy.spin_until_future_complete(node, result_future, timeout_sec=180.0)
+    try:
+        rclpy.spin_until_future_complete(node, result_future, timeout_sec=180.0)
+    except KeyboardInterrupt:
+        # 정리 스크립트가 우리를 죽일 때도 목표는 거둬야 한다
+        reclaim(node, handle, '중단됨')
+        raise
     res = result_future.result()
     if res is None:
         print('**결과를 못 받았다 (시간 초과)**')
+        reclaim(node, handle, '결과 시간 초과')
         return 2
     r = res.result
     print(f"결과: success={r.success} code={r.error_code} "
