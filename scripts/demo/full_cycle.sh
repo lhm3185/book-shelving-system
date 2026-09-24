@@ -60,9 +60,17 @@ if [ -n "$OLD" ]; then
     STILL=""; for pid in $OLD; do kill -0 "$pid" 2>/dev/null && STILL="$STILL $pid"; done
     [ -n "$STILL" ] && { echo "      안 죽어 강제 종료:$STILL"; kill -9 $STILL 2>/dev/null || true; sleep 2; }
 fi
-RQT=$(pgrep -f rqt_image_view || true)
+# **셸은 거른다.** `pgrep -f rqt_image_view` 는 그 문자열을 명령줄에 담은 셸까지
+# 잡는다 — 21:09 판에서 "5 개" 를 껐는데 그 중 하나가 창을 세어 보던 우리 셸이었다
+# (exit 144). 실제 창은 python 이므로 comm 이 셸인 PID 를 빼고, 우리 자신도 뺀다.
+RQT=""
+for pid in $(pgrep -f rqt_image_view || true); do
+    [ "$pid" = "$$" ] && continue
+    case "$(cat /proc/$pid/comm 2>/dev/null)" in bash|sh|dash|zsh|"") continue;; esac
+    RQT="$RQT $pid"
+done
 if [ -n "$RQT" ]; then
-    echo "남은 rqt 창 종료: $(echo $RQT | wc -w) 개"
+    echo "남은 rqt 창 종료:$(echo $RQT | wc -w) 개"
     kill $RQT 2>/dev/null || true; sleep 2
     for pid in $RQT; do kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true; done
 fi
