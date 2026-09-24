@@ -1,0 +1,55 @@
+# **실측으로 고친 사본** — 이현민님 원본(`shelving_system/config/book_profiles.yaml`)은
+# 건드리지 않는다. 이 파일을 파라미터로 가리켜서 쓴다:
+#
+#     ros2 run shelving_system task_manager_node --ros-args \
+#         -p book_profiles_path:=<저장소>/cli_exchange/config/book_profiles_measured.yaml
+#
+# 왜 필요한가 (2026-09-24 실측):
+#   원본 `standard.width = 0.18` 이 `PlaceBook.grasp.width` 로 실려 가고,
+#   조작 노드가 **그 절반(90 mm)을 비전 윗면 z 에서 빼서** AABB 중심을 만든다.
+#   실제로 빼야 할 값은 **60.3 mm** 이라 중심이 **29.7 mm 아래**로 내려가고,
+#   시뮬의 트레이 칸 판정(허용 30 mm)이 **35 mm 로 거절**한다 → 411, 파지 못 함.
+#
+#     폭 0.180  → 중심 추정 0.0980 · 실제 0.1277 · 오차 **−29.7 mm** → 거절
+#     폭 0.1517 → 중심 추정 0.1121 · 실제 0.1277 · 오차 **−15.6 mm** → 통과
+#
+#   **남는 15.6 mm 는 비전의 윗면 추정 오차이지 책 치수가 아니다.**
+#   그래서 "딱 맞는" 폭 0.1206 을 쓰지 않는다 — 그건 치수 자리에 비전 오차를
+#   집어넣는 것이고, 비전이 나아지면 그만큼 다시 틀어진다.
+#
+# 값 출처: 2026-09-24 레벨 실측 (`plan_inputs` 의 dims, 네 판 일치)
+#   두께 0.0352 · 높이 0.2265 · 깊이(책등→앞마구리) 0.1517
+#   앞 값: 0.035 / 0.24 / 0.18
+#
+# 원본과 다른 것은 `standard` 프로파일 셋뿐이다. 나머지는 그대로 둔다.
+#
+# 모든 길이 단위는 m이다.
+schema_version: 1
+
+# TrayJob에 별도의 책 크기 정보가 없을 때 사용한다.
+default_profile: standard
+
+profiles:
+  standard:
+    description: "1차 시연용 기본 책"
+
+    width: 0.1517       # 실측 (앞 값 0.18)
+    height: 0.2265      # 실측 (앞 값 0.24)
+    thickness: 0.0352   # 실측 (앞 값 0.035)
+    safety_margin: 0.01
+
+  thin:
+    description: "얇은 책"
+
+    width: 0.17
+    height: 0.23
+    thickness: 0.02
+    safety_margin: 0.01
+
+  large:
+    description: "크기가 큰 책"
+
+    width: 0.22
+    height: 0.30
+    thickness: 0.05
+    safety_margin: 0.015
