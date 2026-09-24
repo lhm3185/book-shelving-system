@@ -55,7 +55,8 @@ class ScanStubNode(Node):
 
     def _on_command(self, msg):
         command = decode(msg.data)
-        if command and command.get('type') in ('scan_shelf', 'scan_sweep'):   # 수평 스윕(scan_sweep)도 같은 스텁으로
+        # 수평 스윕(scan_sweep)도 같은 스텁으로
+        if command and command.get('type') in ('scan_shelf', 'scan_sweep'):
             self.pending = command
             self.sent_slot = False
 

@@ -56,6 +56,11 @@ ERRORS: Dict[int, ArmError] = {e.code: e for e in [
              '선행 조건 미충족 (시뮬 미연결, 트레이 책 없음)'),
     ArmError(412, 'CANCELLED', True, HOLD_GRIP,
              '취소 요청으로 중단. 책 보유 여부 확인 후 재개'),
+    # 2026-09-24 추가. **이 코드가 없어서 노드가 잠겼다** — 예기치 못한 예외가 실행
+    # 콜백 밖으로 나가면 작업이 '실행 중' 으로 걸린 채 남고 그 뒤 모든 요청이 거절된다.
+    # 이제는 이 코드로 끝내고 **다음 요청을 받는다.** 재시도 가능하다.
+    ArmError(413, 'INTERNAL_ERROR', True, HOLD_GRIP,
+             '조작 노드 내부 오류 — 작업은 끝냈고 다음 요청은 받는다'),
 ]}
 
 OK = 0
@@ -158,7 +163,8 @@ def cancel_command(token: str, job_id: str) -> dict:
 
 
 def publish_feedback_safely(goal_handle, message, on_error=None):
-    """피드백을 보낸다. **실패해도 작업을 죽이지 않는다.**
+    """
+    피드백을 보낸다. **실패해도 작업을 죽이지 않는다**.
 
     `(보냈나, 왜 안 보냈나)` 를 돌려준다.
 
@@ -189,8 +195,34 @@ def publish_feedback_safely(goal_handle, message, on_error=None):
         return False, why
 
 
+INTERNAL_ERROR = 413
+
+
+def internal_failure(exc, traceback_text=''):
+    """
+    예기치 못한 예외 → `(코드, 단계, 메시지)`.
+
+    **작업 하나를 잃는 것과 노드를 잃는 것은 다르다.** 2026-09-24 에 실행 콜백에서
+    `NameError` 하나가 밖으로 나갔는데, `_busy` 를 푸는 곳이 정상 종료 경로에만
+    있어서 그 뒤 **모든 요청이 25초마다 거절**됐다. 프로세스는 살아 있으니 죽은
+    것처럼 보이지도 않는다 — 증상은 "멈춤" 이 아니라 "거절" 이다. 다시 띄우기 전엔
+    복구가 없었고, 생중계에서 그게 나면 무대에서 못 고친다.
+
+    그래서 예외를 **작업의 실패**로 끝낸다. 노드는 계속 산다.
+
+    메시지에 예외 종류와 트레이스백을 싣는다 — **삼키는 것이 아니라 끝내는 것**이다.
+    어디서 터졌는지가 안 남으면 다음에 또 못 고친다.
+    """
+    head = f'{type(exc).__name__}: {exc}'
+    msg = f'조작 노드 내부 오류 — {head}. 이 작업은 실패로 끝내고 다음 요청은 받는다'
+    if traceback_text:
+        msg += f'\n{traceback_text.rstrip()}'
+    return INTERNAL_ERROR, 'INTERNAL', msg
+
+
 def stale_gap_reason(measured_at, place_count):
-    """빈칸 실측이 **그 뒤의 배치 때문에 낡았는가.** 낡았으면 거절 사유, 아니면 `None`.
+    """
+    빈칸 실측이 **그 뒤의 배치 때문에 낡았는가.** 낡았으면 거절 사유, 아니면 `None`.
 
     빈칸은 서가를 스캔할 때 잰다. 그런데 **책을 한 권 꽂으면 그 빈칸이 없어진다.**
     다시 재지 않고 그 값을 쓰면, 방금 채운 자리를 비었다고 보고 그 위에 또 꽂는다.
@@ -212,7 +244,8 @@ def stale_gap_reason(measured_at, place_count):
 
 
 def pick_cancel(inbox, token):
-    """대기 중인 명령들에서 **내 토큰의 취소만** 꺼낸다.
+    """
+    대기 중인 명령들에서 **내 토큰의 취소만** 꺼낸다.
 
     `(남은 명령들, 취소가 있었나)` 를 돌려준다. 다른 명령은 건드리지 않는다 —
     꺼내 버리면 제 차례에 처리될 것이 사라진다.

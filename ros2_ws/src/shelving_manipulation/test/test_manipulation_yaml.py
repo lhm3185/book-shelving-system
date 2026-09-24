@@ -1,4 +1,5 @@
-"""`manipulation.yaml` 이 **검증된 값을 실제로 담고 있는지** 본다.
+"""
+`manipulation.yaml` 이 **검증된 값을 실제로 담고 있는지** 본다.
 
 2026-09-24 에 같은 사고가 **세 번** 났다. 밤새 숫자를 낸 설정이 실행 셸의
 `MAN_EXTRA` 환경변수에만 있고 저장소에는 없었다:
@@ -43,7 +44,7 @@ def _params():
 
 
 def test_every_verified_switch_is_in_the_file():
-    """**하나라도 빠지면 그 판은 검증된 조합이 아니다.**"""
+    """**하나라도 빠지면 그 판은 검증된 조합이 아니다**."""
     p = _params()
     missing = [(k, why) for k, _v, _d, why in VERIFIED if k not in p]
     assert not missing, f'yaml 에 없다 (없으면: {missing})'
@@ -56,7 +57,7 @@ def test_every_verified_switch_has_the_verified_value():
 
 
 def test_the_list_only_holds_things_that_differ_from_the_code_default():
-    """코드 기본과 같은 것을 여기 적으면 **목록이 늘어나기만 하고 뜻이 옅어진다.**"""
+    """코드 기본과 같은 것을 여기 적으면 **목록이 늘어나기만 하고 뜻이 옅어진다**."""
     for k, v, d, _why in VERIFIED:
         assert v != d, f'{k} 는 코드 기본과 같다 — 목록에서 빼라'
 

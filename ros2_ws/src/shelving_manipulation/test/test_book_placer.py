@@ -33,7 +33,9 @@ def test_every_sim_phase_maps_to_team_phase():
 
 
 def test_error_codes_are_m4xx():
-    assert sorted(ERRORS) == list(range(401, 413))
+    # 413 INTERNAL_ERROR 는 2026-09-24 에 더했다 — 실행 콜백의 예외로 노드가 잠기던
+    # 것을 **작업의 실패**로 끝내려면 그 자리를 가리킬 코드가 있어야 한다.
+    assert sorted(ERRORS) == list(range(401, 414))
 
 
 def test_success_reports_all_phases_and_monotonic_progress():
@@ -190,7 +192,7 @@ def test_feedback_goes_out_when_the_goal_is_alive():
 
 
 def test_a_finished_goal_is_not_published_to():
-    """끝난 목표에 보내면 rclpy 가 던진다 — **보내기 전에 본다.**"""
+    """끝난 목표에 보내면 rclpy 가 던진다 — **보내기 전에 본다**."""
     from shelving_manipulation.book_placer import publish_feedback_safely
     h = _Handle(active=False)
     ok, why = publish_feedback_safely(h, 'fb')
@@ -257,7 +259,49 @@ def test_the_reason_says_how_many_placements_ago():
 
 
 def test_never_measured_is_refused_too():
-    """안 잰 것과 낡은 것은 다르지만, **둘 다 꽂으면 안 된다.**"""
+    """안 잰 것과 낡은 것은 다르지만, **둘 다 꽂으면 안 된다**."""
     from shelving_manipulation.book_placer import stale_gap_reason
     why = stale_gap_reason(None, 0)
     assert why is not None and '스캔이 먼저' in why
+
+
+# ----------------------- 노드를 잠그지 않는다 (2026-09-24 생중계 대비)
+#
+#   실행 콜백에서 예외 하나가 밖으로 나가면 `_busy` 가 안 풀려 **그 뒤 모든 요청이
+#   거절**됐다. 프로세스는 살아 있으니 죽은 것처럼 보이지도 않는다 — 증상은 "멈춤"
+#   이 아니라 "거절" 이고, 다시 띄우기 전엔 복구가 없었다.
+#
+#   **작업 하나를 잃는 것과 노드를 잃는 것은 다르다.**
+
+def test_an_internal_error_is_its_own_code():
+    from shelving_manipulation.book_placer import error_name, internal_failure
+    code, phase, _msg = internal_failure(NameError('x is not defined'))
+    assert code == 413 and phase == 'INTERNAL'
+    assert error_name(code) == 'INTERNAL_ERROR'
+
+
+def test_the_message_names_the_exception():
+    """**삼키는 것이 아니라 끝내는 것이다.** 무엇이 터졌는지가 남아야 한다."""
+    from shelving_manipulation.book_placer import internal_failure
+    _code, _phase, msg = internal_failure(NameError('publish_feedback_safely is not defined'))
+    assert 'NameError' in msg and 'publish_feedback_safely' in msg
+
+
+def test_the_message_says_the_node_keeps_going():
+    """FSM 이 읽고 **재시도해도 된다**는 것을 알 수 있어야 한다."""
+    from shelving_manipulation.book_placer import internal_failure
+    assert '다음 요청은 받는다' in internal_failure(RuntimeError('boom'))[2]
+
+
+def test_the_traceback_rides_along_when_given():
+    """어디서 터졌는지가 안 남으면 다음에 또 못 고친다."""
+    from shelving_manipulation.book_placer import internal_failure
+    msg = internal_failure(RuntimeError('boom'), 'File "a.py", line 3, in f\n')
+    assert 'a.py' in msg[2]
+    assert msg[2].splitlines()[0].endswith('다음 요청은 받는다')   # 첫 줄만 써도 뜻이 선다
+
+
+def test_the_new_code_is_retryable():
+    """413 은 재시도 가능이어야 한다 — 노드가 다시 받을 수 있으니까."""
+    from shelving_manipulation.book_placer import ERRORS
+    assert ERRORS[413].retry is True

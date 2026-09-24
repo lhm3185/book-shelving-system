@@ -248,7 +248,8 @@ def test_snap_y_keeps_z_and_respects_half_book():
 
 
 def test_snap_does_not_move_beyond_half_pitch():
-    """**칸 간격 절반을 넘으면 손대지 않는다** — 어느 칸인지 알 수 없다.
+    """
+    **칸 간격 절반을 넘으면 손대지 않는다** — 어느 칸인지 알 수 없다.
 
     엉뚱한 칸으로 당겨 붙이면 옆 책을 집으러 간다. 그때는 검사가 거절하게 둔다.
     """
@@ -269,7 +270,8 @@ def test_snap_is_noop_without_observation():
 
 
 def test_clearance_guard_uses_the_narrower_side():
-    """**안쪽(손가락↔집을 책)과 바깥쪽(손가락↔옆 책) 중 좁은 쪽**이 허용치다.
+    """
+    **안쪽(손가락↔집을 책)과 바깥쪽(손가락↔옆 책) 중 좁은 쪽**이 허용치다.
 
     손이 x 로 어긋나면 양쪽이 동시에 줄어든다. 2026-09-21 까지 바깥쪽만 보고 있어
     검사가 느슨했다 (안쪽 5.0 mm 인데 바깥 8.3 mm 로 판정).
@@ -299,7 +301,8 @@ def test_clearance_guard_uses_the_narrower_side():
 
 
 def test_clearances_are_currently_lopsided():
-    """지금은 안쪽·바깥쪽 여유가 치우쳐 있다 — 균형값(0.00665)으로 바꾸는 판단은 사람이 한다.
+    """
+    지금은 안쪽·바깥쪽 여유가 치우쳐 있다 — 균형값(0.00665)으로 바꾸는 판단은 사람이 한다.
 
     이 시험은 "치우쳐 있음"을 **기록**한다. 균형을 맞추면 이 시험이 깨지는데,
     그때가 바로 사람이 전환을 결정한 시점이어야 한다.

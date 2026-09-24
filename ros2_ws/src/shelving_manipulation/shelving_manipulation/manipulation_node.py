@@ -17,6 +17,7 @@ import math
 import os
 import threading
 import time
+import traceback
 import uuid
 
 from ament_index_python.packages import get_package_share_directory
@@ -32,8 +33,8 @@ from shelving_interfaces.msg import RobotStatus
 from std_msgs.msg import Bool, String
 import yaml
 
-from .book_placer import (cancel_command, COMMAND_ROTATE_BASE, COMMAND_SCAN, decode, encode,
-                          error_name, MockSimExecutor, Outcome, PlaceTracker,
+from .book_placer import (cancel_command, COMMAND_ROTATE_BASE, decode, encode, error_name,
+                          internal_failure, MockSimExecutor, Outcome, PlaceTracker,
                           publish_feedback_safely, SIM_CANCELLED, SIM_FAILED, SIM_SUCCEEDED,
                           stale_gap_reason)
 from .grasp_planner import (build_place_command, DEFAULT_LIMITS, GraspGoal, parse_profile,
@@ -82,7 +83,8 @@ class ManipulationNode(Node):
         # 가짜 시뮬로 도는 테스트가 30 s 회전 대기에 걸리지 않고, 실제 실행은 manipulation.yaml 에서 켠다.
         self.align_base_before_work = bool(p('align_base_before_work', False).value)
         # 작업 자세(월드 yaw, 도): 서가와 **나란히** 서서 팔 +Y 가 서가 앞면을 보게. level_franka0 의 shelf_01 은
-        # x 1.87~3.28, y -2.57~-2.27 (yaw 0) 이고 카트는 y -3.0 에 서므로 yaw 0 이 맞다. 90 은 옆 서가 끝을 봤다 (2026-09-23)
+        # x 1.87~3.28, y -2.57~-2.27 (yaw 0) 이고 카트는 y -3.0 에 서므로 yaw 0 이 맞다.
+        # 90 은 옆 서가 끝을 봤다 (2026-09-23)
         self.work_yaw_deg = float(p('work_yaw_deg', 0.0).value)
         self.place_standoff_m = float(p('place_standoff_m', 0.444).value)
         self.scan_timeout_s = float(p('scan_timeout_s', 180.0).value)
@@ -135,7 +137,8 @@ class ManipulationNode(Node):
         self.detect_pub = self.create_publisher(Bool, '/perception/detect_request', 10)
         self.scan_active_pub = self.create_publisher(Bool, '/perception/slot_scan_active', 10)
         # 작업 서가의 x 범위(팔 기준, 꽂기 자리). 옆 서가와의 틈(x -0.43)을 빈칸으로 잡은 적이 있다 (2026-09-23).
-        # level_franka0 shelf_01: 월드 x 1.87~3.28, 팔 베이스 x 2.22 → -0.35~1.06; 책 반폭·팔 도달을 빼서 -0.25~0.45
+        # level_franka0 shelf_01: 월드 x 1.87~3.28, 팔 베이스 x 2.22 → -0.35~1.06;
+        # 책 반폭·팔 도달을 빼서 -0.25~0.45
         # 작업 위치에서 서가 중앙에 맞춰 서므로(executor rotate_base center) 범위는 좌우 대칭 — 서가 반폭 0.7 에서 책 반폭·여유를 뺐다
         # 검증된 삽입 x (1차 시연 고정 칸 -0.51~-0.27 의 가운데). 틈이 다른 x 에 있으면 차체를 옆으로 옮겨 맞춘다
         self.place_x = float(p('place_x', -0.35).value)
@@ -203,7 +206,8 @@ class ManipulationNode(Node):
                     self._shelf_gaps = [[float(v) for v in g] for g in state['shelf_gaps']]
                     self._shelf_gaps_at = self._place_count      # 이 시점의 값이다
                 if state.get('phase') == 'scan_plan' and state.get('shelf_box'):
-                    self._shelf_box = [float(v) for v in state['shelf_box']]   # 팔 기준 [x0,x1,y_front,y_back,z0,z1]
+                    # 팔 기준 [x0, x1, y_front, y_back, z0, z1]
+                    self._shelf_box = [float(v) for v in state['shelf_box']]
                 self._wake.set()
             tracker = self._tracker
             # 다른 작업(이전 작업의 마지막 상태 반복 포함)의 상태는 token 이 달라 무시된다
@@ -296,12 +300,14 @@ class ManipulationNode(Node):
         result.placement_verified = bool(verified)
         result.error_code = int(code)
         result.message = message
+        # **끝내는 일도 터질 수 있다.** 이미 끝난 목표에 다시 하면 rclpy 가 던지고,
+        # 그 예외가 여기서 나가면 `_busy` 를 푸는 아래 줄에 못 닿는다 — 잠긴다.
         if success:
-            goal_handle.succeed()
+            self._terminate(goal_handle, 'succeed')
         elif canceled and goal_handle.is_cancel_requested:
-            goal_handle.canceled()
+            self._terminate(goal_handle, 'canceled')
         else:
-            goal_handle.abort()
+            self._terminate(goal_handle, 'abort')
         text = (f'job={goal_handle.request.job_id} code={code}({error_name(code)}) '
                 f'phase={failed_phase} {message}')
         # rclpy 는 같은 호출 위치에서 심각도를 바꾸면 예외를 던진다 → 호출 위치를 나눈다
@@ -383,7 +389,8 @@ class ManipulationNode(Node):
         return slots, 0, ''
 
     def _select_empty_slot(self, slots, book_width):
-        """스캔 자리(0.75 m)에서 받은 빈칸 관측 → 꽂을 칸 (팔 기준, 꽂기 자리).
+        """
+        스캔 자리(0.75 m)에서 받은 빈칸 관측 → 꽂을 칸 (팔 기준, 꽂기 자리).
 
         2026-09-23 두 단 스캔 실측(6자세, 관측 5개):
           · 가운데 판(책 있음)은 책 사이 틈이 잡힌다: (-0.43, 0.85, 0.66) — 앞면 0.75 에서 10 cm 안쪽, 정상.
@@ -408,17 +415,21 @@ class ManipulationNode(Node):
             by0, by1 = box[2] - 0.03, box[3] + 0.05             # 앞면 조금 앞 ~ 뒤판
             bz0, bz1 = box[4], box[5]
         else:
-            bx0, bx1, by0, by1, bz0, bz1 = self.shelf_x_min, self.shelf_x_max, 0.30, far_y, 0.15, 1.10
+            bx0, bx1 = self.shelf_x_min, self.shelf_x_max
+            by0, by1, bz0, bz1 = 0.30, far_y, 0.15, 1.10
         open_board, gaps = [], []
         for msg in slots:
             if msg.header.frame_id != self.limits['frame_id']:
                 continue
             x, y, z = float(msg.point.x), float(msg.point.y), float(msg.point.z)
             if y > far_y and bx0 <= x <= bx1:
-                open_board.append((msg, self.place_x))     # 판이 비어 뒤가 보인 것(서가 x 폭 안에서만) → 검증된 삽입 x 에 꽂는다
+                # 판이 비어 뒤가 보인 것(서가 x 폭 안에서만) → 검증된 삽입 x 에 꽂는다
+                open_board.append((msg, self.place_x))
                 continue
             if not (bx0 <= x <= bx1) or not (by0 <= y <= by1) or not (bz0 <= z <= bz1):
-                self.get_logger().info(f'빈칸 관측 버림 (서가 밖): ({x:.3f}, {y:.3f}, {z:.3f}) 서가 x {bx0:.2f}~{bx1:.2f} y {by0:.2f}~{by1:.2f} z {bz0:.2f}~{bz1:.2f}')
+                self.get_logger().info(
+                    f'빈칸 관측 버림 (서가 밖): ({x:.3f}, {y:.3f}, {z:.3f}) '
+                    f'서가 x {bx0:.2f}~{bx1:.2f} y {by0:.2f}~{by1:.2f} z {bz0:.2f}~{bz1:.2f}')
                 continue
             zs = lower_z if abs(z - lower_z) <= abs(z - middle_z) else middle_z
             # **틈 관측의 y(깊이)는 못 믿는다 — 틈은 뚫려 있기 때문이다.**
@@ -457,7 +468,8 @@ class ManipulationNode(Node):
             self.place_standoff_dynamic = float(self.place_standoff_m)
             self.place_lateral_dynamic = 0.0
             self.get_logger().info(
-                f'빈칸 선택: 아래 판이 비어 있음 (서가 너머 관측 {len(open_board)}개) → x {x:.3f}, 계약 y {contract_y}, '
+                f'빈칸 선택: 아래 판이 비어 있음 (서가 너머 관측 {len(open_board)}개) '
+                f'→ x {x:.3f}, 계약 y {contract_y}, '
                 f'z {lower_z}; 꽂기 전 서가 앞면 {self.place_standoff_dynamic:.3f} m 로 붙는다')
             return msg, (x, contract_y, lower_z)
         if not gaps:
@@ -525,16 +537,31 @@ class ManipulationNode(Node):
 
     def _finish_detection(self, goal_handle, result, success):
         if success:
-            goal_handle.succeed()
+            self._terminate(goal_handle, 'succeed')
         elif goal_handle.is_cancel_requested:
-            goal_handle.canceled()
+            self._terminate(goal_handle, 'canceled')
         else:
-            goal_handle.abort()
+            self._terminate(goal_handle, 'abort')
         with self._lock:
             self._busy = False
         return result
 
     def _execute_slot_detection(self, goal_handle):
+        """빈칸 검출도 같이 감싼다 — 여기서 죽어도 노드가 잠긴다."""
+        try:
+            return self._execute_slot_detection_inner(goal_handle)
+        except Exception as exc:      # noqa: BLE001
+            code, _phase, msg = internal_failure(exc, traceback.format_exc())
+            self.get_logger().error(msg)
+            self._force_release('DetectTargetSlot')
+            result = DetectTargetSlot.Result()
+            result.success = False
+            result.error_code = int(code)
+            result.message = msg.splitlines()[0]
+            self._terminate(goal_handle, 'abort')
+            return result
+
+    def _execute_slot_detection_inner(self, goal_handle):
         request = goal_handle.request
         result = DetectTargetSlot.Result()
 
@@ -546,8 +573,9 @@ class ManipulationNode(Node):
         # 트레이·서가에 끼고 그 반작용으로 카트가 밀려났다 (2026-09-23 실측). PlaceBook 앞의 회전은
         # 이미 돌아 있으면 차이 0 이라 그대로 둔다.
         if self.executor_kind == 'sim' and self.align_base_before_work:
-            rotate_result = self._rotate_base_before_work(goal_handle, request.job_id, feedback=feedback,
-                                                          standoff=self.scan_standoff_m)
+            rotate_result = self._rotate_base_before_work(
+                goal_handle, request.job_id, feedback=feedback,
+                standoff=self.scan_standoff_m)
             if rotate_result is not None:
                 result.error_code, result.message = rotate_result
                 self._set_status('FAILED', request.job_id, 0.0, result.error_code, result.message)
@@ -740,12 +768,17 @@ class ManipulationNode(Node):
             f'책 윗면 {tuple(round(v, 4) for v in book_top)}, 삽입깊이 {self.fixed_insertion_depth:.3f}m')
         return replace(goal, slot=slot, grasp=grasp), 0, ''
 
-    def _rotate_base_before_work(self, goal_handle, job_id, feedback=None, standoff=None, lateral=None):
-        """작업 시작 전에 franka base를 90도 회전시킨다.
+    def _rotate_base_before_work(self, goal_handle, job_id, feedback=None,
+                                 standoff=None, lateral=None):
+        """
+        작업 전에 차체를 작업 자세로 돌리고 서가까지 거리·옆자리를 맞춘다.
 
-        Returns:
-            None: 성공 (계속 진행)
-            (error_code, message): 실패
+        성공하면 `None` 을 돌려준다 (호출자가 계속 진행한다). 실패하면
+        `(error_code, message)` 다.
+
+        **"90도" 가 아니다.** 목표 각은 `work_yaw_deg` 이고 이 레벨에서는 0 이다 —
+        서가와 나란히 서서 팔 +Y 가 앞면을 보게 한다. 90 은 옆 서가 끝을 봤다
+        (2026-09-23).
         """
         import uuid as _uuid
 
@@ -761,7 +794,8 @@ class ManipulationNode(Node):
         if lateral is not None:
             rotate_cmd['lateral'] = float(lateral)      # 서가 AABB 중앙 대신 이만큼 옆으로
 
-        self.get_logger().info(f'베이스 회전 명령 전송 (목표 yaw {self.work_yaw_deg:+.0f}°, 서가 거리 {standoff})')
+        self.get_logger().info(
+            f'베이스 회전 명령 전송 (목표 yaw {self.work_yaw_deg:+.0f}°, 서가 거리 {standoff})')
         # PlaceBook 피드백 헬퍼는 DetectTargetSlot 핸들에 쓰면 TypeError 가 난다 — 호출자가 맞는 피드백을 준다
         if feedback is not None:
             feedback('ROTATING_BASE', 0)
@@ -806,7 +840,50 @@ class ManipulationNode(Node):
             self._scan_state = None
         return 404, f'베이스 회전 {timeout:.0f}s 시간 초과'
 
+    def _force_release(self, label):
+        """
+        **무슨 일이 나도 다음 요청은 받는다.** 잡아 둔 것을 전부 푼다.
+
+        `_busy` 를 푸는 곳이 정상 종료 경로에만 있었다. 예외가 실행 콜백 밖으로
+        나가면 영원히 잠긴다 — 2026-09-24 에 그래서 6 사이클이 통째로 거절됐다.
+        """
+        with self._lock:
+            self._busy = False
+            self._tracker = None
+            self._scan_state = None
+        self.get_logger().warning(f'{label}: 잡아 둔 상태를 풀었다 — 다음 요청을 받는다')
+
+    def _terminate(self, goal_handle, how):
+        """
+        목표를 끝낸다. **이미 끝난 목표에 다시 하면 rclpy 가 던진다**.
+
+        그 예외가 우리를 죽이면 안 된다 — 고치려던 병이 바로 그것이다.
+        """
+        try:
+            getattr(goal_handle, how)()
+        except Exception as exc:      # noqa: BLE001
+            self.get_logger().warning(f'목표 종료({how}) 실패 {type(exc).__name__}: {exc}')
+
     def _execute(self, goal_handle):
+        """**예외가 나도 노드는 산다.** 작업 하나를 잃는 것과 노드를 잃는 것은 다르다."""
+        try:
+            return self._execute_place(goal_handle)
+        except Exception as exc:      # noqa: BLE001 - 노드를 잠그지 않는 것이 먼저다
+            code, phase, msg = internal_failure(exc, traceback.format_exc())
+            self.get_logger().error(msg)
+            self._force_release('PlaceBook')
+            result = PlaceBook.Result()
+            result.success = False
+            result.failed_phase = phase
+            result.placement_verified = False
+            result.error_code = int(code)
+            result.message = msg.splitlines()[0]
+            self._set_status('FAILED', getattr(goal_handle.request, 'job_id', ''),
+                             0.0, int(code), result.message)
+            self._terminate(goal_handle, 'abort')
+            return result
+
+    def _execute_place(self, goal_handle):
         request = goal_handle.request
         job_id = request.job_id
         goal = self._to_goal(request)
@@ -820,7 +897,8 @@ class ManipulationNode(Node):
         # 했다. vision_owned 조건 때문에 안 붙어서 허공에 꽂을 뻔했다 (2026-09-23). yaw 는 이미 맞아 차이 0.
         if self.executor_kind == 'sim' and self.align_base_before_work:
             rotate_result = self._rotate_base_before_work(
-                goal_handle, job_id, standoff=getattr(self, 'place_standoff_dynamic', None) or self.place_standoff_m,
+                goal_handle, job_id,
+                standoff=getattr(self, 'place_standoff_dynamic', None) or self.place_standoff_m,
                 lateral=getattr(self, 'place_lateral_dynamic', None))
             if rotate_result is not None:
                 code, message = rotate_result

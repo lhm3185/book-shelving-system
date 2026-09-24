@@ -196,7 +196,8 @@ def resolve_book(goal: PlaceGoal, profile: BookDims,
 
 def observed_dims(goal: PlaceGoal, limits: Optional[dict] = None
                   ) -> Tuple[float, float, str]:
-    """이 판에서 **실제로 쓸** 두께·폭과 그 출처 ('관측' 또는 '규격').
+    """
+    이 판에서 **실제로 쓸** 두께·폭과 그 출처 ('관측' 또는 '규격').
 
     높이는 `GraspObservation` 에 없다 — 규격을 그대로 쓴다.
     스위치가 꺼져 있거나 관측이 치수를 안 실어 보내면 지금까지의 동작 그대로다.
