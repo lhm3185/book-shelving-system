@@ -100,12 +100,20 @@ pkill -f "install/shelving_(manipulation|perception|navigation|system)/" 2>/dev/
 pkill -f "static_transform_publisher" 2>/dev/null || true
 pkill -f "detect_request" 2>/dev/null || true
 sleep 1
+# **화면 녹화를 켤 때는 REC_EVERY=0 으로 이걸 끈다.** 뷰포트 PNG 를 2 fps 로 쓰는 것이
+# 시뮬을 느리게 하고, 삽입 작업이 제한의 87~88 % 를 이미 쓰고 있어 그 차이가 타임아웃이
+# 된다 (2026-09-25 07:36). 판 하나가 16 GB 이기도 하다 — 화면 녹화가 있으면 중복이다.
+if [ "${REC_EVERY:-30}" = "0" ]; then
+    REC_ARGS=""; echo "      (뷰포트 녹화 끔 — REC_EVERY=0)"
+else
+    REC_ARGS="--record-dir $LOG/rec --record-every ${REC_EVERY:-30}"
+fi
 echo "[1/4] Isaac 시작 (약 3~4분) — 레벨 $(basename "$LEVEL")  $(date +%T)"
 spawn env SIM_USD="$LEVEL" SIM_FIX_BASE="${SIM_FIX_BASE:-0}" SIM_GRIP_ROT90="${SIM_GRIP_ROT90:-1}" SIM_GRASP_KINEMATIC="${SIM_GRASP_KINEMATIC:-1}" SIM_HOME_J7_DEG="${SIM_HOME_J7_DEG:-90}" SIM_HOME_SHIFT="${SIM_HOME_SHIFT:-0,0,0.10}" SIM_ROBOT_YAW="${SIM_ROBOT_YAW:-}" SIM_TRAY_TO="${SIM_TRAY_TO:-4.907,-5.782,0.3365}" \
     SIM_SPEED_SCALE="${SIM_SPEED_SCALE:-0.5}" SIM_MAX_STEP="${SIM_MAX_STEP:-0.12}" \
     SIM_CARRY_MODE="${SIM_CARRY_MODE:-swing}" \
     "$REPO/scripts/run_isaac_sim.sh" --gui --camera-prim "$CAM" --amr-test-overrides \
-    --drive-speed "$SPEED" --record-dir "$LOG/rec" --record-every "${REC_EVERY:-30}" > "$LOG/isaac.log" 2>&1
+    --drive-speed "$SPEED" $REC_ARGS > "$LOG/isaac.log" 2>&1
 echo -n "      준비 대기"
 ready=0
 for _ in $(seq 1 60); do
