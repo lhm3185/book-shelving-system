@@ -2067,15 +2067,12 @@ class BookScene:
         """carry_rotate 를 네 조각으로 (NIGHTLY_PLAN 2-3). 돌려주는 값은 plan_path 와 같은 꼴."""
         q_lift = np.asarray(q_lift, float)
         qs = [q_lift.copy()]
-        # a. clear — 수직으로만 올린다 (SIM_SWING_CLEAR_M, 기본 0 = lift 높이 그대로)
-        clear_h = float(os.environ.get("SIM_SWING_CLEAR_M", "0"))
-        p_clear = np.asarray(lift, float) + np.array([0.0, 0.0, clear_h])
-        if clear_h > 1e-4:
-            part, _w, err = self.plan_path([(lift, DOWN), (p_clear, DOWN)], qs[-1])
-            if part is None:
-                return None, 0.0, f"스윙 a(clear): {err}"
-            qs.extend(part[1:])
-        n_a = len(qs) - 1
+        # a. clear(수직으로 먼저 올리기)는 **뺐다** (2026-09-25). SIM_SWING_CLEAR_M 0.15 는 c 를
+        # 악화시켰고(0.126 → 0.168 rad) 0.60 은 a 자체가 아래 판부터 실패했다. 위 판 401 의
+        # 정체는 높이가 아니라 경유점 자세였고(아래 c 주석), 스윙 끝의 문제도 높이가 아니라
+        # 반지름이었다(되돌림 주석). 표도 높이와 무관하다고 했다 — 손잡이를 남길 이유가 없다.
+        p_clear = np.asarray(lift, float)
+        n_a = 0
         # b. swing — j1 만. 나머지 관절은 얼린다 → 손끝이 같은 높이·같은 반지름의 수평 호
         dphi, err = self._swing_angle(p_clear, transfer, float(qs[-1][0]))
         if dphi is None:
@@ -2175,12 +2172,12 @@ class BookScene:
             how_c = (f"되돌림: 바깥 r {r_sw:.3f}→{SWING_TURN_R} ({n_o}점) → 손목 {n_r}점[{how_r}] "
                      f"→ HORIZ 직선 (직교 실패: {err})")
             self.say(f"[스윙] c(reach) 직교 실패 → 바깥으로 뻗어 손목 돌리고 HORIZ 로 올라간다 — {err}")
-        self._swing = {"dphi": dphi, "p_sw": p_sw, "O_sw": O_sw, "p_clear": p_clear,
+        self._swing = {"dphi": dphi, "p_sw": p_sw, "O_sw": O_sw,
                        "q_b_start": np.asarray(qs[n_a], float).copy(), "q_b_end": q_b_end,
                        "q_c_path": q_c_path}       # q_sw … 운반 끝. return 이 거꾸로 되짚는다
         arr = np.asarray(qs, float)
         worst = float(np.max(np.abs(np.diff(arr, axis=0)))) if len(arr) > 1 else 0.0
-        self.say(f"[스윙] carry_rotate: a clear {clear_h:.3f} m ({n_a}점) · b j1 Δφ "
+        self.say(f"[스윙] carry_rotate: b j1 Δφ "
                  f"{math.degrees(dphi):+.1f}° ({n_b}점) · c reach {n_c}점 [{how_c}] · d reorient "
                  f"{n_d}점 [{how}] · 최대걸음 {worst:.3f} rad · 스윙 끝 손끝(월드) "
                  f"{np.round(p_sw, 3).tolist()} · pre_ins(팔기준 xy·월드 z) {np.round(pre_ins_arm, 4).tolist()}")
@@ -2345,7 +2342,7 @@ class BookScene:
             "pre_lift_m": float(self.conf["grasp"].get("pre_lift_m", 0.13)),
             "carry_lift_m": float(self.conf["grasp"].get("carry_lift_m", 0.17)),
             "env": {k: os.environ.get(k, "") for k in (
-                "SIM_CARRY_MODE", "SIM_RETURN_MODE", "SIM_SWING_CLEAR_M", "SIM_JOINT_SEGS",
+                "SIM_CARRY_MODE", "SIM_RETURN_MODE", "SIM_JOINT_SEGS",
                 "SIM_MAX_STEP", "SIM_HOME_Q", "SIM_GRIP_ROT90", "SIM_GRASP_KINEMATIC")},
         }
         if book in self.grasp_local:
