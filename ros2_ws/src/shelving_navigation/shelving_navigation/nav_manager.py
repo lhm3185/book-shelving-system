@@ -51,6 +51,7 @@ class NavManager(Node):
 		self._wake = threading.Event()
 		self._state = {}
 		self._last_home = None
+		self._last_home_root = None
 		self._active = False
 		group = ReentrantCallbackGroup()
 		self._command_pub = self.create_publisher(String, self.command_topic, 10)
@@ -109,6 +110,11 @@ class NavManager(Node):
 			self._state = state
 			if state.get('home'):
 				self._last_home = state['home']
+			# **복귀 목표는 루트 자리다.** `home` 은 팔 베이스라 여기로 주행하면
+			# 로봇이 arm_offset 만큼(이 레벨 y 0.30 m) 못 미쳐 선다 — 데크가
+			# 트레이에서 그만큼 떨어져 트레이를 다시 못 받는다 (2026-09-24).
+			if state.get('home_root'):
+				self._last_home_root = state['home_root']
 		self._wake.set()
 
 	def _publish(self, command):
@@ -136,7 +142,14 @@ class NavManager(Node):
 		if request.target_type == 'home':
 			# 시뮬이 알려준 실제 출발 자리를 먼저 쓰고, 없으면 waypoints.yaml 의 home
 			with self._lock:
-				sim_home = (self._last_home or None)
+				# 루트 자리를 먼저 쓴다. 옛 시뮬은 안 실어 보내므로 없으면 팔 베이스로
+				# 물러서는데, 그때는 arm_offset 만큼 어긋난다는 것을 알려 둔다.
+				sim_home = (self._last_home_root or None)
+				if sim_home is None and self._last_home:
+					sim_home = self._last_home
+					self.get_logger().warn(
+						'시뮬이 home_root 를 안 보낸다 — 팔 베이스 자리로 복귀한다. '
+						'루트와 arm_offset 만큼 어긋날 수 있다')
 			wp = (self._waypoints or {}).get('home', {})
 			home = wp.get('position')
 			# **방향까지 되돌린다.** 자리만 맞추면 서가를 볼 때의 yaw 로 선 채 끝나서,

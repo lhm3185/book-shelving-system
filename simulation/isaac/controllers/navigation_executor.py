@@ -134,12 +134,21 @@ class NavigationExecutor:
         #: 안 돌리면 서가를 볼 때의 각도(0°)로 선 채 끝난다 — 처음 트레이를 받던
         #: 자세와 90° 어긋난다 (2026-09-24 도윤님 지적, 이 레벨은 출발 yaw +90°).
         self.home_root_yaw = _yaw(np.asarray(_rq, float))
+        #: **루트의 출발 자리.** 복귀 목표는 이것이어야 한다. 주행기는 `goto` 의 x, y 에
+        #: 루트를 올려놓는데, 여태 복귀 목표로 팔 베이스 자리(`home`)를 받았다. 둘은
+        #: `arm_offset` 만큼(이 레벨은 y +0.300 m) 다르므로 로봇이 그만큼 못 미쳐 섰고,
+        #: 데크가 트레이에서 30 cm 떨어져 트레이를 다시 받을 수 없었다
+        #: (2026-09-24 도윤님 지적 → 로그로 확인: 루트 출발 -5.607, 복귀 도착 -5.307).
+        self.home_root = np.asarray(_rp, float).copy()
 
         p, _ = self.root.get_world_pose()
         self.say(f"주행 실행기 준비: {BOT.root} 현재 위치 "
                  f"({float(p[0]):+.3f}, {float(p[1]):+.3f}), 속도 {self.speed} m/s")
         self.say(f"  팔 베이스 출발 자리 ({self.home_arm[0]:+.4f}, {self.home_arm[1]:+.4f}) "
                  f"yaw {math.degrees(self.home_root_yaw):+.2f}° — 돌아왔을 때 여기로 맞춘다")
+        self.say(f"  루트 출발 자리 ({self.home_root[0]:+.4f}, {self.home_root[1]:+.4f}) "
+                 f"— **복귀는 여기로 간다** (팔 베이스와 "
+                 f"{float(np.hypot(*self.arm_offset[:2])):.3f} m 다르다)")
 
     # ---------------------------------------------------------------- 발행
     def publish(self, **extra):
@@ -154,6 +163,9 @@ class NavigationExecutor:
                  # 실어서 복귀가 자리만 맞고 방향은 파지할 때 각도로 남았다.
                  "home": [round(float(self.home_arm[0]), 4), round(float(self.home_arm[1]), 4),
                           round(math.degrees(self.home_root_yaw), 3)],
+                 # **복귀 목표는 이쪽이다.** `home` 은 팔 베이스라 주행 목표로 쓰면 안 된다
+                 "home_root": [round(float(self.home_root[0]), 4), round(float(self.home_root[1]), 4),
+                               round(math.degrees(self.home_root_yaw), 3)],
                  "leg": self.legs - len(self.route),
                  "pose": [round(float(p[0]), 4), round(float(p[1]), 4),
                           round(math.degrees(_yaw(q)), 3)],
