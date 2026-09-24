@@ -185,6 +185,9 @@ VEL_LIMIT = np.array(BOT.vel_limit)             # URDF 실측 (로봇별, 프로
 # 빠른 구간을 막으려는 값이 아니다. 손목 특이점에서 0.124 rad(7°) 가 남는데
 # 32배까지 잘게 나눠도 줄지 않는다 — 진짜 작은 불연속이다 (2026-09-21 실측).
 MAX_STEP = float(os.environ.get("SIM_MAX_STEP", "0.12"))
+#: 스윙 되돌림에서 손목을 돌리는 반지름 (팔 기준, m). 오프라인 표에서 HORIZ 여유가 0.6 대로
+#: 넉넉하고, 매달린 책 끝(y +0.19)이 서가 앞면(0.444)에 못 미치는 값 (2026-09-25).
+SWING_TURN_R = 0.50
 # 관절 경로 제한 시간. **안전장치이지 성능 목표가 아니다** — 팔이 명령 속도를
 # 그대로 따라가지 못하면 계산한 시간보다 오래 걸린다. 2.0/3.0 으로는 팔이
 # 경유점 24/36 까지 잘 가고 있는데도 404 로 잘렸다 (2026-09-21 실측).
@@ -2075,23 +2078,53 @@ class BookScene:
             # 넘기고 있었다 — 거기서 pre_ins 까지 HORIZ 를 유지한 채 직선으로 간다.
             # transfer 는 안 들르고 d 는 필요 없다(이미 HORIZ 로 도착한다).
             # c 가 풀리는 판(아래 판)은 이 분기에 오지 않는다 — 한 점도 안 바뀐다.
-            wps_r = [(p_sw, O_sw), (p_sw, HORIZ)]
-            part, _w, err_r = self.plan_joint_path(wps_r, qs[-1])
+            # **돌리는 자리는 p_sw 가 아니다 — 먼저 바깥으로 뻗는다.** 2026-09-25 00:50 실측:
+            # p_sw 가 팔 기준 반지름 0.284(트레이 위 lift 의 반지름이 그대로다)라 거기엔
+            # HORIZ 해가 없다 — 손을 수평으로 하면 플랜지가 손끝보다 10 cm 뒤라 베이스
+            # 기둥 위에 온다. 오프라인 표(방위각 157.6°, z 0.339, @HORIZ): r 0.284 ✗ ·
+            # 0.34 → 0.143 · 0.40 → 0.320 · 0.46 → 0.504 · 0.52 → 0.695. 그리고 돌리는
+            # 자리의 y 가 0.25 를 넘으면 매달린 책(0.19 m)이 서가 앞면(0.444)을 쓸고
+            # 들어간다 — 그래서 pre_ins 자리에서 돌리지 않고, 같은 방위각으로 r 0.50
+            # (y 0.19, 책 끝 0.38)까지만 뻗는다.
+            p_sw_arm = self.to_arm(p_sw)
+            r_sw = float(math.hypot(p_sw_arm[0], p_sw_arm[1]))
+            phi = math.atan2(float(p_sw_arm[1]), float(p_sw_arm[0]))
+            q_c_path = []
+            n_o = 0
+            p_out = p_sw
+            if r_sw < SWING_TURN_R - 1e-3:
+                p_out = self.to_world([SWING_TURN_R * math.cos(phi), SWING_TURN_R * math.sin(phi),
+                                       float(p_sw_arm[2])])
+                part, _w, err_o = self.plan_path([(p_sw, O_sw), (p_out, O_sw)], qs[-1])
+                if part is None:
+                    return None, 0.0, f"스윙 c(reach): 직교 {err} / 바깥으로 r {r_sw:.3f}→{SWING_TURN_R}: {err_o}"
+                n_o = len(part) - 1
+                q_c_path.extend(np.asarray(v, float).copy() for v in part)
+                qs.extend(part[1:])
+            # 손목 돌리기 — d 와 같은 순서: 직교(자세만 slerp) → 안 되면 관절공간
+            wps_r = [(p_out, O_sw), (p_out, HORIZ)]
+            part, _w, err_r = self.plan_path(wps_r, qs[-1])
+            how_r = "직교"
             if part is None:
-                return None, 0.0, f"스윙 c(reach): 직교 {err} / 손목 먼저: {err_r}"
+                part, _w, err_r2 = self.plan_joint_path(wps_r, qs[-1])
+                if part is None:
+                    return None, 0.0, (f"스윙 c(reach): 직교 {err} / 손목(r {SWING_TURN_R}): "
+                                       f"직교 {err_r} / 관절 {err_r2}")
+                how_r = f"관절(직교 실패: {err_r})"
             n_r = len(part) - 1
-            q_c_path = [np.asarray(v, float).copy() for v in part]
+            q_c_path.extend(np.asarray(v, float).copy() for v in (part if not q_c_path else part[1:]))
             qs.extend(part[1:])
-            part, _w, err_l = self.plan_path([(p_sw, HORIZ), (np.asarray(pre_ins, float), HORIZ)], qs[-1])
+            part, _w, err_l = self.plan_path([(p_out, HORIZ), (np.asarray(pre_ins, float), HORIZ)], qs[-1])
             if part is None:
-                return None, 0.0, f"스윙 c(reach): 직교 {err} / 손목 먼저 뒤 HORIZ 직선: {err_l}"
+                return None, 0.0, f"스윙 c(reach): 직교 {err} / 손목 뒤 HORIZ 직선: {err_l}"
             q_c_path.extend(np.asarray(v, float).copy() for v in part[1:])   # … q_pre_ins
             qs.extend(part[1:])
             n_c = len(part) - 1
             n_d = 0
             how = "없음"
-            how_c = f"되돌림: 손목 먼저 {n_r}점(관절) → HORIZ 직선 (직교 실패: {err})"
-            self.say(f"[스윙] c(reach) 직교 실패 → 손목 먼저 돌리고 HORIZ 로 올라간다 — {err}")
+            how_c = (f"되돌림: 바깥 r {r_sw:.3f}→{SWING_TURN_R} ({n_o}점) → 손목 {n_r}점[{how_r}] "
+                     f"→ HORIZ 직선 (직교 실패: {err})")
+            self.say(f"[스윙] c(reach) 직교 실패 → 바깥으로 뻗어 손목 돌리고 HORIZ 로 올라간다 — {err}")
         self._swing = {"dphi": dphi, "p_sw": p_sw, "O_sw": O_sw, "p_clear": p_clear,
                        "q_b_start": np.asarray(qs[n_a], float).copy(), "q_b_end": q_b_end,
                        "q_c_path": q_c_path}       # q_sw … 운반 끝. return 이 거꾸로 되짚는다
