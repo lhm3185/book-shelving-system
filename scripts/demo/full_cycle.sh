@@ -50,8 +50,22 @@ spawn() { setsid nohup "$@" < /dev/null & }
 set +u; source /opt/ros/jazzy/setup.bash; source "$REPO/ros2_ws/install/setup.bash"; set -u
 
 [ -f "$LEVEL" ] || { echo "**레벨이 없다**: $LEVEL"; exit 1; }
+# **이전 판을 확실히 내린 뒤 띄운다.** 예전에는 Isaac 만 kill 하고 5 초 기다린 게 전부라
+# ① Isaac 이 안 죽으면 두 판이 겹쳐 돌았고 ② rqt 창은 아예 안 껐다 — 판마다 두 개씩
+# 쌓여 어느 창이 이번 판 것인지 알 수 없었다 (2026-09-24 지적, 그때 8 개 떠 있었다).
 OLD=$(pgrep -f 'isaac/run_simulation' || true)
-[ -n "$OLD" ] && { echo "남은 Isaac 종료: $OLD"; kill $OLD; sleep 5; }
+if [ -n "$OLD" ]; then
+    echo "남은 Isaac 종료: $OLD"; kill $OLD 2>/dev/null || true
+    for _ in $(seq 20); do kill -0 $OLD 2>/dev/null || break; sleep 1; done
+    STILL=""; for pid in $OLD; do kill -0 "$pid" 2>/dev/null && STILL="$STILL $pid"; done
+    [ -n "$STILL" ] && { echo "      안 죽어 강제 종료:$STILL"; kill -9 $STILL 2>/dev/null || true; sleep 2; }
+fi
+RQT=$(pgrep -f rqt_image_view || true)
+if [ -n "$RQT" ]; then
+    echo "남은 rqt 창 종료: $(echo $RQT | wc -w) 개"
+    kill $RQT 2>/dev/null || true; sleep 2
+    for pid in $RQT; do kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true; done
+fi
 pkill -f "install/shelving_(manipulation|perception|navigation|system)/" 2>/dev/null || true
 pkill -f "static_transform_publisher" 2>/dev/null || true
 pkill -f "detect_request" 2>/dev/null || true
