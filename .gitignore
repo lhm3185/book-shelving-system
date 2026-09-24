@@ -19,3 +19,6 @@ night/
 /build/
 /install/
 /log/
+
+# 판 출력 — 매 판 덮어쓰이고 rec/ 는 GB 단위다 (2026-09-25: 한 판이 16 GB)
+logs/
