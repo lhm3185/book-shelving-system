@@ -160,7 +160,11 @@ def main(argv=None):
     recs = load(a.dump)
     out = compare(recs, a.pos_tol, a.rot_tol)
     if a.json:
-        print(json.dumps(out, ensure_ascii=False, indent=1))
+        # **점별 키가 튜플이라 JSON 으로 못 나간다** (2026-09-25: --json 이 TypeError).
+        # 사람이 읽는 표는 튜플 키가 편하니 그대로 두고, 내보낼 때만 문자열로 바꾼다.
+        _o = dict(out)
+        _o["점별"] = {str(list(k)): v for k, v in out.get("점별", {}).items()}
+        print(json.dumps(_o, ensure_ascii=False, indent=1))
         return 0
     print(f"덤프 {a.dump} · 문제 {len(recs)}개 · ak 허용 {a.pos_tol * 1000:.1f} mm / {a.rot_tol} rad")
     print(f"모델 검증: Lula 해를 ak FK(도구 프레임)로 되돌린 손끝 오차 최대 **{out['모델오차_최대mm']:.3f} mm**")
