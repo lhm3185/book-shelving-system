@@ -396,6 +396,13 @@ class ManipulationExecutor:
         self.job.state = {"token": token, "job_id": job_id, "status": SIM_RUNNING, "phase": "scan", "scan_poses": holds}
         self.publish(self.job.state)
         self.say(f"스윕 시작: 판 {boards}, 정지점 {holds}개, 정지 {dwell:.1f}s")
+        # 판 목록 그림자 — **이 분기가 실제로 도는 분기다** (기본 scan_command: scan_sweep).
+        # 처음엔 포즈표 분기(위)에만 넣어 두 판 동안 0건이 찍혔다 (2026-09-25 09:08, 데스크탑 지적).
+        # 계측을 넣으면 한 줄이라도 찍히는지부터 본다 — 어젯밤 SIM_CARRY_MODE 와 같은 모양의 실수.
+        try:
+            self.scene.shadow_boards(list(boards) + [float(self.scene.shelf_floor_z)])   # 로그만
+        except Exception as _exc:      # noqa: BLE001 - 계측이 스캔을 막으면 안 된다
+            self.say(f"[판목록] 못 견줬다: {type(_exc).__name__}: {_exc}")
         self.publish(dict(self.job.state, phase="scan_plan", shelf_box=self._shelf_box_arm(),
                           shelf_gaps=self._shelf_gaps_arm(boards),
                           boards=[{"board_z": b, "name": f"sweep_{b:.3f}", "reachable": True} for b in boards]))
