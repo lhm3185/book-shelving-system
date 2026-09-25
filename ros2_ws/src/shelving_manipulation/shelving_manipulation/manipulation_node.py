@@ -392,7 +392,8 @@ class ManipulationNode(Node):
         # **책 두께는 요청 값이다.** 프로파일 두께(35.2)는 기본값일 뿐이라 네 권 판에서 43.1·38.2·44.3 mm 책도
         # 35.2 로 재 여유가 최대 9.1 mm 부풀려졌다 — 15 mm 경고가 무력화되고, 들어가는 칸 판정도 느슨했다
         # (2026-09-25 데스크탑). 요청에 두께가 있으면(FSM 이 프로파일에서 채움) 그것을, 없으면 기본을 쓴다.
-        thickness = float(book_thickness) if book_thickness and book_thickness > 0 else float(self.profile.thickness)
+        thickness = (float(book_thickness) if book_thickness and book_thickness > 0
+                     else float(self.profile.thickness))
         """
         스캔 자리(0.75 m)에서 받은 빈칸 관측 → 꽂을 칸 (팔 기준, 꽂기 자리).
 
@@ -616,7 +617,8 @@ class ManipulationNode(Node):
             self._set_status('FAILED', request.job_id, 0.0, code, message)
             return self._finish_detection(goal_handle, result, False)
 
-        selected = self._select_empty_slot(slots, float(request.book_width), float(request.book_thickness))
+        selected = self._select_empty_slot(
+            slots, float(request.book_width), float(request.book_thickness))
         result.candidate_count = len(slots)
         if selected is None:
             result.error_code = 410
