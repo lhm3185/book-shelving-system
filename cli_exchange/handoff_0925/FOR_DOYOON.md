@@ -148,3 +148,54 @@ SIM_SPINE_FROM_NEIGHBOURS=1 bash scripts/demo/full_cycle.sh
   12분 기다렸다. → 그 값은 랩탑이 `manipulation.yaml` 에 상수로 넣어 둬서 이제 필요 없다
 - `full_cycle.sh` 의 정리는 **Isaac 과 rqt 만** 끈다. 런처 셸(`full_cycle.sh`) 자체는 안 끈다 —
   한때 셸이 3개 겹쳐 돌았다. 다음 판 띄우기 전에 `ps | grep full_cycle` 로 확인할 것
+
+---
+
+## D-5. **네 권 완주 성공** (2026-09-25 15:34 · 15:49 두 판 연속)
+
+`bash scripts/demo/full_cycle.sh` 에 아래 환경변수만 주면 그대로 재현된다
+(검출 신뢰도·어긋남 기준은 이제 스크립트 기본값이라 안 줘도 된다):
+
+    export SIM_LEVEL=$HOME/levels/Final_Level_Library/Final_Level_RnD.usd
+    export SIM_SHELF_PRIM=/World/bookshelves_main/shelf_brown__book_shelf_11
+    export SIM_SHELF_PRIMS="shelf_01=/World/bookshelves_main/shelf_brown__book_shelf_11;shelf_02=/World/bookshelves_main/shelf_brown__book_shelf_01"
+    export SIM_SPINE_FROM_NEIGHBOURS=1
+    export SIM_BOOK_IDS="['book_003','book_004','book_001','book_002']"
+    export SIM_RFID_TAGS="['rfid_003','rfid_004','rfid_001','rfid_002']"
+    export SIM_CLASS_CODES="['512.3','611.0','005.7','006.3']"
+
+### 결과 (두 판)
+
+    권  서가      중심오차(15:34 / 15:49)   기울기    양옆 여유(15:49)
+    1   B 위판     -1.8 / -1.8 mm           +0.32°    27.0 / 32.5 mm
+    2   B 아래판   -3.7 / -3.9 mm           +0.17°    13.6 / 23.1 mm
+    3   A 아래판   +0.0 / +1.1 mm           +0.34°    10.6 / 10.2 mm
+    4   A 위판     -1.1 / -3.5 mm           +0.21°     0.8 /  9.6 mm   ← A-7 참고
+
+겹침 0건 (그 판의 서가 책 41~44권과 대조). 홈 복귀 좌표·각도 두 판 모두 정확.
+한 권당 1분 50초, 전체 약 10분.
+
+### 가는 길에 막혔던 세 가지 — 전부 **두 서가를 실제로 써야 드러나는** 것들이었다
+
+1. **유령 빈칸** (`410`): 우리가 꽂은 책이 서가 상자 필터를 안 탔다. B 는 A 의 복사본이라
+   판 높이가 같아, B 에 꽂은 두 권이 A 를 잴 때 목록에 섞였다 → 3 m 짜리 빈칸 →
+   네 권째가 차체를 1.454 m 옮기려다 멈췄다. 필터 한 줄 추가 (`book_scene.py`)
+2. **트레이 검출 여유 없음** (`411`): 30 s 창에 트리거 60회, 관측 1개. 성공하던 판도 2개가
+   전부라 아슬아슬했다. 신뢰도 0.75 → **0.55**. ROI·안전범위·합의가 뒤를 받친다
+3. **`406` 이 허위**: 책 원점↔형상중심 지렛대가 **109.6~176.7 cm** 라 회전 1.5° 가 3.4 cm 로
+   찍혔다. 키네마틱 파지는 매 스텝 책을 손에 다시 써 넣으므로 그 기준은 애초에 미끄러짐을
+   못 본다 → 쥔점 기준(`SIM_DRIFT_METRIC=grip`)으로 전환
+
+---
+
+### A-7. 서가 A **위 판** 빈칸을 조금 더 벌려 주시면 (권장도 중)
+
+- 그 칸은 빈칸 55~56 mm 에 책 두께 45.1 mm — 양쪽 합쳐 10 mm 뿐이다
+- 15:49 판에서 중심이 -3.5 mm 쏠려 **왼쪽 여유가 0.8 mm** 까지 좁아졌다
+- 콜리전이 없으니 실패는 안 나지만, **생중계 화면에서 옆 책에 붙어 보인다**
+- 다른 세 칸은 여유가 9.6~32.5 mm 로 넉넉하다. 이 칸만 10~15 mm 더 벌리면 균일해진다
+- (서가 B 의 두 칸은 도윤님이 넓혀 주신 덕에 제일 여유롭다 — 13.6~32.5 mm)
+
+### B-5. 서가 B 근접 녹화 (진행 중)
+- 서가 A 는 근접으로 확인했지만 **B 는 한 번도 눈으로 못 봤다**
+- 16:02 판에 B 작업 자리를 보는 카메라를 걸어 돌리는 중. 프레임은 `logs/rec/<월일_시분초>/`
