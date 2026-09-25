@@ -106,7 +106,10 @@ sleep 1
 if [ "${REC_EVERY:-30}" = "0" ]; then
     REC_ARGS=""; echo "      (뷰포트 녹화 끔 — REC_EVERY=0)"
 else
-    REC_ARGS="--record-dir $LOG/rec --record-every ${REC_EVERY:-30}"
+    # 판마다 다른 폴더 — 같은 폴더에 f000000 부터 다시 쓰면 앞 판 프레임을 덮어써 번호가 겹친다
+    # (2026-09-25 근접 녹화가 1,590 에서 안 늘던 원인). 앞 판을 지우지 않고 판을 가른다.
+    REC_DIR="$LOG/rec/$(date +%m%d_%H%M%S)"; mkdir -p "$REC_DIR"
+    REC_ARGS="--record-dir $REC_DIR --record-every ${REC_EVERY:-30}"
     # **가까이서 보고 싶을 때** 녹화 카메라를 옮긴다 (REC_EYE / REC_LOOK, "x y z").
     # 기본 뷰는 방 전체라 로봇이 화면의 8% 밖에 안 돼 팔이 책을 스치는지 안 보인다
     # (2026-09-25 네 권 예행 실측). 서가 책은 콜리전이 없어 **눈이 유일한 검사**다.
