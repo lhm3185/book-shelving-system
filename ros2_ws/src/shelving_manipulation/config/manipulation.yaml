@@ -75,7 +75,9 @@ manipulation_node:
     fixed_insertion_depth: 0.30 # 뒤가 열린 서가: 삽입량은 비전 depth가 아닌 고정값
     # 비전 책 좌표 x -0.579 가 3 cm 차이로 범위 밖(410)이 났다 (2026-09-23) — 트레이 칸 x -0.47~-0.65 를 덮게 넓힘
     vision_grasp_region_min: [-0.70, -0.35, 0.05]
-    vision_grasp_region_max: [-0.15, 0.35, 0.30]
+    # y 상한 0.35 → 0.60: 트레이 칸이 팔 +Y 로 다섯 칸(칸0 -0.188 … 칸4 +0.548)이라 세 권째부터 범위 밖이었다
+    # (2026-09-25 네 권 판, 비전 ROI 와 같은 병). 서가 책(y 0.52~0.59)은 x 상한 -0.15 가 거른다.
+    vision_grasp_region_max: [-0.15, 0.60, 0.30]
     status_rate_hz: 2.0
     feedback_rate_hz: 10.0
 

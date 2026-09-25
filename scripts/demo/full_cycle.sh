@@ -144,7 +144,11 @@ spawn ros2 run shelving_perception vision_manager --ros-args \
     --params-file "$REPO/ros2_ws/src/shelving_perception/config/perception.yaml" \
     -p model_path:="${MODEL_PATH:-$RES/book_tray_best.pt}" \
     -p shelf_model_path:="${SHELF_MODEL:-$RES/best.pt}" \
-    -p confidence_threshold:="${VISION_CONF:-0.75}" > "$LOG/vision.log" 2>&1
+    -p confidence_threshold:="${VISION_CONF:-0.75}" \
+    -p book_roi_max:="${VISION_ROI_MAX:-[-0.26, 0.65, 0.32]}" > "$LOG/vision.log" 2>&1
+# ^ 트레이 ROI y 상한 0.30 → 0.65 (비전팀 yaml 은 안 건드리고 여기서 덮는다). yaml 값은 앞 두 칸 기준이라
+#   세 권째(칸2 y +0.180 가장자리, 칸3 +0.364 밖)부터 "책 좌표 없음 411" 이 났다 (2026-09-25 네 권 판).
+#   칸4(+0.548)까지 덮는다. 서가 책(y 0.52~0.59)은 x 상한 -0.26 이 거른다 (서가 책 x -0.02~+0.46).
 spawn ros2 run shelving_manipulation manipulation_node --ros-args \
     --params-file "$REPO/ros2_ws/src/shelving_manipulation/config/manipulation.yaml" -p executor:=sim \
     ${MAN_EXTRA:-} > "$LOG/manipulation.log" 2>&1
