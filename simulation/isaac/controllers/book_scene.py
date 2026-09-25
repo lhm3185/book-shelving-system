@@ -2712,10 +2712,26 @@ class BookScene:
                     _wp.append([float(v) for v in _q])
                     _lab.append(_n)
                     _isl.append(_n in _lin and _n not in JOINT_SEGS)
+            # 경로 스침 검사(tools/sweep_check.py)가 쓰는 것도 같이 — 베이스 자세(팔→월드), 손→손끝 변환,
+            # 쥔 책 치수, 그 판 이웃 책 상자(월드 AABB). 서가 책에 콜리전이 없어 스침은 물리로 못 잡는다 —
+            # 계획 경로를 FK 로 훑어 이웃과의 이격을 기하로 본다 (웹 클로드 v44 회신 §5).
+            _extra = {}
+            try:
+                _extra = {"l0p": [float(v) for v in self.l0p],
+                          "Rl0": [float(v) for v in np.asarray(self.Rl0, float).ravel()],
+                          "tool": None if getattr(self, "_ak_tool", None) is None else
+                          {"T": [float(v) for v in self._ak_tool[0]],
+                           "R": [float(v) for v in np.asarray(self._ak_tool[1], float).ravel()]},
+                          "book_dims": [float(T), float(Lb), float(W)], "tip_down": float(TIP_DOWN),
+                          "neighbours": [[float(v) for v in bb]
+                                         for _p, bb in self.shelf_book_boxes(board_z=floor_z, exclude=book)],
+                          "shelf_bb": [float(v) for v in np.asarray(self.shelf_aabb_world, float)]}
+            except Exception as _exc:      # noqa: BLE001 - 덤프 부가 정보가 계획을 막으면 안 된다
+                self.say(f"[경고] 계획 덤프 부가 정보 실패: {type(_exc).__name__}: {_exc}")
             try:
                 with open(os.environ["SIM_PLAN_DUMP"], "w") as _f:
-                    json.dump({"home": [float(v) for v in self.q_home],
-                               "waypoints": _wp, "labels": _lab, "linear": _isl}, _f)
+                    json.dump(dict({"home": [float(v) for v in self.q_home],
+                                    "waypoints": _wp, "labels": _lab, "linear": _isl}, **_extra), _f)
                 self.say(f"계획 덤프: {len(_wp)}점 → {os.environ['SIM_PLAN_DUMP']}")
             except Exception as _exc:      # noqa: BLE001
                 self.say(f"[경고] 계획 덤프 실패: {_exc}")
