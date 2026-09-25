@@ -94,7 +94,7 @@ def test_책_두께는_요청_값을_쓴다_프로파일_기본이_아니라():
     """네 권 판: 44.3 mm 책이 35.2 로 재져 여유가 9.1 mm 부풀려졌다. 요청 두께로 들어가는 칸을 가른다."""
     gaps = [[-0.400, -0.350, 0.168], [0.100, 0.160, 0.712]]             # 아래 50 mm · 위 60 mm
     thin = ManipulationNode._select_empty_slot(_stub(gaps), [_open_board_obs()], 0.1517, 0.0352)
-    assert thin is not None and abs(thin[1][2] - LOWER_Z) < 1e-6      # 35.2+10 = 45.2 → 아래 50 mm 에 들어간다
+    assert thin is not None and abs(thin[1][2] - LOWER_Z) < 1e-6   # 35.2+10=45.2 → 아래 50 에 들어감
     s2 = _stub(gaps)
     thick = ManipulationNode._select_empty_slot(s2, [_open_board_obs()], 0.1517, 0.0443)
     assert thick is not None and abs(thick[1][2] - (LOWER_Z + UPPER_REL)) < 1e-6
