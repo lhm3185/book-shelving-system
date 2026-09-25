@@ -88,3 +88,14 @@ def test_실측_빈칸이_없으면_예전과_같은_자리다():
     _msg, (x, y, z) = out
     assert (x, round(y, 4), z) == (-0.35, 0.5495, LOWER_Z)
     assert s.place_lateral_dynamic == 0.0
+
+
+def test_책_두께는_요청_값을_쓴다_프로파일_기본이_아니라():
+    """네 권 판: 44.3 mm 책이 35.2 로 재져 여유가 9.1 mm 부풀려졌다. 요청 두께로 들어가는 칸을 가른다."""
+    s = _stub([[-0.400, -0.360, 0.168], [0.100, 0.155, 0.712]])         # 아래 40 mm · 위 55 mm
+    thin = ManipulationNode._select_empty_slot(s, [_open_board_obs()], 0.1517, 0.0352)
+    assert thin is not None and abs(thin[1][2] - LOWER_Z) < 1e-6          # 35.2 는 아래 40 mm 칸에 들어간다
+    s2 = _stub([[-0.400, -0.360, 0.168], [0.100, 0.155, 0.712]])
+    thick = ManipulationNode._select_empty_slot(s2, [_open_board_obs()], 0.1517, 0.0443)
+    assert thick is not None and abs(thick[1][2] - (LOWER_Z + UPPER_REL)) < 1e-6   # 44.3 은 위 판으로 옮긴다
+    assert any('[배정] 책 44.3 mm' in ln for ln in s2.get_logger().lines)

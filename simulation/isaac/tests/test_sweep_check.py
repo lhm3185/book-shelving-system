@@ -14,7 +14,7 @@ from sweep_check import aabb_gap, aabb_of_points, box_corners, held_book_box_loc
 def test_쥔_책_상자는_손끝_아래로_매달린다():
     lo, hi = held_book_box_local((0.0352, 0.2265, 0.1517), 0.035)
     assert hi[2] == 0.035 and abs(lo[2] - (-(0.2265 - 0.035))) < 1e-9
-    assert hi[0] == 0.1517 / 2 and lo[1] == -0.1517 / 2          # 보수적: 두께·폭 중 큰 쪽
+    assert hi[0] == 0.1517 / 2 and hi[1] == 0.0352 / 2          # x 폭 · y 두께(물림축)
 
 
 def test_이격은_축별_최대이고_겹치면_음수다():
@@ -50,4 +50,4 @@ def test_이웃이_손끝_바로_옆이면_이격이_작다():
             "waypoints": [q], "labels": ["carry_rotate"], "neighbours": [nb]}
     per, worst = sweep(plan)
     assert per["carry_rotate"]["n"] == 1 and worst is not None
-    assert -0.16 < worst[0] < 0.10          # 보수적 상자(반폭 7.6 cm)라 10 cm 이웃은 2.4 cm 안팎이거나 살짝 겹침
+    assert -0.16 < worst[0] < 0.10          # 손끝 옆 10 cm 이웃 — 폭 반쪽(7.6 cm) 기준 2.4 cm 안팎

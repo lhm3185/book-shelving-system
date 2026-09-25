@@ -96,6 +96,14 @@ def main(argv=None):
         if pub.get_subscription_count() > 0:
             break
         rclpy.spin_once(node, timeout_sec=0.1)
+    if pub.get_subscription_count() == 0:
+        # **조용히 성공처럼 끝나지 않는다.** 2026-09-25 데스크탑: 셸의 ROS_DOMAIN_ID(130)가 스크립트의
+        # 기본(129)과 달라 구독자 0 인 채 발행하고 끝났다 — 아무 일도 안 일어난다. 도메인·RMW·프로파일을
+        # full_cycle 과 같게 맞춰야 붙는다.
+        node.destroy_node(); rclpy.shutdown()
+        raise SystemExit(f"구독자가 없다 — {a.topic} 을 듣는 노드가 안 보인다. full_cycle 과 같은 "
+                         f"ROS_DOMAIN_ID / RMW_IMPLEMENTATION / FASTRTPS_DEFAULT_PROFILES_FILE 인지 확인 "
+                         f"(지금 ROS_DOMAIN_ID={os.environ.get('ROS_DOMAIN_ID', '(없음)')})")
     pub.publish(msg)
     rclpy.spin_once(node, timeout_sec=0.5)
     print(f"발행 {a.topic}: job_id={msg.job_id} · {len(books)}권 (구독자 {pub.get_subscription_count()})")

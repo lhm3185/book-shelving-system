@@ -26,10 +26,17 @@ import arm_kinematics as ak          # noqa: E402
 
 
 def held_book_box_local(dims, tip_down):
-    """쥔 책의 상자 — 손끝 프레임 `(min xyz, max xyz)`. dims = (두께 T, 높이 Lb, 폭 W)."""
+    """쥔 책의 상자 — 손끝 프레임 `(min xyz, max xyz)`. dims = (두께 T, 높이 Lb, 폭 W).
+
+    Franka 손가락은 손 **y** 로 벌어지고 닫힌다 → 책 두께(T)는 손끝 y, 폭(W)은 손끝 x 방향이다.
+    처음엔 둘 다 max(T, W)/2 로 잡았는데 그러면 밀어 넣는 구간(push)에서 이웃과 -25.9 mm 로 "겹쳐"
+    보였다 — 같은 판 `[겹침]` 실측은 여유 14.7 mm. 두께 방향을 제대로 두면 그 허위가 사라진다
+    (2026-09-25 데스크탑 대조). 축 가정이 틀리면 이격이 작게 나오는 쪽(보수)이 아니라 크게 나올 수
+    있으니, `[겹침]` 실측과 나란히 본다.
+    """
     T, Lb, W = (float(v) for v in dims)
-    h = max(T, W) / 2.0
-    return np.array([-h, -h, -(Lb - float(tip_down))]), np.array([h, h, float(tip_down)])
+    return (np.array([-W / 2.0, -T / 2.0, -(Lb - float(tip_down))]),
+            np.array([W / 2.0, T / 2.0, float(tip_down)]))
 
 
 def box_corners(lo, hi):

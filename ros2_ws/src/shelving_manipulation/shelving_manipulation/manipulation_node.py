@@ -388,7 +388,11 @@ class ManipulationNode(Node):
             self._scan_state = None
         return slots, 0, ''
 
-    def _select_empty_slot(self, slots, book_width):
+    def _select_empty_slot(self, slots, book_width, book_thickness=0.0):
+        # **책 두께는 요청 값이다.** 프로파일 두께(35.2)는 기본값일 뿐이라 네 권 판에서 43.1·38.2·44.3 mm 책도
+        # 35.2 로 재 여유가 최대 9.1 mm 부풀려졌다 — 15 mm 경고가 무력화되고, 들어가는 칸 판정도 느슨했다
+        # (2026-09-25 데스크탑). 요청에 두께가 있으면(FSM 이 프로파일에서 채움) 그것을, 없으면 기본을 쓴다.
+        thickness = float(book_thickness) if book_thickness and book_thickness > 0 else float(self.profile.thickness)
         """
         스캔 자리(0.75 m)에서 받은 빈칸 관측 → 꽂을 칸 (팔 기준, 꽂기 자리).
 
@@ -514,7 +518,7 @@ class ManipulationNode(Node):
             # 3·4번 선반에 한 권씩인데, 비전은 두 권째에도 아래 판을 가리킨다.
             # 가리킨 판만 보면 **비어 있는 위 판을 두고 거절한다** (2026-09-24 실측).
             gx, gw, _rel, why = choose_gap_any_board(
-                self._shelf_gaps, x, float(zs) - lower_z, self.profile.thickness,
+                self._shelf_gaps, x, float(zs) - lower_z, thickness,
                 min_clearance=float(self.limits['side_clearance']),
                 max_move=self.slot_x_snap_max_m)
             if gx is None:
@@ -531,14 +535,14 @@ class ManipulationNode(Node):
             self.get_logger().info(
                 f'빈칸 x: 검출 {x:+.4f} → 실측 빈칸 중심 {gx:+.4f} '
                 f'({(gx - x) * 1000:+.1f} mm, 빈칸 폭 {gw * 1000:.1f} mm, '
-                f'책 두께 {self.profile.thickness * 1000:.1f} mm, '
-                f'남는 여유 한쪽 {(gw - self.profile.thickness) / 2 * 1000:.1f} mm, '
+                f'책 두께 {thickness * 1000:.1f} mm, '
+                f'남는 여유 한쪽 {(gw - thickness) / 2 * 1000:.1f} mm, '
                 f'판 상대높이 {0.0 if _rel is None else _rel:+.3f} m) [slot_x_snap_to_gap]')
             # **배정 경고 한 줄** (웹 클로드 v44 회신 §9). 2026-09-25 네 권 판에서 제일 좁은 칸(56 mm)에 제일
             # 두꺼운 책(44.3 mm)이 가서 여유 0.8 mm 까지 갔다 — 레벨 문제가 아니라 배정이었다. 규칙(두꺼운 책 →
             # 넓은 칸)은 시연 뒤 개선 목록. 지금은 판이 죽기 전에 로그가 먼저 말하게만 한다.
-            _slack = (gw - self.profile.thickness) * 1000.0
-            _line = (f'[배정] 책 {self.profile.thickness * 1000:.1f} mm → 칸 {gw * 1000:.1f} mm '
+            _slack = (gw - thickness) * 1000.0
+            _line = (f'[배정] 책 {thickness * 1000:.1f} mm → 칸 {gw * 1000:.1f} mm '
                      f'(여유 합 {_slack:.1f} mm)')
             if _slack < 15.0:
                 self.get_logger().warning(_line + ' — **여유 15 mm 미만**, 이 칸에 이 책은 아슬아슬하다')
@@ -612,7 +616,7 @@ class ManipulationNode(Node):
             self._set_status('FAILED', request.job_id, 0.0, code, message)
             return self._finish_detection(goal_handle, result, False)
 
-        selected = self._select_empty_slot(slots, float(request.book_width))
+        selected = self._select_empty_slot(slots, float(request.book_width), float(request.book_thickness))
         result.candidate_count = len(slots)
         if selected is None:
             result.error_code = 410
