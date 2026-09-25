@@ -140,20 +140,32 @@ class NavManager(Node):
 
 	def _command_for_goal(self, request):
 		if request.target_type == 'shelf':
-			route = (self._routes or {}).get(f'to_{request.target_id}') or self.patrol_route
+			# **어디서 오는지 아는 경로를 먼저 본다.** 서가끼리 옮겨 갈 때 홈에서 출발하는 경로를 그대로
+			# 돌리면 첫 다리가 서가들을 관통한다 (B→A 곧장 5.25 m 에 서가 5개, 2026-09-25 실측).
+			# `to_<목표>_from_<직전>` → `to_<목표>` → library_loop 순으로 고른다.
+			_from = getattr(self, '_last_shelf_id', None)
+			_name = f'to_{request.target_id}_from_{_from}' if _from else None
+			route = (self._routes or {}).get(_name) if _name else None
+			if route is None:
+				_name = f'to_{request.target_id}'
+				route = (self._routes or {}).get(_name)
+			if route is None:
+				_name, route = self.patrol_route_name, self.patrol_route
 			self._last_shelf_id = str(request.target_id)
-			if route is not self.patrol_route:
-				# **이미 그 서가 앞이면 안 움직인다.** 경로는 홈에서 출발하는 것이라 서가 앞에서 다시
-				# 돌리면 첫 점(바깥 열)까지 서가들을 관통해 팔 베이스가 2 m 뒤처졌다(2026-09-25 B 2권).
-				# library_loop(shelf_01)는 검증된 흐름 그대로 둔다.
-				with self._lock:
-					pose = (self._state or {}).get('pose')
-				if pose and math.hypot(float(pose[0]) - route[-1][0], float(pose[1]) - route[-1][1]) < 0.15:
-					self.get_logger().info(
-						f'서가 {request.target_id}: 이미 앞에 서 있다 ({pose[0]:.3f}, {pose[1]:.3f}) — 주행 생략')
-					return None
+			# **이미 그 서가 앞이면 안 움직인다.** 경로는 다른 자리에서 출발하는 것이라 서가 앞에서 다시
+			# 돌리면 첫 점(바깥 열)까지 서가들을 관통해 팔 베이스가 2 m 뒤처졌다(2026-09-25 B 2권).
+			# library_loop 도 마지막 점이 patrol_start 로 되돌아오므로 (waypoints_measured.yaml)
+			# route[-1] 이 서가 A 작업 자리 (2.535, -3.019) 다 — 같은 기준이 그대로 성립한다.
+			# 전에는 여기에 `route is not self.patrol_route` 가드가 있어 A 의 두 권째가 매번 37 m 를
+			# 다시 돌았다 (도윤님 지적, 2026-09-25).
+			with self._lock:
+				pose = (self._state or {}).get('pose')
+			if pose and math.hypot(float(pose[0]) - route[-1][0], float(pose[1]) - route[-1][1]) < 0.15:
 				self.get_logger().info(
-					f'서가 {request.target_id}: 경로 to_{request.target_id} ({len(route)}점) 로 patrol')
+					f'서가 {request.target_id}: 이미 앞에 서 있다 ({pose[0]:.3f}, {pose[1]:.3f}) — 주행 생략')
+				return None
+			self.get_logger().info(
+				f'서가 {request.target_id}: 경로 {_name} ({len(route)}점) 로 patrol')
 			return {
 				'type': 'patrol',
 				'speed': self.patrol_speed,

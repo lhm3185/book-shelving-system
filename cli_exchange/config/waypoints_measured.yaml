@@ -152,6 +152,15 @@ routes:
     - shelf_02_wp3
     - shelf_02_wp2
     - shelf_02_wp1
+  # 서가 B → 서가 A: 곧장 가면 서가 5개를 관통한다 (5.25 m, 2026-09-25 데스크탑 실측, 카트 반폭 0.45).
+  # B 로 올 때 쓴 통로를 되짚어 바깥 열(x +4.0)까지 나온 뒤 A 작업 자리로 들어간다 — 10.26 m, 관통 0.
+  # 마지막 점은 shelf_01 웨이포인트(2.229, -3.010, yaw 90°)가 **아니라** patrol_start 다.
+  # library_loop 가 끝나는 자리이자 검증된 작업 자리·각도 (2.535, -3.019, yaw 0°).
+  to_shelf_01_from_shelf_02:
+    - shelf_02_wp3
+    - shelf_02_wp2
+    - patrol_wp1
+    - patrol_start
   library_loop:
     - patrol_start
     - patrol_wp1
