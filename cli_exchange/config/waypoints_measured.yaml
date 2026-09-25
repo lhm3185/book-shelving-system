@@ -146,6 +146,12 @@ routes:
     - shelf_02_wp2
     - shelf_02_wp3
     - shelf_02
+  # 서가 B → 홈: 곧장 가면 서가들을 관통한다. 통로를 거꾸로 돌아 바깥 열까지, 그다음 nav_manager 의
+  # 곧장 goto(홈, 출발 yaw)가 이어진다 — (4.0, -4.2) 에서 홈 (4.986, -5.607) 은 서가 줄 아래라 깨끗하다
+  home_from_shelf_02:
+    - shelf_02_wp3
+    - shelf_02_wp2
+    - shelf_02_wp1
   library_loop:
     - patrol_start
     - patrol_wp1
