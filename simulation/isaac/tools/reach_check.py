@@ -9,6 +9,10 @@ GPU 판 여러 개를 썼는데, **빈칸 위치와 팔 도달은 둘 다 시뮬
 
 레벨이 바뀌면 **이것부터 다시 돌린다.** 판 좌표·책 배치가 달라지면 답도 달라진다.
 
+**서가 prim 이름을 믿지 말고 좌표로 확인한다.** 2026-09-25 새 레벨에서 `shelf_01`/`shelf_11` 이름이
+서로 맞바뀌었다 — 작업 서가(x +1.87~+3.28)가 `_11`, 새 서가(x -1.37~+0.04)가 `_01`. `--shelf` 로 준 prim
+의 안쪽 x 범위가 출력 둘째 줄에 찍히니 그걸로 어느 서가인지 본다.
+
 `pxr`(USD)·`numpy` 가 시스템 파이썬에 없으면 그게 있는 가상환경으로 돈다 — 데스크탑은
 `/tmp/usdenv/bin/python3 simulation/isaac/tools/reach_check.py <레벨.usd>` (2026-09-25 확인).
 
@@ -25,7 +29,7 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "controllers"))
 
 import arm_kinematics as ak          # noqa: E402
-from shelf_gap import boards_from_zs, gaps as find_gaps   # noqa: E402
+from shelf_gap import boards_from_zs, book_in_shelf, gaps as find_gaps   # noqa: E402
 
 #: 꽂을 때 손 자세 — 서가(+Y)를 향하고 물림축이 +X (`SIM_GRIP_ROT90=1` 조합)
 R_INSERT = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]])
@@ -70,6 +74,10 @@ def read_shelf(usd_path, shelf_prim):
     xs = sorted({round(float(q[0]), 4) for q in wp})
     inner = (xs[1], xs[-2]) if len(xs) >= 4 else (xs[0], xs[-1])
     boards = boards_from_zs(float(q[2]) for q in wp)
+    # **이 서가의 상자** — 책을 판 높이로만 거르면 다른 서가의 책이 섞인다. 2026-09-25 새 레벨
+    # (서가 둘, 같은 판 높이)에서 두 서가 사이 3.28 m 가 "빈칸" 으로 나왔다(데스크탑 실측).
+    shelf_bb = (min(float(q[0]) for q in wp), min(float(q[1]) for q in wp), min(float(q[2]) for q in wp),
+                max(float(q[0]) for q in wp), max(float(q[1]) for q in wp), max(float(q[2]) for q in wp))
     books = {}
     root = stage.GetPrimAtPath("/World/books")
     if root and root.IsValid():
@@ -80,6 +88,9 @@ def read_shelf(usd_path, shelf_prim):
                 if r.IsEmpty():
                     continue
                 lo, hi = r.GetMin(), r.GetMax()
+                bb = (float(lo[0]), float(lo[1]), float(lo[2]), float(hi[0]), float(hi[1]), float(hi[2]))
+                if not book_in_shelf(bb, shelf_bb):
+                    continue                        # 다른 서가의 책
                 books.setdefault(str(floor.GetName()), []).append(
                     (str(c.GetName()), float(lo[0]), float(hi[0]), float(lo[2])))
     return boards, inner, books
