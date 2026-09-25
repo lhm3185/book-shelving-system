@@ -79,6 +79,14 @@ class NavManager(Node):
 		waypoints = data.get('waypoints', {})
 		self._waypoints = waypoints
 		route_names = data.get('routes', {})
+		# 서가별 경로(`to_<shelf_id>`)를 다 풀어 둔다 — 없는 점 이름은 그 경로만 버리고 말한다
+		self._routes = {}
+		for rname, names in (route_names or {}).items():
+			try:
+				self._routes[rname] = [[float(waypoints[n]['position']['x']),
+					float(waypoints[n]['position']['y'])] for n in names]
+			except (KeyError, TypeError) as exc:
+				self.get_logger().warn(f'경로 {rname} 을 못 읽는다 ({exc}) — 건너뛴다')
 		if self.patrol_route_name not in route_names:
 			raise ValueError(
 				f'patrol route not found: {self.patrol_route_name}')
@@ -132,10 +140,24 @@ class NavManager(Node):
 
 	def _command_for_goal(self, request):
 		if request.target_type == 'shelf':
+			route = (self._routes or {}).get(f'to_{request.target_id}') or self.patrol_route
+			self._last_shelf_id = str(request.target_id)
+			if route is not self.patrol_route:
+				# **이미 그 서가 앞이면 안 움직인다.** 경로는 홈에서 출발하는 것이라 서가 앞에서 다시
+				# 돌리면 첫 점(바깥 열)까지 서가들을 관통해 팔 베이스가 2 m 뒤처졌다(2026-09-25 B 2권).
+				# library_loop(shelf_01)는 검증된 흐름 그대로 둔다.
+				with self._lock:
+					pose = (self._state or {}).get('pose')
+				if pose and math.hypot(float(pose[0]) - route[-1][0], float(pose[1]) - route[-1][1]) < 0.15:
+					self.get_logger().info(
+						f'서가 {request.target_id}: 이미 앞에 서 있다 ({pose[0]:.3f}, {pose[1]:.3f}) — 주행 생략')
+					return None
+				self.get_logger().info(
+					f'서가 {request.target_id}: 경로 to_{request.target_id} ({len(route)}점) 로 patrol')
 			return {
 				'type': 'patrol',
 				'speed': self.patrol_speed,
-				'route': self.patrol_route,
+				'route': route,
 			}
 		# 작업이 끝나면 **시작점으로 돌아간다** — waypoints.yaml 의 home 좌표로 goto (2026-09-23).
 		# 전에는 home 도 '이미 만족' 으로 넘겨 카트가 서가 앞에 남았다.
@@ -150,6 +172,7 @@ class NavManager(Node):
 					self.get_logger().warn(
 						'시뮬이 home_root 를 안 보낸다 — 팔 베이스 자리로 복귀한다. '
 						'루트와 arm_offset 만큼 어긋날 수 있다')
+			pre = (self._routes or {}).get(f'home_from_{getattr(self, "_last_shelf_id", "")}')
 			wp = (self._waypoints or {}).get('home', {})
 			home = wp.get('position')
 			# **방향까지 되돌린다.** 자리만 맞추면 서가를 볼 때의 yaw 로 선 채 끝나서,
@@ -161,11 +184,15 @@ class NavManager(Node):
 				cmd = {'type': 'goto', 'x': float(sim_home[0]), 'y': float(sim_home[1])}
 				if yaw is not None:
 					cmd['yaw_deg'] = yaw
+				if pre:
+					cmd['pre_route'] = pre
 				return cmd
 			if home:
 				cmd = {'type': 'goto', 'x': float(home['x']), 'y': float(home['y'])}
 				if yaw is not None:
 					cmd['yaw_deg'] = yaw
+				if pre:
+					cmd['pre_route'] = pre
 				return cmd
 		# The simulator already delivers the tray before the ROS job starts.
 		# The verified patrol ends at the work position, which is also the
@@ -211,13 +238,20 @@ class NavManager(Node):
 			if command is None:
 				goal_handle.succeed()
 				return self._result(request, True, 0, 'Navigation waypoint is already satisfied in simulation.')
+			pre = command.pop('pre_route', None)
+			if pre:
+				self.get_logger().info(f'홈 복귀 전 통로 경로 {len(pre)}점을 먼저 돈다')
+				ok, result = self._run_command(goal_handle, request, {
+					'type': 'patrol', 'speed': self.patrol_speed, 'route': pre}, 'corridor')
+				if not ok:
+					return result
 			ok, result = self._run_command(goal_handle, request, command, command.get('type', ''))
 			if not ok:
 				return result
 			# **1차 시연 방식**: 한 바퀴 돌아 파지 자리에 서면 시뮬 주행기가 제자리에서 yaw 를 맞춘다(3 s, 트레이 동반).
 			# 검증된 파지 자리는 (2.535, -3.019) yaw 0° — 팔 +Y 가 서가 앞면을 본다 (2026-09-22 실측).
 			if request.target_type == 'shelf' and self.work_yaw_deg is not None:
-				last = self.patrol_route[-1]
+				last = (command.get('route') or self.patrol_route)[-1]
 				ok, result = self._run_command(goal_handle, request, {
 					'type': 'goto', 'x': float(last[0]), 'y': float(last[1]),
 					'speed': self.patrol_speed, 'yaw_deg': float(self.work_yaw_deg)}, 'turn')
