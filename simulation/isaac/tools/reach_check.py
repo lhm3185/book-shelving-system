@@ -85,16 +85,20 @@ def read_shelf(usd_path, shelf_prim):
         # 층 그룹(`…Floor…`)의 자식이 낱권 책. 깊이는 레벨마다 다르다(옛: 루트/층, 새: 루트/서가/층)
         floors = [p for p in Usd.PrimRange(root) if is_floor_group(p.GetName()) and p != root]
         for floor in floors:
-            for c in floor.GetChildren():
-                r = cache.ComputeWorldBound(c).ComputeAlignedRange()
-                if r.IsEmpty():
-                    continue
-                lo, hi = r.GetMin(), r.GetMax()
-                bb = (float(lo[0]), float(lo[1]), float(lo[2]), float(hi[0]), float(hi[1]), float(hi[2]))
-                if not book_in_shelf(bb, shelf_bb):
-                    continue                        # 다른 서가의 책
-                books.setdefault(str(floor.GetName()), []).append(
-                    (str(c.GetName()), float(lo[0]), float(hi[0]), float(lo[2])))
+            for c0 in floor.GetChildren():
+                # 잎 메시까지 — 책 prim 하나에 떨어진 두 권(메시 둘)이 든 것이 있다(2026-09-25). 자식에서
+                # 멈추면 623 mm 유령 덩어리가 그 사이 빈칸을 덮는다. 메시 하나 = 책 하나
+                leaves = [m for m in Usd.PrimRange(c0) if m.IsA(UsdGeom.Mesh)] or [c0]
+                for c in leaves:
+                    r = cache.ComputeWorldBound(c).ComputeAlignedRange()
+                    if r.IsEmpty():
+                        continue
+                    lo, hi = r.GetMin(), r.GetMax()
+                    bb = (float(lo[0]), float(lo[1]), float(lo[2]), float(hi[0]), float(hi[1]), float(hi[2]))
+                    if not book_in_shelf(bb, shelf_bb):
+                        continue                        # 다른 서가의 책
+                    books.setdefault(str(floor.GetName()), []).append(
+                        (str(c.GetName()), float(lo[0]), float(hi[0]), float(lo[2])))
     return boards, inner, books
 
 

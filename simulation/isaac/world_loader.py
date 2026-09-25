@@ -18,10 +18,12 @@ from robot_profiles import profile  # noqa: E402
 BOT = profile()
 
 # 통합 USD 에 있어야 하는 것들. 없으면 시작할 때 바로 알린다
+# 값이 튜플이면 **그중 하나**만 있으면 된다. 2026-09-25 레벨 정리로 서가는 /World/bookshelves_main,
+# 책은 /World/bookshelves_main/books 로 옮겨졌다(옛 레벨은 /World/bookshelves, /World/books).
 REQUIRED_PRIMS = {
     "로봇(AMR+로봇팔)": BOT.root,
-    "서가": "/World/bookshelves",
-    "책 원본": "/World/books",
+    "서가": ("/World/bookshelves_main", "/World/bookshelves"),
+    "책 원본": ("/World/bookshelves_main/books", "/World/books"),
 }
 OPTIONAL_PRIMS = {
     "손목 카메라": f"{BOT.root}/{BOT.camera_prim}",
@@ -74,8 +76,9 @@ def check_prims(stage, say=print, required=None, optional=None):
     """있어야 하는 Prim 을 검사한다. 없으면 RuntimeError, 선택 항목은 알리기만 한다"""
     missing = []
     for name, path in (required or REQUIRED_PRIMS).items():
-        if not stage.GetPrimAtPath(path).IsValid():
-            missing.append(f"{name} ({path})")
+        cands = path if isinstance(path, (tuple, list)) else (path,)
+        if not any(stage.GetPrimAtPath(p).IsValid() for p in cands):
+            missing.append(f"{name} ({' 또는 '.join(cands)})")
     for name, path in (optional or OPTIONAL_PRIMS).items():
         if not stage.GetPrimAtPath(path).IsValid():
             say(f"선택 Prim 없음: {name} ({path}) — 해당 기능은 건너뛴다")

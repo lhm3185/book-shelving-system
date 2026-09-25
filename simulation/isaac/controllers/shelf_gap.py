@@ -202,6 +202,8 @@ def side_clearances(bb, boxes):
 #: 레벨의 서가 책 루트 후보 — 앞에서부터 있는 것을 쓴다. 2026-09-25 레벨 정리로 `/World/books` 가
 #: `/World/bookshelves_main/books/shelf_{A,B}/<층>/<책>` 로 옮겨졌다(서가별 그룹). 옛 레벨은 `/World/books/<층>/<책>`.
 BOOKS_ROOTS = ("/World/bookshelves_main/books", "/World/books")
+#: 서가 그룹 루트 후보 — 새 레벨은 작업 서가가 `/World/bookshelves_main`, 장식 서가는 `/World/bookshelves_Prop`
+SHELF_ROOTS = ("/World/bookshelves_main", "/World/bookshelves")
 
 
 def is_floor_group(name):

@@ -3554,22 +3554,27 @@ class BookScene:
             return []
         mine = set(self.books)
         out = []
+        # **잎 메시까지 내려간다.** 책 prim 하나에 메시가 두 개(서가 양 끝에 떨어진 두 권)인 것이
+        # 있어(2026-09-25 데스크탑 실측: `…cover15` 폭 623 mm — 진짜는 41 mm 두 권), 자식에서 멈추면
+        # 그 둘을 감싼 유령 덩어리가 사이 빈칸(B 아래 칸 95.8 mm)을 덮는다. 메시 하나 = 책 하나.
+        # 한 권이 메시 여럿(표지·속지)이어도 상자가 겹칠 뿐이라 빈칸 계산에는 해가 없다.
         for floor in Usd.PrimRange(root):
             if not is_floor_group(floor.GetName()) or str(floor.GetPath()) == str(root.GetPath()):
                 continue
             for c in floor.GetChildren():
-                path = str(c.GetPath())
-                if path in mine:
+                if str(c.GetPath()) in mine:
                     continue
-                b = self.aabb(path)
-                if not np.all(np.isfinite(b)) or np.any(b[3:] - b[:3] <= 0):
-                    continue
-                if board_z is not None and abs(float(b[2]) - float(board_z)) > tol:
-                    continue
-                # 서가가 둘이면 다른 서가의 책이 같은 판 높이에 있다 — 현재 서가 상자로 거른다
-                if not book_in_shelf(b, self.shelf_aabb_world):
-                    continue
-                out.append((path, b))
+                leaves = [m for m in Usd.PrimRange(c) if m.IsA(UsdGeom.Mesh)] or [c]
+                for m in leaves:
+                    path = str(m.GetPath())
+                    b = self.aabb(path)
+                    if not np.all(np.isfinite(b)) or np.any(b[3:] - b[:3] <= 0):
+                        continue
+                    if board_z is not None and abs(float(b[2]) - float(board_z)) > tol:
+                        continue
+                    if not book_in_shelf(b, self.shelf_aabb_world):
+                        continue
+                    out.append((path, b))
         # **우리가 꽂은 책을 그 판의 책으로 편입한다.** 판 높이로 거르므로 트레이에
         # 남아 있는 것은 저절로 빠진다.
         _skip = set(exclude) if not isinstance(exclude, str) else {exclude}
