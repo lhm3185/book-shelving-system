@@ -120,6 +120,10 @@ echo "[1/4] Isaac 시작 (약 3~4분) — 레벨 $(basename "$LEVEL")  $(date +%
 spawn env SIM_USD="$LEVEL" SIM_FIX_BASE="${SIM_FIX_BASE:-0}" SIM_GRIP_ROT90="${SIM_GRIP_ROT90:-1}" SIM_GRASP_KINEMATIC="${SIM_GRASP_KINEMATIC:-1}" SIM_HOME_J7_DEG="${SIM_HOME_J7_DEG:-90}" SIM_HOME_SHIFT="${SIM_HOME_SHIFT:-0,0,0.10}" SIM_ROBOT_YAW="${SIM_ROBOT_YAW:-}" SIM_TRAY_TO="${SIM_TRAY_TO:-4.907,-5.782,0.3365}" \
     SIM_SPEED_SCALE="${SIM_SPEED_SCALE:-0.5}" SIM_MAX_STEP="${SIM_MAX_STEP:-0.12}" \
     SIM_CARRY_MODE="${SIM_CARRY_MODE:-swing}" \
+    `# 어긋남(406)은 쥔점 기준으로 잰다. 기본 center 는 책 원점↔형상중심 지렛대` \
+    `# (2026-09-25 실측 109.6~176.7 cm)에 회전을 곱한다 — 1.5° 가 3.4 cm 로 찍혀 4권째가 멈췄다.` \
+    `# 키네마틱 파지는 매 스텝 책을 손에 다시 써 넣어 원점 기준은 애초에 미끄러짐을 못 본다.` \
+    SIM_DRIFT_METRIC="${SIM_DRIFT_METRIC:-grip}" \
     "$REPO/scripts/run_isaac_sim.sh" --gui --camera-prim "$CAM" --amr-test-overrides \
     --drive-speed "$SPEED" $REC_ARGS > "$LOG/isaac.log" 2>&1
 echo -n "      준비 대기"
@@ -147,7 +151,7 @@ spawn ros2 run shelving_perception vision_manager --ros-args \
     --params-file "$REPO/ros2_ws/src/shelving_perception/config/perception.yaml" \
     -p model_path:="${MODEL_PATH:-$RES/book_tray_best.pt}" \
     -p shelf_model_path:="${SHELF_MODEL:-$RES/best.pt}" \
-    -p confidence_threshold:="${VISION_CONF:-0.75}" \
+    -p confidence_threshold:="${VISION_CONF:-0.55}" \
     -p book_roi_max:="${VISION_ROI_MAX:-[-0.26, 0.42, 0.32]}" > "$LOG/vision.log" 2>&1
 # ^ 트레이 ROI y 상한 0.30 → 0.65 (비전팀 yaml 은 안 건드리고 여기서 덮는다). yaml 값은 앞 두 칸 기준이라
 #   세 권째(칸2 y +0.180 가장자리, 칸3 +0.364 밖)부터 "책 좌표 없음 411" 이 났다 (2026-09-25 네 권 판).
