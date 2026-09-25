@@ -29,7 +29,7 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "controllers"))
 
 import arm_kinematics as ak          # noqa: E402
-from shelf_gap import boards_from_zs, book_in_shelf, gaps as find_gaps   # noqa: E402
+from shelf_gap import BOOKS_ROOTS, boards_from_zs, book_in_shelf, is_floor_group, gaps as find_gaps   # noqa: E402
 
 #: 꽂을 때 손 자세 — 서가(+Y)를 향하고 물림축이 +X (`SIM_GRIP_ROT90=1` 조합)
 R_INSERT = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]])
@@ -79,10 +79,12 @@ def read_shelf(usd_path, shelf_prim):
     shelf_bb = (min(float(q[0]) for q in wp), min(float(q[1]) for q in wp), min(float(q[2]) for q in wp),
                 max(float(q[0]) for q in wp), max(float(q[1]) for q in wp), max(float(q[2]) for q in wp))
     books = {}
-    root = stage.GetPrimAtPath("/World/books")
+    root = next((stage.GetPrimAtPath(r) for r in BOOKS_ROOTS if stage.GetPrimAtPath(r).IsValid()), None)
     if root and root.IsValid():
         cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), ["default"], useExtentsHint=True)
-        for floor in root.GetChildren():
+        # 층 그룹(`…Floor…`)의 자식이 낱권 책. 깊이는 레벨마다 다르다(옛: 루트/층, 새: 루트/서가/층)
+        floors = [p for p in Usd.PrimRange(root) if is_floor_group(p.GetName()) and p != root]
+        for floor in floors:
             for c in floor.GetChildren():
                 r = cache.ComputeWorldBound(c).ComputeAlignedRange()
                 if r.IsEmpty():

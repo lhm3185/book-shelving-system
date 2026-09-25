@@ -199,6 +199,16 @@ def side_clearances(bb, boxes):
     return left, left_name, right, right_name
 
 
+#: 레벨의 서가 책 루트 후보 — 앞에서부터 있는 것을 쓴다. 2026-09-25 레벨 정리로 `/World/books` 가
+#: `/World/bookshelves_main/books/shelf_{A,B}/<층>/<책>` 로 옮겨졌다(서가별 그룹). 옛 레벨은 `/World/books/<층>/<책>`.
+BOOKS_ROOTS = ("/World/bookshelves_main/books", "/World/books")
+
+
+def is_floor_group(name):
+    """`thirdFloor` · `forthFloor_01` 처럼 **판(층) 그룹** prim 인가 — 그 자식이 낱권 책이다."""
+    return "floor" in str(name).lower()
+
+
 def parse_shelf_prims(text):
     """`SIM_SHELF_PRIMS="shelf_01=/World/a;shelf_02=/World/b"` → `{shelf_id: prim}`. 비면 `{}`.
 

@@ -11,7 +11,7 @@ import sys
 
 import numpy as np
 
-from shelf_gap import book_in_shelf, boards_from_zs, nearest_board, classify_place, side_clearances, skew_deg_from_spans
+from shelf_gap import BOOKS_ROOTS, is_floor_group, book_in_shelf, boards_from_zs, nearest_board, classify_place, side_clearances, skew_deg_from_spans
 from pxr import Gf, Usd, UsdGeom, UsdPhysics
 from isaacsim.core.api import World
 from isaacsim.core.prims import SingleArticulation, SingleXFormPrim
@@ -179,6 +179,8 @@ SPEED_SCALE = float(os.environ.get("SIM_SPEED_SCALE", "1.0"))
 GRIP_CLEAR = 0.005
 SPINE_INSET = 0.02          # 계획상 최종 책등이 서가 앞면에서 들어가는 거리
 MEASURED_INSET = 0.024      # 실측 최종 책등 위치 (밀기 후). 꽂힌 책 AABB 중심 → 서가 앞면 역산에 쓴다
+#: 이웃 책 앞끝 중앙값에서 이만큼 **안쪽**에 책등을 둔다 (SIM_SPINE_FROM_NEIGHBOURS=1 일 때). 0 = 이웃과 나란히.
+SPINE_BEHIND_NEIGHBOURS = float(os.environ.get("SIM_SPINE_BEHIND_M", "0.0"))
 DIV_H, DIV_T, DIV_GAP = 0.07, 0.01, 0.003
 VEL_LIMIT = np.array(BOT.vel_limit)             # URDF 실측 (로봇별, 프로파일에서)
 # 계획 인접점 최대 관절 변화 (초과 = 불연속, M402). 순간이동을 잡으려는 값이지,
@@ -2576,6 +2578,11 @@ class BookScene:
         # 그대로 쓰면 책이 칸 바닥에서 뜨거나 파묻힌다. 같은 칸으로 볼 수 있으면 실제 칸 바닥에 맞춘다.
         floor_z = self.snap_floor(float(_pc[2]) - Lb / 2)
         spine_final = y_front + SPINE_INSET
+        # **이웃 책 앞끝에 맞춘다** (`SIM_SPINE_FROM_NEIGHBOURS=1`, 기본 꺼짐 — 아래 그림자로 먼저 본다).
+        # 2026-09-25 실측: 이웃 앞끝이 앞면에서 A 46.9 / 58.4 mm, B 75.6 / 86.6 mm 뒤인데 우리는 상수
+        # 20 mm 로 꽂아 왔다 — 9/9 판 전부 이웃보다 27~38 mm 튀어나온 채였다(겹침 검사는 x 만 보니
+        # 통과). 판마다·서가마다 다르니 상수로는 안 되고, 그 판 이웃 앞끝 중앙값에서 SPINE_BEHIND
+        # 만큼 안쪽으로 둔다. 이웃이 없으면 상수 그대로.
         # **그림자 — 이웃 책 앞끝과 견준다.** 서가 B 는 책이 앞면에서 34 mm 뒤(A 는 5.3 mm)라 같은
         # SPINE_INSET 으로 꽂으면 이웃보다 29 mm 튀어나온다 (2026-09-25 데스크탑 실측). 아직 값은 안
         # 바꾼다 — 그 판의 이웃 앞끝 중앙값과 계획값의 차이만 찍어, 서가 A 회귀 판에서 이 차이가
@@ -2588,8 +2595,13 @@ class BookScene:
                 _fronts.append(min(float(_fa[1]), float(_fb[1])))      # 팔 기준 y 가 작은 쪽 = 앞끝
             if _fronts:
                 _med = float(np.median(_fronts))
+                _use = os.environ.get("SIM_SPINE_FROM_NEIGHBOURS", "0") != "0"
                 self.say(f"[책등] 계획 spine_final(팔기준 y) {spine_final:+.4f} · 이웃 {len(_fronts)}권 앞끝 중앙값 "
-                         f"{_med:+.4f} · 계획이 이웃보다 {(spine_final - _med) * 1000:+.1f} mm 안쪽  (그림자 — 값은 그대로)")
+                         f"{_med:+.4f} · 계획이 이웃보다 {(spine_final - _med) * 1000:+.1f} mm 안쪽  "
+                         f"({'이웃 기준으로 바꾼다' if _use else '그림자 — 값은 그대로'})")
+                if _use:
+                    spine_final = _med + SPINE_BEHIND_NEIGHBOURS
+                    self.say(f"[책등] → spine_final {spine_final:+.4f} (이웃 앞끝 + {SPINE_BEHIND_NEIGHBOURS * 1000:.0f} mm) [SIM_SPINE_FROM_NEIGHBOURS]")
         except Exception as _exc:      # noqa: BLE001 - 계측이 계획을 막으면 안 된다
             self.say(f"[책등] 이웃 앞끝을 못 쟀다: {type(_exc).__name__}: {_exc}")
         grasp = self.yaw_to_arm([bc[0], bc[1], bb[5] - TIP_DOWN])
@@ -3530,12 +3542,21 @@ class BookScene:
         **트레이에 있는 우리 책은 안 센다** — 판 높이로 걸러지므로 저절로 빠진다.
         `exclude` 는 지금 판정하려는 책이다. 안 빼면 자기 자신과 100% 겹친다.
         """
-        root = self.stage.GetPrimAtPath("/World/books")
-        if not root.IsValid():
+        # 책 루트는 레벨마다 다르다(BOOKS_ROOTS). 층 그룹(`…Floor…`)의 자식이 낱권 책이고, 층 그룹은
+        # 루트 바로 아래(옛 레벨)일 수도, 서가 그룹 아래(새 레벨 shelf_A/shelf_B)일 수도 있다 —
+        # 깊이를 가정하지 않고 이름으로 찾는다. 다른 서가의 책은 아래 서가 상자 필터가 거른다.
+        root = None
+        for _r in (os.environ.get("SIM_BOOKS_ROOT"),) + BOOKS_ROOTS:
+            if _r and self.stage.GetPrimAtPath(_r).IsValid():
+                root = self.stage.GetPrimAtPath(_r)
+                break
+        if root is None:
             return []
         mine = set(self.books)
         out = []
-        for floor in root.GetChildren():
+        for floor in Usd.PrimRange(root):
+            if not is_floor_group(floor.GetName()) or str(floor.GetPath()) == str(root.GetPath()):
+                continue
             for c in floor.GetChildren():
                 path = str(c.GetPath())
                 if path in mine:

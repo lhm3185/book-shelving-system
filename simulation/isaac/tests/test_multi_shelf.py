@@ -8,7 +8,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "controllers"))
 
-from shelf_gap import book_in_shelf, parse_shelf_prims  # noqa: E402
+from shelf_gap import BOOKS_ROOTS, book_in_shelf, is_floor_group, parse_shelf_prims  # noqa: E402
 
 SHELF_A = [1.8, -2.9, 0.0, 3.3, -2.5, 2.6]      # x0 y0 z0 x1 y1 z1 (월드)
 
@@ -35,3 +35,13 @@ def test_서가_상자_가장자리는_여유_안이면_센다():
     edge = [3.30, -2.8, 0.5, 3.36, -2.6, 0.72]         # 중심 x 3.33 — 상자 x1 3.3 + 여유 0.05 안
     assert book_in_shelf(edge, SHELF_A)
     assert not book_in_shelf(edge, SHELF_A, margin=0.0)
+
+
+def test_층_그룹은_이름으로_고른다():
+    """옛 레벨 thirdFloor/forthFloor, 새 레벨 thirdFloor_01/forthFloor_01 — 깊이가 아니라 이름."""
+    assert is_floor_group("thirdFloor") and is_floor_group("forthFloor_01")
+    assert not is_floor_group("shelf_A") and not is_floor_group("books") and not is_floor_group("book_012")
+
+
+def test_책_루트는_새_레벨을_먼저_본다():
+    assert BOOKS_ROOTS[0] == "/World/bookshelves_main/books" and "/World/books" in BOOKS_ROOTS
