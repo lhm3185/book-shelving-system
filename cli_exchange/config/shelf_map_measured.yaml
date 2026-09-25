@@ -68,7 +68,7 @@ shelves:
     observation_pose:
       # 서가 B 실측 유도 (2026-09-25): 앞면 y +1.6692 에서 0.444 물러남, x 는 중심 -0.6665 - 0.037. yaw 0° (A 와 같다)
       position:
-        x: -0.7035
+        x: -0.5476
         y: 1.2252
         z: 0.0
       orientation:
