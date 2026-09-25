@@ -107,6 +107,11 @@ if [ "${REC_EVERY:-30}" = "0" ]; then
     REC_ARGS=""; echo "      (뷰포트 녹화 끔 — REC_EVERY=0)"
 else
     REC_ARGS="--record-dir $LOG/rec --record-every ${REC_EVERY:-30}"
+    # **가까이서 보고 싶을 때** 녹화 카메라를 옮긴다 (REC_EYE / REC_LOOK, "x y z").
+    # 기본 뷰는 방 전체라 로봇이 화면의 8% 밖에 안 돼 팔이 책을 스치는지 안 보인다
+    # (2026-09-25 네 권 예행 실측). 서가 책은 콜리전이 없어 **눈이 유일한 검사**다.
+    [ -n "${REC_EYE:-}" ]  && REC_ARGS="$REC_ARGS --record-eye $REC_EYE"
+    [ -n "${REC_LOOK:-}" ] && REC_ARGS="$REC_ARGS --record-look $REC_LOOK"
 fi
 echo "[1/4] Isaac 시작 (약 3~4분) — 레벨 $(basename "$LEVEL")  $(date +%T)"
 spawn env SIM_USD="$LEVEL" SIM_FIX_BASE="${SIM_FIX_BASE:-0}" SIM_GRIP_ROT90="${SIM_GRIP_ROT90:-1}" SIM_GRASP_KINEMATIC="${SIM_GRASP_KINEMATIC:-1}" SIM_HOME_J7_DEG="${SIM_HOME_J7_DEG:-90}" SIM_HOME_SHIFT="${SIM_HOME_SHIFT:-0,0,0.10}" SIM_ROBOT_YAW="${SIM_ROBOT_YAW:-}" SIM_TRAY_TO="${SIM_TRAY_TO:-4.907,-5.782,0.3365}" \
