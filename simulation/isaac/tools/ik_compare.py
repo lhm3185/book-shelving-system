@@ -91,12 +91,18 @@ def classify(p, R, tool, lq, kw):
     e_mm, e_rot = tip_error_mm(lq, p, R, tool)
     if e_mm > LULA_POS_TOL * 1000.0 + 1e-6 or e_rot > LULA_ROT_TOL + 1e-6:
         return "모델차이", {"Lula해_오차mm": round(e_mm, 3), "Lula해_회전오차rad": round(e_rot, 4)}
-    r2 = ak.ik(p, R, lq, tool=tool, **kw)
+    # 판별의 재풀이는 **Lula 와 같은 허용치**로 한다. Lula 해는 4 mm 안이고 ak 커버리지 허용은
+    # 1 mm 라, Lula 해에서 시작해도 ak 는 3 mm 를 더 줄여야 한다 — 가장자리에서 그게 안 되면
+    # "수렴실패" 로 찍히는데 그건 풀이기 차이가 아니라 허용치 차이다 (2026-09-25 09:30, 수렴실패 126
+    # 이 한 점(z 0.766)에 75건 몰렸다). 질문은 "ak 가 Lula 의 답을 Lula 의 기준으로 재현하는가" 다.
+    kw2 = dict(kw, pos_tol=LULA_POS_TOL, rot_tol=LULA_ROT_TOL)
+    r2 = ak.ik(p, R, lq, tool=tool, **kw2)
     moved = None if not r2.ok else float(np.max(np.abs(r2.q - lq)))
     if r2.ok and moved < 0.05:
         return "씨앗문제", {"Lula씨앗_ak_이동rad": round(moved, 4)}
     return "수렴실패", {"Lula씨앗_ak_ok": bool(r2.ok), "Lula해_오차mm": round(e_mm, 3),
-                       "Lula해_회전오차rad": round(e_rot, 4)}
+                       "Lula해_회전오차rad": round(e_rot, 4),
+                       "Lula씨앗_ak_이동rad": None if moved is None else round(moved, 4)}
 
 
 def compare(recs, pos_tol=0.001, rot_tol=0.01):
