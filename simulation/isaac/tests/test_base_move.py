@@ -6,7 +6,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "controllers"))
 
 from base_move import (  # noqa: E402
-    OBSERVED_MAX, OBSERVED_OUTLIER, move_limit_m, refuse_far_move)
+    OBSERVED_MAX, OBSERVED_OUTLIER, move_limit_m, refuse_far_move, within_shelf_span)
 
 
 def test_every_observed_normal_move_passes():
@@ -46,3 +46,23 @@ def test_a_broken_env_value_falls_back_instead_of_crashing():
         os.environ.pop("SIM_ROTATE_MAX_MOVE", None)
         if old is not None:
             os.environ["SIM_ROTATE_MAX_MOVE"] = old
+
+
+def test_서가_구간_안의_이동은_상한을_안_본다():
+    """서가 B: 중심에 선 팔(x 0)이 95.8 mm 빈칸(팔 기준 +0.624)으로 — 서가 구간 [-0.70, +0.71] 안이다."""
+    span = (-0.7065, +0.7061)
+    assert within_shelf_span(0.0, 0.624, span)
+    assert refuse_far_move(0.624, along_shelf=True) is None
+    assert refuse_far_move(0.624, along_shelf=False) is not None     # 상한만 보면 4 % 초과
+
+
+def test_서가_밖에서_시작하면_상한이_그대로_잡는다():
+    """VD2: 키오스크에 선 채로 서가 자리를 맞추려 2.676 m — 출발점이 서가 구간 밖이라 뜻으로도 막힌다."""
+    span = (2.3, 3.7)          # 서가가 팔 기준 2.3~3.7 m 옆에 있다
+    assert not within_shelf_span(0.0, OBSERVED_OUTLIER, span)
+    assert refuse_far_move(OBSERVED_OUTLIER, along_shelf=within_shelf_span(0.0, OBSERVED_OUTLIER, span)) is not None
+
+
+def test_구간_정보가_없으면_상한으로_돌아간다():
+    assert not within_shelf_span(0.0, 0.3, None)
+    assert within_shelf_span(0.0, 0.70, (-0.7, 0.7)) and not within_shelf_span(0.0, 0.80, (-0.7, 0.7))

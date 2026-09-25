@@ -43,17 +43,33 @@ def move_limit_m() -> float:
         return 0.6
 
 
-def refuse_far_move(dist_m: float, limit_m: float | None = None) -> str | None:
+def within_shelf_span(x_before: float, x_after: float, span, margin: float = 0.05) -> bool:
+    """옆이동 **전·후**의 팔 베이스 x(팔 기준)가 둘 다 그 서가의 x 구간 안(여유 margin)인가.
+
+    거리 상한은 "얼마나 멀리" 만 보고 "어디서 어디로" 를 안 본다. 서가 B(2026-09-25)는 빈칸이 양 끝이라
+    중심에서 95.8 mm 칸까지 0.624 m — 실측 정상 최대(0.447)에서 나온 상한 0.6 을 4 % 넘겼는데, 그 이동은
+    서가 폭(1.40 m) 안에서 서가를 따라가는 이동이다. 반면 원래 막으려던 사고(VD2, 키오스크에 선 채로
+    2.676 m)는 출발점부터 서가 구간 밖이다. 그래서 **서가 구간 안에서 서가를 따라가는 이동**이면 거리
+    상한을 안 보고, 아니면 본다 — 숫자가 아니라 뜻으로 막는다. `span` 이 없으면 False(상한으로 돌아간다).
+    """
+    if not span:
+        return False
+    lo, hi = sorted((float(span[0]), float(span[1])))
+    return (lo - margin <= float(x_before) <= hi + margin) and (lo - margin <= float(x_after) <= hi + margin)
+
+
+def refuse_far_move(dist_m: float, limit_m: float | None = None, along_shelf: bool = False) -> str | None:
     """너무 멀면 **거절 사유**를, 괜찮으면 `None` 을 돌려준다.
 
     거절은 말없이 하지 않는다. 사유에 실측 정상 최대를 같이 실어서, 읽는 사람이
     "상한이 빡빡한 것" 과 "이번 값이 이상한 것" 을 구분할 수 있게 한다.
+    `along_shelf=True`(`within_shelf_span` 으로 확인한 것)면 서가 폭 안의 이동이라 상한을 안 본다.
     """
     lim = move_limit_m() if limit_m is None else float(limit_m)
     if lim <= 0.0:
         return None                       # 상한을 껐다 (회귀 비교용)
     d = float(dist_m)
-    if d <= lim:
+    if d <= lim or along_shelf:
         return None
     return (f"자리 맞추기 이동 {d:.3f} m 가 상한 {lim:.3f} m 를 넘는다 "
             f"(실측 정상 최대 {OBSERVED_MAX:.3f} m). "
