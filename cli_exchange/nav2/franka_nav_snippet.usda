@@ -1,0 +1,602 @@
+#usda 1.0
+# ─────────────────────────────────────────────────────────────────────────────
+#  Nav2 주행 스니펫 — 팀원 브랜치에서 **그대로** 잘라 낸 것
+#
+#  출처  origin/refactor/project-layout:isaac_sim/assets/robots/franka_nav.usda
+#  용도  도윤님이 우리 레벨에 붙일 때 보는 참고본. **이 파일로 레벨을 덮지 말 것.**
+#        레벨 편집은 도윤님이 하시고, 우리는 무엇을 어디에 붙이는지만 적는다.
+#
+#  ── 붙이는 자리 ──────────────────────────────────────────────────────────
+#  ① 평면 조인트 `over` 3개
+#     붙일 곳: 우리 레벨의 로봇 프림 아래 같은 경로
+#              /World/ridgeback_franka/dummy_base_prismatic_x_joint   (직접 자식)
+#              /World/ridgeback_franka/dummy_base_y/dummy_base_revolute_z_joint
+#              /World/ridgeback_franka/dummy_base_x/dummy_base_prismatic_y_joint
+#     `def` 가 아니라 `over` 다 — 그 조인트는 **원본 스톡 에셋에 이미 있다**
+#     (팀원·우리 둘 다 같은 payload: …/Isaac/5.1/Isaac/Robots/Clearpath/RidgebackFranka/ridgeback_franka.usd).
+#     바꾸는 것은 드라이브 설정뿐: stiffness 0 · targetVelocity 0 · 한계를 크게 열기.
+#     위치 강성을 죽여 **속도 제어**로 쓰려는 것이다.
+#
+#  ② Nav2BaseController OmniGraph  (/Graphs/Nav2BaseController)
+#     cmd_vel 구독 → 평면 조인트 3개에 속도 → odom 계산·발행 + 클럭.
+#     **고쳐야 하는 값 두 개:**
+#       · ArticulationController.inputs:targetPrim = </World/ridgeback_franka>
+#         → 우리 레벨의 로봇 경로와 같은지 확인 (우리도 /World/ridgeback_franka 다)
+#       · ROS2Context.inputs:domain_id = **0**  →  우리는 **129** 다 (full_cycle.sh)
+#         이 값이 0 이면 우리 노드가 토픽을 못 본다. **반드시 바꿀 것.**
+#     토픽: 구독 `cmd_vel` · 발행 `/odom` · `/clock`
+#
+#  ③ LidarSensorGraph OmniGraph  (/Graphs/LidarSensorGraph)
+#     **`/scan` 을 발행하지 않는다.** 발행하는 것은
+#       · `/lidar/points_raw`  (PointCloud2, frameId `lidar_link`)
+#       · `/tf_static`
+#     Nav2 가 쓰는 `/scan` 은 `pointcloud_to_laserscan` 노드가 위 점군을
+#     변환해 만든다 — 그래서 그 패키지가 의존성 목록에 있었다.
+#     여기도 `domain_id = 0` 이라 **129 로 바꿀 것.**
+#     cameraPrim = /World/ridgeback_franka/base_link/lidar_link/PandarXT_32_10hz
+#
+#  ── 주의 ────────────────────────────────────────────────────────────────
+#  순간이동(`navigation_executor._write_root`)과 Nav2 는 **같은 차체**를 움직인다.
+#  전자는 루트 XForm 을 직접 쓰고 후자는 평면 조인트에 속도를 준다 — 동시에
+#  켜면 싸운다. 9/26 설계에 `SIM_NAV_MODE=teleport|nav2` 스위치로 들어간다.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ══ ① 평면 조인트 드라이브 over ═══════════════════════════════════════════
+
+# --- /World/ridgeback_franka/dummy_base_prismatic_x_joint (직접 자식)
+            over "dummy_base_prismatic_x_joint"
+            {
+                float drive:linear:physics:stiffness = 0
+                float drive:linear:physics:targetPosition = 0
+                float drive:linear:physics:targetVelocity = 0
+                custom string isaac:nameOverride (
+                    displayName = "Name Override"
+                    doc = "Name override for prim lookup in base name search"
+                )
+                float physics:lowerLimit = -600.28
+                float physics:upperLimit = 600.28
+                float state:linear:physics:position = 3.650693e-7
+                float state:linear:physics:velocity = -0.00005778325
+            }
+
+# --- /World/ridgeback_franka/dummy_base_y/dummy_base_revolute_z_joint
+        over "dummy_base_y"
+        {
+            rel physics:simulationOwner
+
+            over "dummy_base_revolute_z_joint"
+            {
+                float drive:angular:physics:stiffness = 0
+                float drive:angular:physics:targetPosition = 0
+                float drive:angular:physics:targetVelocity = 0
+                custom string isaac:nameOverride (
+                    displayName = "Name Override"
+                    doc = "Name override for prim lookup in base name search"
+                )
+                float physics:lowerLimit = -34393.51
+                float physics:upperLimit = 34393.51
+                float state:angular:physics:position = 8.4532394e-7
+                float state:angular:physics:velocity = -0.00008509477
+            }
+        }
+
+# --- /World/ridgeback_franka/dummy_base_x/dummy_base_prismatic_y_joint
+        over "dummy_base_x"
+        {
+            rel physics:simulationOwner
+
+            over "dummy_base_prismatic_y_joint"
+            {
+                float drive:linear:physics:stiffness = 0
+                float drive:linear:physics:targetPosition = 0
+                float drive:linear:physics:targetVelocity = 0
+                custom string isaac:nameOverride (
+                    displayName = "Name Override"
+                    doc = "Name override for prim lookup in base name search"
+                )
+                float physics:lowerLimit = -600.28
+                float physics:upperLimit = 600.28
+                float state:linear:physics:position = -5.683919e-10
+                float state:linear:physics:velocity = 6.188571e-8
+            }
+        }
+
+
+# ══ ② Nav2BaseController (domain_id 0 → 129 로 바꿀 것) ═══════════════════
+    def OmniGraph "Nav2BaseController" (
+        active = true
+    )
+    {
+        token evaluationMode = "Automatic"
+        token evaluator:type = "execution"
+        token fabricCacheBacking = "StageWithoutHistory"
+        int2 fileFormatVersion = (1, 9)
+        token pipelineStage = "pipelineStageSimulation"
+
+        def OmniGraphNode "OnPlaybackTick"
+        {
+            token node:type = "omni.graph.action.OnPlaybackTick"
+            int node:typeVersion = 2
+            custom double outputs:deltaSeconds
+            custom double outputs:frame
+            custom uint outputs:tick (
+                customData = {
+                    bool isExecution = 1
+                }
+            )
+            custom double outputs:time
+        }
+
+        def OmniGraphNode "SubscribeCmdVel"
+        {
+            custom uint64 inputs:context
+            custom uint inputs:execIn (
+                customData = {
+                    bool isExecution = 1
+                }
+            )
+            prepend uint inputs:execIn.connect = </Graphs/Nav2BaseController/OnPlaybackTick.outputs:tick>
+            custom string inputs:nodeNamespace
+            custom string inputs:qosProfile
+            custom uint64 inputs:queueSize = 10
+            custom string inputs:topicName = "cmd_vel"
+            token node:type = "isaacsim.ros2.bridge.ROS2SubscribeTwist"
+            int node:typeVersion = 1
+            custom vector3d outputs:angularVelocity
+            custom uint outputs:execOut (
+                customData = {
+                    bool isExecution = 1
+                }
+            )
+            custom vector3d outputs:linearVelocity
+        }
+
+        def OmniGraphNode "BreakLinearVelocity"
+        {
+            custom token inputs:tuple
+            prepend token inputs:tuple.connect = </Graphs/Nav2BaseController/SubscribeCmdVel.outputs:linearVelocity>
+            token node:type = "omni.graph.nodes.BreakVector3"
+            int node:typeVersion = 1
+            custom token outputs:x
+            custom token outputs:y
+            custom token outputs:z
+        }
+
+        def OmniGraphNode "BreakAngularVelocity"
+        {
+            custom token inputs:tuple
+            prepend token inputs:tuple.connect = </Graphs/Nav2BaseController/SubscribeCmdVel.outputs:angularVelocity>
+            token node:type = "omni.graph.nodes.BreakVector3"
+            int node:typeVersion = 1
+            custom token outputs:x
+            custom token outputs:y
+            custom token outputs:z
+        }
+
+        def OmniGraphNode "ReadBaseWorldPose"
+        {
+            custom rel inputs:prim = </World/ridgeback_franka/base_link> (
+                customData = {
+                    dictionary omni = {
+                        dictionary graph = {
+                            string relType = "target"
+                        }
+                    }
+                }
+            )
+            token node:type = "isaacsim.core.nodes.IsaacReadWorldPose"
+            int node:typeVersion = 2
+            custom quatd outputs:orientation
+            custom vector3d outputs:scale
+            custom vector3d outputs:translation
+        }
+
+        def OmniGraphNode "BodyVelocityToWorld"
+        {
+            custom double inputs:angularZ
+            prepend double inputs:angularZ.connect = </Graphs/Nav2BaseController/BreakAngularVelocity.outputs:z>
+            custom uint inputs:execIn (
+                customData = {
+                    bool isExecution = 1
+                }
+            )
+            prepend uint inputs:execIn.connect = </Graphs/Nav2BaseController/SubscribeCmdVel.outputs:execOut>
+            custom double inputs:linearX
+            prepend double inputs:linearX.connect = </Graphs/Nav2BaseController/BreakLinearVelocity.outputs:x>
+            custom double inputs:linearY
+            prepend double inputs:linearY.connect = </Graphs/Nav2BaseController/BreakLinearVelocity.outputs:y>
+            custom token inputs:orientation (
+                customData = {
+                    string ExtendedAttributeType = "Any"
+                    dictionary omni = {
+                        dictionary graph = {
+                            string attrType = "Any"
+                        }
+                    }
+                }
+            )
+            prepend token inputs:orientation.connect = </Graphs/Nav2BaseController/ReadBaseWorldPose.outputs:orientation>
+            custom string inputs:script = """
+import math
+
+
+def compute(db):
+    # Isaac Read World Pose의 quaternion 순서는 IJKR,
+    # 즉 [x, y, z, w]이다.
+    q = db.inputs.orientation
+
+    x = float(q[0])
+    y = float(q[1])
+    z = float(q[2])
+    w = float(q[3])
+
+    # Quaternion 정규화
+    norm = math.sqrt(x*x + y*y + z*z + w*w)
+
+    if norm < 1.0e-12:
+        yaw = 0.0
+    else:
+        x /= norm
+        y /= norm
+        z /= norm
+        w /= norm
+
+        # Quaternion -> yaw
+        sin_yaw = 2.0 * (w*z + x*y)
+        cos_yaw = 1.0 - 2.0 * (y*y + z*z)
+        yaw = math.atan2(sin_yaw, cos_yaw)
+
+    body_vx = float(db.inputs.linearX)
+    body_vy = float(db.inputs.linearY)
+    angular_z = float(db.inputs.angularZ)
+
+    cos_yaw = math.cos(yaw)
+    sin_yaw = math.sin(yaw)
+
+    # 몸체 좌표계 속도를 월드 좌표계 속도로 변환
+    world_vx = cos_yaw * body_vx - sin_yaw * body_vy
+    world_vy = sin_yaw * body_vx + cos_yaw * body_vy
+
+    db.outputs.velocityCommand = [
+        world_vx,
+        world_vy,
+        angular_z,
+    ]
+
+    return True
+"""
+            custom token inputs:scriptPath
+            custom bool inputs:usePath
+            token node:type = "omni.graph.scriptnode.ScriptNode"
+            int node:typeVersion = 2
+            custom uint outputs:execOut (
+                customData = {
+                    bool isExecution = 1
+                }
+            )
+            custom double[] outputs:velocityCommand
+            custom bool state:omni_initialized
+        }
+
+        def OmniGraphNode "ArticulationController"
+        {
+            custom double[] inputs:effortCommand
+            custom uint inputs:execIn (
+                customData = {
+                    bool isExecution = 1
+                }
+            )
+            prepend uint inputs:execIn.connect = </Graphs/Nav2BaseController/BodyVelocityToWorld.outputs:execOut>
+            custom int[] inputs:jointIndices
+            custom token[] inputs:jointNames = ["dummy_base_prismatic_x_joint", "dummy_base_prismatic_y_joint", "dummy_base_revolute_z_joint"]
+            custom double[] inputs:positionCommand
+            custom string inputs:robotPath
+            custom rel inputs:targetPrim = </World/ridgeback_franka> (
+                customData = {
+                    dictionary omni = {
+                        dictionary graph = {
+                            string relType = "target"
+                        }
+                    }
+                }
+            )
+            custom double[] inputs:velocityCommand
+            prepend double[] inputs:velocityCommand.connect = </Graphs/Nav2BaseController/BodyVelocityToWorld.outputs:velocityCommand>
+            token node:type = "isaacsim.core.nodes.IsaacArticulationController"
+            int node:typeVersion = 1
+        }
+
+        def OmniGraphNode "ROS2Context"
+        {
+            custom uchar inputs:domain_id = 0
+            custom bool inputs:useDomainIDEnvVar = 1
+            token node:type = "isaacsim.ros2.bridge.ROS2Context"
+            int node:typeVersion = 2
+            custom uint64 outputs:context
+        }
+
+        def OmniGraphNode "ReadSimulationTime"
+        {
+            custom uint64 inputs:referenceTimeDenominator
+            custom int64 inputs:referenceTimeNumerator
+            custom bool inputs:resetOnStop
+            token node:type = "isaacsim.core.nodes.IsaacReadSimulationTime"
+            int node:typeVersion = 1
+            custom double outputs:simulationTime
+        }
+
+        def OmniGraphNode "PublishClock"
+        {
+            custom uint64 inputs:context
+            prepend uint64 inputs:context.connect = </Graphs/Nav2BaseController/ROS2Context.outputs:context>
+            custom uint inputs:execIn (
+                customData = {
+                    bool isExecution = 1
+                }
+            )
+            prepend uint inputs:execIn.connect = </Graphs/Nav2BaseController/OnPlaybackTick.outputs:tick>
+            custom string inputs:nodeNamespace
+            custom string inputs:qosProfile
+            custom uint64 inputs:queueSize = 10
+            custom double inputs:timeStamp
+            prepend double inputs:timeStamp.connect = </Graphs/Nav2BaseController/ReadSimulationTime.outputs:simulationTime>
+            custom string inputs:topicName = "/clock"
+            token node:type = "isaacsim.ros2.bridge.ROS2PublishClock"
+            int node:typeVersion = 1
+        }
+
+        def OmniGraphNode "ComputeOdometry"
+        {
+            custom rel inputs:chassisPrim = </World/ridgeback_franka/base_link> (
+                customData = {
+                    dictionary omni = {
+                        dictionary graph = {
+                            string relType = "target"
+                        }
+                    }
+                }
+            )
+            custom uint inputs:execIn (
+                customData = {
+                    bool isExecution = 1
+                }
+            )
+            prepend uint inputs:execIn.connect = </Graphs/Nav2BaseController/OnPlaybackTick.outputs:tick>
+            token node:type = "isaacsim.core.nodes.IsaacComputeOdometry"
+            int node:typeVersion = 1
+            custom vector3d outputs:angularAcceleration
+            custom vector3d outputs:angularVelocity
+            custom uint outputs:execOut (
+                customData = {
+                    bool isExecution = 1
+                }
+            )
+            custom vector3d outputs:globalLinearAcceleration
+            custom vector3d outputs:globalLinearVelocity
+            custom vector3d outputs:linearAcceleration
+            custom vector3d outputs:linearVelocity
+            custom quatd outputs:orientation
+            custom vector3d outputs:position
+        }
+
+        def OmniGraphNode "PublishOdometry"
+        {
+            custom vector3d inputs:angularVelocity
+            prepend vector3d inputs:angularVelocity.connect = </Graphs/Nav2BaseController/ComputeOdometry.outputs:angularVelocity>
+            custom string inputs:chassisFrameId = "base_link"
+            custom uint64 inputs:context
+            prepend uint64 inputs:context.connect = </Graphs/Nav2BaseController/ROS2Context.outputs:context>
+            custom uint inputs:execIn (
+                customData = {
+                    bool isExecution = 1
+                }
+            )
+            prepend uint inputs:execIn.connect = </Graphs/Nav2BaseController/ComputeOdometry.outputs:execOut>
+            custom vector3d inputs:linearVelocity
+            prepend vector3d inputs:linearVelocity.connect = </Graphs/Nav2BaseController/ComputeOdometry.outputs:linearVelocity>
+            custom string inputs:nodeNamespace
+            custom string inputs:odomFrameId = "odom"
+            custom quatd inputs:orientation
+            prepend quatd inputs:orientation.connect = </Graphs/Nav2BaseController/ComputeOdometry.outputs:orientation>
+            custom vector3d inputs:position
+            prepend vector3d inputs:position.connect = </Graphs/Nav2BaseController/ComputeOdometry.outputs:position>
+            custom bool inputs:publishRawVelocities = 0
+            custom string inputs:qosProfile
+            custom uint64 inputs:queueSize = 10
+            custom vector3d inputs:robotFront
+            custom double inputs:timeStamp
+            prepend double inputs:timeStamp.connect = </Graphs/Nav2BaseController/ReadSimulationTime.outputs:simulationTime>
+            custom string inputs:topicName = "/odom"
+            token node:type = "isaacsim.ros2.bridge.ROS2PublishOdometry"
+            int node:typeVersion = 1
+        }
+
+        def OmniGraphNode "PublishOdomTF"
+        {
+            custom string inputs:childFrameId = "base_link"
+            custom uint64 inputs:context
+            prepend uint64 inputs:context.connect = </Graphs/Nav2BaseController/ROS2Context.outputs:context>
+            custom uint inputs:execIn (
+                customData = {
+                    bool isExecution = 1
+                }
+            )
+            prepend uint inputs:execIn.connect = </Graphs/Nav2BaseController/ComputeOdometry.outputs:execOut>
+            custom string inputs:nodeNamespace
+            custom string inputs:parentFrameId = "odom"
+            custom string inputs:qosProfile
+            custom uint64 inputs:queueSize = 10
+            custom quatd inputs:rotation
+            prepend quatd inputs:rotation.connect = </Graphs/Nav2BaseController/ComputeOdometry.outputs:orientation>
+            custom bool inputs:staticPublisher = 0
+            custom double inputs:timeStamp
+            prepend double inputs:timeStamp.connect = </Graphs/Nav2BaseController/ReadSimulationTime.outputs:simulationTime>
+            custom string inputs:topicName = "/tf"
+            custom vector3d inputs:translation
+            prepend vector3d inputs:translation.connect = </Graphs/Nav2BaseController/ComputeOdometry.outputs:position>
+            token node:type = "isaacsim.ros2.bridge.ROS2PublishRawTransformTree"
+            int node:typeVersion = 1
+        }
+    }
+
+
+# ══ ③ LidarSensorGraph — /scan 이 아니라 /lidar/points_raw 다 ════════════
+    def OmniGraph "LidarSensorGraph" (
+        active = true
+    )
+    {
+        token evaluationMode = "Automatic"
+        token evaluator:type = "execution"
+        token fabricCacheBacking = "StageWithoutHistory"
+        int2 fileFormatVersion = (1, 9)
+        token pipelineStage = "pipelineStageSimulation"
+
+        def OmniGraphNode "OnPlaybackTick"
+        {
+            token node:type = "omni.graph.action.OnPlaybackTick"
+            int node:typeVersion = 2
+            custom double outputs:deltaSeconds
+            custom double outputs:frame
+            custom uint outputs:tick (
+                customData = {
+                    bool isExecution = 1
+                }
+            )
+            custom double outputs:time
+        }
+
+        def OmniGraphNode "LidarRunOnce"
+        {
+            custom uint inputs:execIn (
+                customData = {
+                    bool isExecution = 1
+                }
+            )
+            prepend uint inputs:execIn.connect = </Graphs/LidarSensorGraph/OnPlaybackTick.outputs:tick>
+            token node:type = "isaacsim.core.nodes.OgnIsaacRunOneSimulationFrame"
+            int node:typeVersion = 1
+            custom uint outputs:step (
+                customData = {
+                    bool isExecution = 1
+                }
+            )
+        }
+
+        def OmniGraphNode "LidarRenderProduct"
+        {
+            custom rel inputs:cameraPrim = </World/ridgeback_franka/base_link/lidar_link/PandarXT_32_10hz> (
+                customData = {
+                    dictionary omni = {
+                        dictionary graph = {
+                            string relType = "target"
+                        }
+                    }
+                }
+            )
+            custom bool inputs:enabled = 1
+            custom uint inputs:execIn (
+                customData = {
+                    bool isExecution = 1
+                }
+            )
+            prepend uint inputs:execIn.connect = </Graphs/LidarSensorGraph/LidarRunOnce.outputs:step>
+            custom uint inputs:height = 1
+            custom uint inputs:width = 1
+            token node:type = "isaacsim.core.nodes.IsaacCreateRenderProduct"
+            int node:typeVersion = 2
+            custom uint outputs:execOut (
+                customData = {
+                    bool isExecution = 1
+                }
+            )
+            custom token outputs:renderProductPath
+        }
+
+        def OmniGraphNode "ROS2Context"
+        {
+            custom uchar inputs:domain_id = 0
+            custom bool inputs:useDomainIDEnvVar = 1
+            token node:type = "isaacsim.ros2.bridge.ROS2Context"
+            int node:typeVersion = 2
+            custom uint64 outputs:context
+        }
+
+        def OmniGraphNode "ReadSimulationTime"
+        {
+            custom uint64 inputs:referenceTimeDenominator
+            custom int64 inputs:referenceTimeNumerator
+            custom bool inputs:resetOnStop = 0
+            token node:type = "isaacsim.core.nodes.IsaacReadSimulationTime"
+            int node:typeVersion = 1
+            custom double outputs:simulationTime
+        }
+
+        def OmniGraphNode "PublishLidarPointCloud"
+        {
+            custom uint64 inputs:context
+            prepend uint64 inputs:context.connect = </Graphs/LidarSensorGraph/ROS2Context.outputs:context>
+            custom bool inputs:enabled = 1
+            custom uint inputs:execIn (
+                customData = {
+                    bool isExecution = 1
+                }
+            )
+            prepend uint inputs:execIn.connect = </Graphs/LidarSensorGraph/LidarRenderProduct.outputs:execOut>
+            custom string inputs:frameId = "lidar_link"
+            custom uint inputs:frameSkipCount = 0
+            custom bool inputs:fullScan = 1
+            custom string inputs:nodeNamespace
+            custom string inputs:qosProfile
+            custom uint64 inputs:queueSize = 10
+            custom token inputs:renderProductPath
+            prepend token inputs:renderProductPath.connect = </Graphs/LidarSensorGraph/LidarRenderProduct.outputs:renderProductPath>
+            custom bool inputs:resetSimulationTimeOnStop = 0
+            custom bool inputs:showDebugView = 1
+            custom string inputs:topicName = "/lidar/points_raw"
+            custom token inputs:type = "point_cloud" (
+                allowedTokens = ["laser_scan", "point_cloud"]
+            )
+            custom bool inputs:useSystemTime = 0
+            token node:type = "isaacsim.ros2.bridge.ROS2RtxLidarHelper"
+            int node:typeVersion = 1
+        }
+
+        def OmniGraphNode "PublishLidarTF"
+        {
+            custom uint64 inputs:context
+            prepend uint64 inputs:context.connect = </Graphs/LidarSensorGraph/ROS2Context.outputs:context>
+            custom uint inputs:execIn (
+                customData = {
+                    bool isExecution = 1
+                }
+            )
+            prepend uint inputs:execIn.connect = </Graphs/LidarSensorGraph/OnPlaybackTick.outputs:tick>
+            custom string inputs:nodeNamespace
+            custom rel inputs:parentPrim = </World/ridgeback_franka/base_link> (
+                customData = {
+                    dictionary omni = {
+                        dictionary graph = {
+                            string relType = "target"
+                        }
+                    }
+                }
+            )
+            custom string inputs:qosProfile
+            custom uint64 inputs:queueSize = 10
+            custom bool inputs:staticPublisher = 1
+            custom rel inputs:targetPrims = </World/ridgeback_franka/base_link/lidar_link> (
+                customData = {
+                    dictionary omni = {
+                        dictionary graph = {
+                            string relType = "target"
+                        }
+                    }
+                }
+            )
+            custom double inputs:timeStamp
+            prepend double inputs:timeStamp.connect = </Graphs/LidarSensorGraph/ReadSimulationTime.outputs:simulationTime>
+            custom string inputs:topicName = "/tf_static"
+            token node:type = "isaacsim.ros2.bridge.ROS2PublishTransformTree"
+            int node:typeVersion = 1
+        }
+    }
