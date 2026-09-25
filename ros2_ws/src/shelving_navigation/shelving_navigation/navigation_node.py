@@ -38,6 +38,8 @@ class NavigationNode(Node):
         self.declare_parameter('cmd_vel_topic', '/cmd_vel_nav')
         self.declare_parameter('global_frame', 'map')
         self.declare_parameter('robot_base_frame', 'base_link')
+        self.declare_parameter('max_nav2_retries', 2)
+        self.declare_parameter('nav2_retry_delay_sec', 1.0)
 
         self._action_name = str(
             self.get_parameter('action_name').value
@@ -55,6 +57,12 @@ class NavigationNode(Node):
             ),
             nav2_server_timeout_sec=float(
                 self.get_parameter('nav2_server_timeout_sec').value
+            ),
+            max_nav2_retries=int(
+                self.get_parameter('max_nav2_retries').value
+            ),
+            nav2_retry_delay_sec=float(
+                self.get_parameter('nav2_retry_delay_sec').value
             ),
             approach_radius=float(
                 self.get_parameter('approach_radius').value

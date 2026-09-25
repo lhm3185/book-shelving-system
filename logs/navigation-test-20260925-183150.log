@@ -1,0 +1,10 @@
+
+[18:31:50] 실행 모드: navigation-test
+
+[18:31:50] ROS_DOMAIN_ID: 130
+
+[ERROR] 이미 실행 중인 Isaac Sim이 있습니다.
+24142 /bin/bash /home/hymi/isaacsim/python.sh /home/hymi/book-shelving-system/isaac_sim/run_simulation.py --config /home/hymi/book-shelving-system/isaac_sim/config/scenes.yaml
+24162 /home/hymi/isaacsim/kit/python/bin/python3 /home/hymi/book-shelving-system/isaac_sim/run_simulation.py --config /home/hymi/book-shelving-system/isaac_sim/config/scenes.yaml
+
+[18:31:50] 전체 구성요소 종료 시작

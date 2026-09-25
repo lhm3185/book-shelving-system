@@ -14,6 +14,7 @@ def generate_launch_description():
     """Build the Ridgeback-Franka navigation launch description."""
     package_share = get_package_share_directory("shelving_navigation")
     nav2_share = get_package_share_directory("nav2_bringup")
+    smac_share = get_package_share_directory("nav2_smac_planner")
 
     default_map = os.path.join(
         package_share,
@@ -35,6 +36,14 @@ def generate_launch_description():
         "config",
         "navigation.yaml",
     )
+    default_lattice_file = os.path.join(
+        smac_share,
+        "sample_primitives",
+        "5cm_resolution",
+        "0.5m_turning_radius",
+        "omni",
+        "output.json",
+    )
     map_file = LaunchConfiguration("map")
     params_file = LaunchConfiguration("params_file")
     lidar_params_file = LaunchConfiguration("lidar_params_file")
@@ -44,6 +53,7 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
     pointcloud_topic = LaunchConfiguration("pointcloud_topic")
     scan_topic = LaunchConfiguration("scan_topic")
+    lattice_file = LaunchConfiguration("lattice_file")
 
     localization_launch = os.path.join(
         nav2_share,
@@ -87,6 +97,11 @@ def generate_launch_description():
             default_value="/scan",
             description="Generated LaserScan topic.",
         ),
+        DeclareLaunchArgument(
+            "lattice_file",
+            default_value=default_lattice_file,
+            description="Omnidirectional State Lattice primitive file.",
+        ),
 
         Node(
             package="pointcloud_to_laserscan",
@@ -128,7 +143,13 @@ def generate_launch_description():
             executable="planner_server",
             name="planner_server",
             output="screen",
-            parameters=[params_file, {"use_sim_time": use_sim_time}],
+            parameters=[
+                params_file,
+                {
+                    "use_sim_time": use_sim_time,
+                    "GridBased.lattice_filepath": lattice_file,
+                },
+            ],
         ),
 
         Node(

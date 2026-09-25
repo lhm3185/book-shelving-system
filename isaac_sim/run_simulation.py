@@ -59,6 +59,7 @@ def load_scene(config_path: Path, scene_name: str) -> dict:
     scene = scenes[scene_name]
     required = {
         "world_usd": scene.get("world_usd"),
+        "tray_usd": scene.get("tray_usd"),
         "nav_map_yaml": scene.get("nav_map_yaml"),
         "robot.usd": scene.get("robot", {}).get("usd"),
         "robot.prim_path": scene.get("robot", {}).get("prim_path"),
@@ -67,7 +68,7 @@ def load_scene(config_path: Path, scene_name: str) -> dict:
     if missing:
         raise ValueError(f"Missing scene fields: {', '.join(missing)}")
 
-    for label in ("world_usd", "nav_map_yaml"):
+    for label in ("world_usd", "tray_usd", "nav_map_yaml"):
         path = resolve_project_path(scene[label])
         if not path.is_file():
             raise FileNotFoundError(f"{label} not found: {path}")
@@ -84,6 +85,7 @@ CONFIG_PATH = Path(ARGS.config).expanduser().resolve()
 SCENE = load_scene(CONFIG_PATH, ARGS.scene)
 
 WORLD_USD = resolve_project_path(SCENE["world_usd"])
+TRAY_USD = resolve_project_path(SCENE["tray_usd"])
 ROBOT_USD = resolve_project_path(SCENE["robot"]["usd"])
 ROBOT_PRIM_PATH = SCENE["robot"]["prim_path"]
 ROS_DOMAIN_ID = int(SCENE.get("ros", {}).get("domain_id", 0))
@@ -113,6 +115,7 @@ def create_composed_stage() -> Path:
     upAxis = "Z"
     subLayers = [
         @{ROBOT_USD.as_posix()}@,
+        @{TRAY_USD.as_posix()}@,
         @{WORLD_USD.as_posix()}@
     ]
 )
@@ -215,6 +218,7 @@ try:
 
     print(f"[project] scene={ARGS.scene}")
     print(f"[project] world={WORLD_USD}", flush=True)
+    print(f"[project] tray_layer={TRAY_USD}", flush=True)
     print(f"[project] robot_layer={ROBOT_USD}", flush=True)
     print(f"[project] composed_stage={COMPOSED_STAGE}", flush=True)
     print(f"[project] ROS_DOMAIN_ID={ROS_DOMAIN_ID}")

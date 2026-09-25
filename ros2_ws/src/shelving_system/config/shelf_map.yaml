@@ -9,8 +9,8 @@ calibration_required: true
 locations:
   home:
     position:
-      x: 0.06556940078735352
-      y: -4.773948669433594
+      x: -6.086313
+      y: 5.546779
       z: 0.0
     orientation:
       x: 0.0
@@ -20,42 +20,65 @@ locations:
 
   return_station:
     position:
-      x: -6.0
-      y: 0.0
+      x: 4.72
+      y: -5.66
       z: 0.0
     orientation:
       x: 0.0
       y: 0.0
       z: 0.7071068
       w: 0.7071068
+
     waypoints:
       - position:
-          x: 0.0
-          y: -5.0
+          x: -5.145864
+          y: 2.626965
           z: 0.0
         orientation:
           x: 0.0
           y: 0.0
-          z: 1.0
-          w: 0.0
+          z: -0.716664
+          w: 0.697419
+
       - position:
-          x: -5.5
-          y: -5.0
+          x: -5.161836
+          y: -1.750214
           z: 0.0
         orientation:
           x: 0.0
           y: 0.0
-          z: 1.0
-          w: 0.0
+          z: -0.690493
+          w: 0.723340
+
       - position:
-          x: -6.0
-          y: -2.0
+          x: -5.010464
+          y: -4.280072
           z: 0.0
         orientation:
           x: 0.0
           y: 0.0
-          z: 0.7071068
-          w: 0.7071068
+          z: -0.381582
+          w: 0.924335
+
+      - position:
+          x: -1.003184
+          y: -5.618009
+          z: 0.0
+        orientation:
+          x: 0.0
+          y: 0.0
+          z: -0.013700
+          w: 0.999906
+
+      - position:
+          x: 2.562411
+          y: -5.661207
+          z: 0.0
+        orientation:
+          x: 0.0
+          y: 0.0
+          z: 0.405361
+          w: 0.914157
 
 shelves:
   shelf_01:
@@ -71,7 +94,7 @@ shelves:
     observation_pose:
       position:
         x: 2.229003667831421
-        y: -3.0101053714752197
+        y: -3.2
         z: 0.0
       orientation:
         x: 0.0
@@ -81,34 +104,14 @@ shelves:
 
     waypoints:
       - position:
-          x: -6.0
-          y: -4.5
+          x: 3.025811
+          y: -4.801575
           z: 0.0
         orientation:
           x: 0.0
           y: 0.0
-          z: -0.7071068
-          w: 0.7071068
-
-      - position:
-          x: 1.0
-          y: -4.5
-          z: 0.0
-        orientation:
-          x: 0.0
-          y: 0.0
-          z: 0.0
-          w: 1.0
-
-      - position:
-          x: 2.229003667831421
-          y: -4.0
-          z: 0.0
-        orientation:
-          x: 0.0
-          y: 0.0
-          z: 0.0
-          w: 1.0
+          z: 0.854493
+          w: 0.519463
 
   shelf_02:
     name: "분류 500~999 서가"
@@ -123,7 +126,7 @@ shelves:
     observation_pose:
       position:
         x: 0.0
-        y: -3.0101053714752197
+        y: -3.2
         z: 0.0
       orientation:
         x: 0.0

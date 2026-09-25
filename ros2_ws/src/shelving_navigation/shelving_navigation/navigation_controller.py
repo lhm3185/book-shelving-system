@@ -44,6 +44,8 @@ class NavigationController:
         nav2_action_name: str,
         nav2_route_action_name: str,
         nav2_server_timeout_sec: float,
+        max_nav2_retries: int,
+        nav2_retry_delay_sec: float,
         approach_radius: float,
         position_tolerance: float,
         yaw_tolerance: float,
@@ -58,6 +60,11 @@ class NavigationController:
         self._node = node
 
         self._nav2_server_timeout_sec = nav2_server_timeout_sec
+        self._max_nav2_retries = max(0, max_nav2_retries)
+        self._nav2_retry_delay_sec = max(
+            0.0,
+            nav2_retry_delay_sec,
+        )
         self._approach_radius = approach_radius
         self._position_tolerance = position_tolerance
         self._yaw_tolerance = yaw_tolerance
@@ -271,23 +278,140 @@ class NavigationController:
                     )
 
                 if response.status != GoalStatus.STATUS_SUCCEEDED:
-                    error_message = getattr(
-                        response.result,
-                        "error_msg",
-                        "",
+                    nav2_error_code = int(
+                        getattr(
+                            response.result,
+                            "error_code",
+                            0,
+                        )
+                    )
+                    error_message = str(
+                        getattr(
+                            response.result,
+                            "error_msg",
+                            "",
+                        )
                     )
 
-                    goal_handle.abort()
-
-                    return self._make_result(
-                        success=False,
-                        final_pose=self._get_final_pose(),
-                        error_code=self.ERROR_NAVIGATION_FAILED,
-                        message=(
-                            error_message
-                            or "Nav2 navigation failed."
-                        ),
+                    final_segment = self._is_final_route_segment()
+                    current_pose = self._lookup_robot_pose(
+                        log_error=False
                     )
+                    position_error = None
+
+                    if current_pose is not None:
+                        position_error, _ = self._compute_errors(
+                            request.target_pose,
+                            current_pose,
+                        )
+
+                    # Nav2 결과가 실패로 먼저 끝났더라도 로봇이 이미
+                    # 최종 접근 반경 안에 있다면 정밀 정렬을 계속한다.
+                    if (
+                        request.enable_fine_alignment
+                        and final_segment
+                        and position_error is not None
+                        and position_error <= self._approach_radius
+                    ):
+                        early_stop_requested = True
+
+                        self._node.get_logger().warning(
+                            "Nav2 failed inside the approach radius. "
+                            "Continuing with fine alignment: "
+                            f"status={response.status}, "
+                            f"error_code={nav2_error_code}, "
+                            f"position_error={position_error:.3f}, "
+                            f"message={error_message or '<empty>'}"
+                        )
+
+                        self._publish_stop()
+
+                    else:
+                        failure_message = (
+                            "Nav2 navigation failed: "
+                            f"status={response.status}, "
+                            f"error_code={nav2_error_code}, "
+                            "position_error="
+                            f"{position_error if position_error is not None else 'unknown'}, "
+                            f"message={error_message or '<empty>'}"
+                        )
+
+                        # 원래 Nav2 goal은 이미 종료된 상태다.
+                        self._active_nav2_goal_handle = None
+
+                        if (
+                            final_segment
+                            and self._max_nav2_retries > 0
+                        ):
+                            self._node.get_logger().warning(
+                                f"{failure_message} "
+                                "Retrying only the final target."
+                            )
+
+                            retry_state, retry_message = (
+                                await self._retry_final_target(
+                                    goal_handle,
+                                    request,
+                                )
+                            )
+
+                            if retry_state == "CANCELED":
+                                goal_handle.canceled()
+
+                                return self._make_result(
+                                    success=False,
+                                    final_pose=self._get_final_pose(),
+                                    error_code=(
+                                        self.ERROR_NAVIGATION_REJECTED
+                                    ),
+                                    message=retry_message,
+                                )
+
+                            if retry_state == "APPROACH_REACHED":
+                                early_stop_requested = True
+
+                            elif retry_state == "SUCCEEDED":
+                                self._node.get_logger().info(
+                                    "Final-target Nav2 retry "
+                                    "completed successfully."
+                                )
+
+                            else:
+                                final_failure_message = (
+                                    retry_message
+                                    or failure_message
+                                )
+
+                                self._node.get_logger().error(
+                                    final_failure_message
+                                )
+
+                                goal_handle.abort()
+
+                                return self._make_result(
+                                    success=False,
+                                    final_pose=self._get_final_pose(),
+                                    error_code=(
+                                        self.ERROR_NAVIGATION_FAILED
+                                    ),
+                                    message=final_failure_message,
+                                )
+
+                        else:
+                            self._node.get_logger().error(
+                                failure_message
+                            )
+
+                            goal_handle.abort()
+
+                            return self._make_result(
+                                success=False,
+                                final_pose=self._get_final_pose(),
+                                error_code=(
+                                    self.ERROR_NAVIGATION_FAILED
+                                ),
+                                message=failure_message,
+                            )
 
             if request.enable_fine_alignment:
                 alignment_state, final_pose = (
@@ -475,6 +599,245 @@ class NavigationController:
             position_error=position_error,
             yaw_error=yaw_error,
         )
+
+    async def _retry_final_target(
+        self,
+        goal_handle,
+        request: NavigateToTarget.Goal,
+    ) -> tuple[str, str]:
+        """Retry only the final target with NavigateToPose."""
+
+        last_failure_message = (
+            "Nav2 final-target retry did not run."
+        )
+
+        # 기존 경유점은 다시 보내지 않고 최종 목표만 남긴다.
+        with self._feedback_lock:
+            self._remaining_poses = 1
+
+        for retry_number in range(
+            1,
+            self._max_nav2_retries + 1,
+        ):
+            if goal_handle.is_cancel_requested:
+                await self._cancel_nav2_goal()
+                self._publish_stop()
+
+                return "CANCELED", "Navigation was canceled."
+
+            current_pose = self._lookup_robot_pose(
+                log_error=False
+            )
+
+            if (
+                request.enable_fine_alignment
+                and current_pose is not None
+            ):
+                position_error, _ = self._compute_errors(
+                    request.target_pose,
+                    current_pose,
+                )
+
+                if position_error <= self._approach_radius:
+                    self._node.get_logger().info(
+                        "Final target is already inside the "
+                        "approach radius before retry. "
+                        "Starting fine alignment."
+                    )
+
+                    self._publish_stop()
+
+                    return "APPROACH_REACHED", ""
+
+            if self._nav2_retry_delay_sec > 0.0:
+                time.sleep(self._nav2_retry_delay_sec)
+
+            if not self._navigate_to_pose_client.wait_for_server(
+                timeout_sec=self._nav2_server_timeout_sec
+            ):
+                last_failure_message = (
+                    "NavigateToPose server is unavailable "
+                    f"during retry {retry_number}/"
+                    f"{self._max_nav2_retries}."
+                )
+
+                self._node.get_logger().warning(
+                    last_failure_message
+                )
+                continue
+
+            retry_goal = NavigateToPose.Goal()
+            retry_goal.pose = request.target_pose
+
+            self._node.get_logger().warning(
+                "Retrying the final Nav2 target: "
+                f"retry={retry_number}/"
+                f"{self._max_nav2_retries}"
+            )
+
+            send_goal_future = (
+                self._navigate_to_pose_client.send_goal_async(
+                    retry_goal,
+                    feedback_callback=self._handle_nav2_feedback,
+                )
+            )
+
+            retry_goal_handle = await send_goal_future
+
+            if (
+                retry_goal_handle is None
+                or not retry_goal_handle.accepted
+            ):
+                last_failure_message = (
+                    "Nav2 rejected final-target retry "
+                    f"{retry_number}/"
+                    f"{self._max_nav2_retries}."
+                )
+
+                self._node.get_logger().warning(
+                    last_failure_message
+                )
+                continue
+
+            self._active_nav2_goal_handle = retry_goal_handle
+            result_future = retry_goal_handle.get_result_async()
+
+            while rclpy.ok() and not result_future.done():
+                if goal_handle.is_cancel_requested:
+                    await self._cancel_nav2_goal()
+                    self._publish_stop()
+
+                    return "CANCELED", (
+                        "Navigation was canceled during retry."
+                    )
+
+                if request.enable_fine_alignment:
+                    current_pose = self._lookup_robot_pose(
+                        log_error=False
+                    )
+
+                    if current_pose is not None:
+                        position_error, _ = self._compute_errors(
+                            request.target_pose,
+                            current_pose,
+                        )
+
+                        if (
+                            position_error
+                            <= self._approach_radius
+                        ):
+                            self._node.get_logger().info(
+                                "Entered approach radius during "
+                                "final-target retry. Starting "
+                                "fine alignment."
+                            )
+
+                            await self._cancel_nav2_goal()
+                            self._publish_stop()
+
+                            return "APPROACH_REACHED", ""
+
+                time.sleep(self.CONTROL_PERIOD_SEC)
+
+            if not result_future.done():
+                await self._cancel_nav2_goal()
+
+                last_failure_message = (
+                    "Nav2 retry result was not available: "
+                    f"retry={retry_number}/"
+                    f"{self._max_nav2_retries}."
+                )
+
+                self._node.get_logger().warning(
+                    last_failure_message
+                )
+                continue
+
+            response = result_future.result()
+            self._active_nav2_goal_handle = None
+
+            if response is None:
+                last_failure_message = (
+                    "Nav2 returned an empty retry result: "
+                    f"retry={retry_number}/"
+                    f"{self._max_nav2_retries}."
+                )
+
+                self._node.get_logger().warning(
+                    last_failure_message
+                )
+                continue
+
+            if response.status == GoalStatus.STATUS_SUCCEEDED:
+                self._node.get_logger().info(
+                    "Final-target retry succeeded: "
+                    f"retry={retry_number}/"
+                    f"{self._max_nav2_retries}."
+                )
+
+                return "SUCCEEDED", ""
+
+            nav2_error_code = int(
+                getattr(
+                    response.result,
+                    "error_code",
+                    0,
+                )
+            )
+            error_message = str(
+                getattr(
+                    response.result,
+                    "error_msg",
+                    "",
+                )
+            )
+
+            current_pose = self._lookup_robot_pose(
+                log_error=False
+            )
+            position_error = None
+
+            if current_pose is not None:
+                position_error, _ = self._compute_errors(
+                    request.target_pose,
+                    current_pose,
+                )
+
+            if (
+                request.enable_fine_alignment
+                and position_error is not None
+                and position_error <= self._approach_radius
+            ):
+                self._node.get_logger().warning(
+                    "Nav2 retry failed inside the approach "
+                    "radius. Continuing with fine alignment: "
+                    f"retry={retry_number}/"
+                    f"{self._max_nav2_retries}, "
+                    f"error_code={nav2_error_code}, "
+                    f"position_error={position_error:.3f}"
+                )
+
+                self._publish_stop()
+
+                return "APPROACH_REACHED", ""
+
+            last_failure_message = (
+                "Final-target Nav2 retry failed: "
+                f"retry={retry_number}/"
+                f"{self._max_nav2_retries}, "
+                f"status={response.status}, "
+                f"error_code={nav2_error_code}, "
+                "position_error="
+                f"{position_error if position_error is not None else 'unknown'}, "
+                f"message={error_message or '<empty>'}"
+            )
+
+            self._node.get_logger().warning(
+                last_failure_message
+            )
+            self._publish_stop()
+
+        return "FAILED", last_failure_message
 
     async def _run_fine_alignment(
         self,

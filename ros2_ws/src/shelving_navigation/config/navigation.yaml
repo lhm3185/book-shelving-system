@@ -12,6 +12,10 @@ navigation_node:
     # Nav2 action server 연결 대기 시간
     nav2_server_timeout_sec: 10.0
 
+    # Nav2 액션이 마지막 구간에서 실패했을 때 추가 재시도 횟수
+    max_nav2_retries: 2
+    nav2_retry_delay_sec: 1.0
+
     # 목표점에서 이 거리 안으로 진입하면 Nav2를 취소하고
     # 저속 정밀 정렬로 전환한다.
     approach_radius: 0.25
