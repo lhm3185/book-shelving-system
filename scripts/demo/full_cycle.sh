@@ -174,7 +174,9 @@ echo "[3/4] 반납 작업 1건 투입 (${JOB_DELAY}s 뒤)  $(date +%T)"
 # FSM 은 이미 반복할 줄 안다 (`_current_task_index += 1` → SELECT_BOOK 부터 다시).
 # 분류코드는 **둘 다 0~4 로 시작**해야 한다 — shelf_map 에서 그 범위만 shelf_01 이고,
 # 5~9 를 주면 shelf_02 로 가는데 그 observation_pose 는 아직 자리표시자(3.0, +1.0)다.
-spawn ros2 run shelving_system return_machine_node --ros-args -p auto_publish:=true \
+# SIM_JOB_INPUT=manual 이면 자동 발행을 끈다 — 그 뒤 `scripts/demo/return_request.py --shelf … --count …` 로
+# "N번 서가에 K권" 입력을 준다 (같은 토픽, 같은 TrayJob). 기본은 지금처럼 자동 발행.
+spawn ros2 run shelving_system return_machine_node --ros-args -p auto_publish:="$([ "${SIM_JOB_INPUT:-auto}" = manual ] && echo false || echo true)" \
     -p publish_delay_sec:="$JOB_DELAY" \
     -p book_ids:="${SIM_BOOK_IDS:-['book_001','book_002']}" \
     -p rfid_tags:="${SIM_RFID_TAGS:-['rfid_001','rfid_002']}" \

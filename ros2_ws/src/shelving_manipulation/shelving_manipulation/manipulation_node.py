@@ -534,6 +534,16 @@ class ManipulationNode(Node):
                 f'책 두께 {self.profile.thickness * 1000:.1f} mm, '
                 f'남는 여유 한쪽 {(gw - self.profile.thickness) / 2 * 1000:.1f} mm, '
                 f'판 상대높이 {0.0 if _rel is None else _rel:+.3f} m) [slot_x_snap_to_gap]')
+            # **배정 경고 한 줄** (웹 클로드 v44 회신 §9). 2026-09-25 네 권 판에서 제일 좁은 칸(56 mm)에 제일
+            # 두꺼운 책(44.3 mm)이 가서 여유 0.8 mm 까지 갔다 — 레벨 문제가 아니라 배정이었다. 규칙(두꺼운 책 →
+            # 넓은 칸)은 시연 뒤 개선 목록. 지금은 판이 죽기 전에 로그가 먼저 말하게만 한다.
+            _slack = (gw - self.profile.thickness) * 1000.0
+            _line = (f'[배정] 책 {self.profile.thickness * 1000:.1f} mm → 칸 {gw * 1000:.1f} mm '
+                     f'(여유 합 {_slack:.1f} mm)')
+            if _slack < 15.0:
+                self.get_logger().warning(_line + ' — **여유 15 mm 미만**, 이 칸에 이 책은 아슬아슬하다')
+            else:
+                self.get_logger().info(_line)
             x = gx
         # 스캔과 꽂기가 같은 자리(앞면 0.444 m)라 관측 깊이를 그대로 쓴다: 틈 앞 + 책폭/2 + inset = 꽂힌 책 중심.
         # (전에 스캔만 0.75 m 물러났을 땐 그 차이만큼 차체를 옮겼다 — 이제 scan/place standoff 가 같다.)
