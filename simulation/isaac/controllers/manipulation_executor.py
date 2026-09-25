@@ -302,6 +302,24 @@ class ManipulationExecutor:
             self.say(f"[빈칸] 실측 실패 {type(exc).__name__}: {exc}")
             return None
 
+    def _select_shelf(self, cmd):
+        """명령의 `shelf_id` 로 현재 서가를 고른다 (`SIM_SHELF_PRIMS`). 매핑이 없으면 아무것도 안 한다."""
+        sid = str(cmd.get("shelf_id") or "").strip()
+        if not sid:
+            return
+        from shelf_gap import parse_shelf_prims
+        prims = parse_shelf_prims(os.environ.get("SIM_SHELF_PRIMS", ""))
+        if not prims:
+            return                      # 서가 하나 — 지금까지의 동작
+        prim = prims.get(sid)
+        if prim is None:
+            self._shelf_warn = getattr(self, "_shelf_warn", set())
+            if sid not in self._shelf_warn:
+                self._shelf_warn.add(sid)
+                self.say(f"[서가] shelf_id {sid!r} 가 SIM_SHELF_PRIMS 에 없다 {sorted(prims)} — 현재 서가 그대로")
+            return
+        self.scene.set_shelf(prim)
+
     def _shelf_box_arm(self):
         """서가 AABB 를 팔 기준으로 — [x_min, x_max, y_front, y_back, z_min, z_max]. 빈칸 관측을 서가 안으로 거를 때 쓴다."""
         try:
@@ -575,6 +593,8 @@ class ManipulationExecutor:
             self.say(f"명령 형식 오류: {text[:80]}")
             return
         kind = cmd.get("type")
+        if kind in (COMMAND_PLACE, COMMAND_SCAN, COMMAND_SWEEP):
+            self._select_shelf(cmd)
         if kind == COMMAND_PLACE:
             if self.job is not None and self.job.state["status"] == SIM_RUNNING:
                 self.publish({"token": cmd.get("token"), "job_id": cmd.get("job_id", ""),

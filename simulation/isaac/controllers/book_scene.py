@@ -11,7 +11,7 @@ import sys
 
 import numpy as np
 
-from shelf_gap import boards_from_zs, nearest_board, classify_place, side_clearances, skew_deg_from_spans
+from shelf_gap import book_in_shelf, boards_from_zs, nearest_board, classify_place, side_clearances, skew_deg_from_spans
 from pxr import Gf, Usd, UsdGeom, UsdPhysics
 from isaacsim.core.api import World
 from isaacsim.core.prims import SingleArticulation, SingleXFormPrim
@@ -370,6 +370,7 @@ class BookScene:
             raise RuntimeError("쓸 수 있는 책 원본이 없다")
         shelf = self.aabb(SHELF)
         self.shelf_aabb_world = np.asarray(shelf, float).copy()
+        self.shelf_prim = SHELF          # 현재 서가. 명령의 shelf_id 로 바뀔 수 있다 (set_shelf)
         # **레벨 책을 그대로 쓸 때는 끄지 않는다** — 끄면 쓸 책이 사라진다
         _keep_level = USE_LEVEL_TRAY and _lt and _lt.IsValid()
         for p in (([] if _keep_level else [s[0] for s in sources if s[0] is not None])
@@ -1183,6 +1184,30 @@ class BookScene:
         # 확인할 수 없으면 **유효하지 않다**고 본다. 검사의 기본값이 '통과' 면 검사가 아니다
         return self.stage.GetPrimAtPath(p).IsValid() if getattr(self, "stage", None) else False
 
+    def set_shelf(self, prim_path):
+        """현재 서가를 바꾼다 — 서가 상자·앞면·판 목록 캐시가 그 서가 것이 된다. 성공이면 True.
+
+        서가가 둘인 그림(2026-09-25): 팔은 "서가 앞에 서 있고 서가가 팔 기준 +Y" 만 가정하므로
+        서가가 바뀌면 **재는 대상**만 바꾸면 된다. 같은 서가면 아무것도 안 한다.
+        """
+        prim_path = str(prim_path)
+        if prim_path == getattr(self, "shelf_prim", SHELF):
+            return True
+        pr = self.stage.GetPrimAtPath(prim_path)
+        if not (pr and pr.IsValid()):
+            self.say(f"[서가] 없는 prim 이라 안 바꾼다: {prim_path} (지금 {self.shelf_prim})")
+            return False
+        bb = np.asarray(self.aabb(prim_path), float)
+        if not np.all(np.isfinite(bb)) or np.any(bb[3:] - bb[:3] <= 0):
+            self.say(f"[서가] AABB 를 못 재서 안 바꾼다: {prim_path}")
+            return False
+        self.shelf_prim = prim_path
+        self.shelf_aabb_world = bb.copy()
+        self.shelf_front_y = float(bb[1])
+        self._boards_seen = set()
+        self.say(f"[서가] 현재 서가 → {prim_path} · 상자(월드) {np.round(bb, 3).tolist()}")
+        return True
+
     def level_boards(self):
         """레벨(장면)의 서가 메시에서 **판 윗면 z(월드) 목록**을 읽는다. 못 읽으면 [].
 
@@ -1192,7 +1217,7 @@ class BookScene:
         캐시**로 강등하는 것이다. `reach_check.read_shelf` 와 같은 규칙(`boards_from_zs`)이다.
         """
         try:
-            root = self.stage.GetPrimAtPath(SHELF)
+            root = self.stage.GetPrimAtPath(getattr(self, "shelf_prim", SHELF))
             if not (root and root.IsValid()):
                 return []
             zs = []
@@ -1271,9 +1296,10 @@ class BookScene:
         판 윗면은 같은 z 에 점이 여러 개 모인다. 그 뭉치들 중 지금 값에 가장 가까운
         것을 고른다 — 아랫면(같은 판의 반대쪽)과 헷갈리지 않도록 `tol` 안만 본다.
         """
-        root = self.stage.GetPrimAtPath(SHELF)
+        _shelf = getattr(self, "shelf_prim", SHELF)
+        root = self.stage.GetPrimAtPath(_shelf)
         if not (root and root.IsValid()):
-            root = self.stage.GetPrimAtPath(SHELF.rsplit("/", 1)[0])
+            root = self.stage.GetPrimAtPath(_shelf.rsplit("/", 1)[0])
         if not (root and root.IsValid()):
             return None
         from collections import Counter
@@ -3502,6 +3528,9 @@ class BookScene:
                 if not np.all(np.isfinite(b)) or np.any(b[3:] - b[:3] <= 0):
                     continue
                 if board_z is not None and abs(float(b[2]) - float(board_z)) > tol:
+                    continue
+                # 서가가 둘이면 다른 서가의 책이 같은 판 높이에 있다 — 현재 서가 상자로 거른다
+                if not book_in_shelf(b, self.shelf_aabb_world):
                     continue
                 out.append((path, b))
         # **우리가 꽂은 책을 그 판의 책으로 편입한다.** 판 높이로 거르므로 트레이에

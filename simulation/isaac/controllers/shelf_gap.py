@@ -199,6 +199,36 @@ def side_clearances(bb, boxes):
     return left, left_name, right, right_name
 
 
+def parse_shelf_prims(text):
+    """`SIM_SHELF_PRIMS="shelf_01=/World/a;shelf_02=/World/b"` → `{shelf_id: prim}`. 비면 `{}`.
+
+    서가가 둘이 되면(2026-09-25 다음 그림) 명령의 `shelf_id` 로 현재 서가를 고른다. 매핑이 없으면
+    지금까지처럼 서가 하나(`SIM_SHELF_PRIM`)다 — 동작이 안 바뀐다.
+    """
+    out = {}
+    for part in (text or "").replace(",", ";").split(";"):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        k, v = part.split("=", 1)
+        if k.strip() and v.strip():
+            out[k.strip()] = v.strip()
+    return out
+
+
+def book_in_shelf(bb, shelf_bb, margin=0.05):
+    """책 AABB 의 xy 중심이 서가 AABB(x0 y0 z0 x1 y1 z1) 안(여유 margin)에 있는가.
+
+    `/World/books/*` 에 두 서가의 책이 같이 있으면 판 높이만으로는 못 가른다 — 다른 서가의
+    책이 이 서가의 빈칸을 막은 것처럼 보인다. 현재 서가 상자로 거른다.
+    """
+    cx = (float(bb[0]) + float(bb[3])) / 2.0
+    cy = (float(bb[1]) + float(bb[4])) / 2.0
+    x0, x1 = sorted((float(shelf_bb[0]), float(shelf_bb[3])))
+    y0, y1 = sorted((float(shelf_bb[1]), float(shelf_bb[4])))
+    return (x0 - margin <= cx <= x1 + margin) and (y0 - margin <= cy <= y1 + margin)
+
+
 def boards_from_zs(zs, thick_min=0.02, thick_max=0.08):
     """서가 메시 점들의 z 값 집합 → **판 윗면 z 목록**.
 

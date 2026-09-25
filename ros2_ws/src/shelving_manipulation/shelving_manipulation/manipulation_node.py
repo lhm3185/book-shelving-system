@@ -695,8 +695,12 @@ class ManipulationNode(Node):
             self._scan_state = {'token': token, 'status': 'RUNNING', 'phase': 'scan_request'}
         self._feedback(goal_handle, 'SCANNING_SHELF', 0.02)
         self._set_status('RUNNING', goal.job_id, 0.02, 0, 'SCANNING_SHELF')
+        # 서가가 둘이면 어느 서가를 재는지 시뮬이 알아야 한다 — 계약의 shelf_id 를 그대로 싣는다.
+        # 꽂기 명령에도 같은 값을 실어 재는 서가와 꽂는 서가가 갈리지 않게 한다.
+        self._shelf_id = str(getattr(goal, 'shelf_id', '') or '')
         self._send({'type': self.scan_command, 'token': token,
-                    'job_id': f'{goal.job_id}:scan', 'dwell_s': self.scan_dwell_s})
+                    'job_id': f'{goal.job_id}:scan', 'dwell_s': self.scan_dwell_s,
+                    'shelf_id': self._shelf_id})
 
         while time.monotonic() - started < self.scan_timeout_s:
             if goal_handle.is_cancel_requested:
@@ -971,6 +975,7 @@ class ManipulationNode(Node):
 
         token = uuid.uuid4().hex
         command = build_place_command(token, goal, book, tray_slot, self.limits)
+        command['shelf_id'] = getattr(self, '_shelf_id', '')
         tracker = PlaceTracker(token=token, job_id=job_id, started_at=time.monotonic(),
                                heartbeat_timeout_s=self.heartbeat_timeout_s,
                                goal_timeout_s=self.goal_timeout_s)
