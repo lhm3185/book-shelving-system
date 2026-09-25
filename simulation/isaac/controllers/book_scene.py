@@ -3588,6 +3588,14 @@ class BookScene:
                     out.append((path, b))
         # **우리가 꽂은 책을 그 판의 책으로 편입한다.** 판 높이로 거르므로 트레이에
         # 남아 있는 것은 저절로 빠진다.
+        #
+        # **서가 상자로도 거른다** (2026-09-25 실측). 서가 책에는 `book_in_shelf` 가
+        # 걸려 있었는데 우리 책에는 없었다. 서가 B 는 A 를 그대로 복사한 것이라 판
+        # 높이가 같다 — 그래서 B 에 꽂은 두 권이 A 를 잴 때 목록에 섞여 들어왔고,
+        # A 의 책들과 3 m 떨어져 있으니 그 사이가 통째로 '빈칸' 으로 잡혔다
+        # (판 1.042 에 2962 mm, 판 0.498 에 2292 mm). 네 권째가 그 유령 칸을
+        # 겨냥해 차체를 1.454 m 옆으로 옮기려다 `410 TARGET_INVALID` 로 멈췄다.
+        # 한 서가만 쓸 때는 우리 책이 늘 그 서가 안이라 드러나지 않던 자리다.
         _skip = set(exclude) if not isinstance(exclude, str) else {exclude}
         for path in self.books:
             if path in _skip:
@@ -3596,6 +3604,8 @@ class BookScene:
             if not np.all(np.isfinite(b)) or np.any(b[3:] - b[:3] <= 0):
                 continue
             if board_z is None or abs(float(b[2]) - float(board_z)) > tol:
+                continue
+            if not book_in_shelf(b, self.shelf_aabb_world):
                 continue
             out.append((path, b))
         return out
