@@ -320,7 +320,8 @@ class ManipulationExecutor:
                         boxes[k] = bb
                 except Exception:      # noqa: BLE001
                     continue
-            name, dist = nearest_shelf(boxes, self.scene.l0p[:2])
+            here = self.scene.arm_base_world()          # 캐시(l0p)가 아니라 지금 자리 — refresh 전이라도 맞게
+            name, dist = nearest_shelf(boxes, here[:2])
             if name is None:
                 self.say(f"[서가] shelf_id 없음 · 가까운 서가도 없다 (가장 가까운 거리 {dist}) — 현재 서가 그대로")
                 return

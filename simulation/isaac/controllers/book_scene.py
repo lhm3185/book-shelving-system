@@ -1374,6 +1374,17 @@ class BookScene:
                 hits.append(f"link_{i} 반경18cm: " + ", ".join(x[:46] for x in out[:4]))
         return ("[진단] 팔 주변 물체 — " + " | ".join(hits)) if hits else "[진단] 팔 주변에 바깥 물체 없음"
 
+    def arm_base_world(self):
+        """팔 베이스의 **지금** 월드 위치 (캐시 `l0p` 가 아니다). 캐시는 바꾸지 않는다.
+
+        `l0p` 는 기동 때와 `refresh_base()` 때만 갱신된다. rotate_base 명령이 오는 순간은 refresh 전이라
+        `l0p` 가 홈 자리다 — 그걸로 "가장 가까운 서가" 를 재니 서가 A 3.76 m 가 나와 B 를 못 골랐다
+        (2026-09-25). 좌표 계약 변환(`to_arm`·`to_world`)은 refresh_base 가 작업 전에 다시 잡으므로
+        그대로 두고, 자리 판단만 이걸로 한다.
+        """
+        p, _q = SingleXFormPrim(BASE_LINK).get_world_pose()
+        return np.asarray(p, float)
+
     def refresh_base(self):
         """팔 베이스의 **지금** 월드 자세를 읽고, 거기 딸린 것을 **전부** 다시 잡는다.
 
