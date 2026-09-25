@@ -1,0 +1,78 @@
+# 이현민님 shelf_map.yaml 의 사본 — **관측 자세만** 이 레벨(Final_Level_RnD) 실측으로 채웠다.
+# 원본은 "calibration_required: true" 자리표시자다. 접두어·이름은 그대로. full_cycle.sh 가
+# -p shelf_map_path:= 로 넘긴다 (book_profiles_measured 와 같은 방식). 원본은 건드리지 않는다.
+# 도서관 전체 좌표 기준
+schema_version: 1
+frame_id: map
+
+# 현재 좌표는 초기 개발용 임시값이다.
+# Isaac Sim 통합 후 실제 prim 위치를 기준으로 수정해야 한다.
+calibration_required: true
+
+locations:
+  home:
+    position:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+    orientation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+
+  return_station:
+    position:
+      x: 1.0
+      y: 0.0
+      z: 0.0
+    orientation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+
+shelves:
+  shelf_01:
+    name: "분류 000~499 서가"
+
+    classification_prefixes:
+      - "0"
+      - "1"
+      - "2"
+      - "3"
+      - "4"
+
+    observation_pose:
+      # 서가 A 실측 작업 자리 (1차 시연이 파지에 성공한 자리·각도, full_cycle.sh 머리말): (2.535, -3.019) yaw 0°
+      position:
+        x: 2.535
+        y: -3.019
+        z: 0.0
+      orientation:
+        x: 0.0
+        y: 0.0
+        z: 0.0
+        w: 1.0
+
+  shelf_02:
+    name: "분류 500~999 서가"
+
+    classification_prefixes:
+      - "5"
+      - "6"
+      - "7"
+      - "8"
+      - "9"
+
+    observation_pose:
+      # 서가 B 실측 유도 (2026-09-25): 앞면 y +1.6692 에서 0.444 물러남, x 는 중심 -0.6665 - 0.037. yaw 0° (A 와 같다)
+      position:
+        x: -0.7035
+        y: 1.2252
+        z: 0.0
+      orientation:
+        x: 0.0
+        y: 0.0
+        z: 0.0
+        w: 1.0

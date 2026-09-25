@@ -146,7 +146,8 @@ spawn ros2 run shelving_manipulation manipulation_node --ros-args \
 spawn ros2 run shelving_navigation nav_manager --ros-args \
     --params-file "$REPO/ros2_ws/src/shelving_navigation/config/navigation.yaml" \
     -p waypoints_file:="$REPO/cli_exchange/config/waypoints_measured.yaml" > "$LOG/nav_manager.log" 2>&1
-spawn ros2 run shelving_system task_manager_node --ros-args -p use_sim_time:=false -p book_profiles_path:="$REPO/cli_exchange/config/book_profiles_measured.yaml" > "$LOG/task_manager.log" 2>&1
+# shelf_map 도 실측 사본으로 (서가 B 관측 자세). shelf_01 은 원본과 접두어가 같아 두 권 흐름은 안 바뀐다.
+spawn ros2 run shelving_system task_manager_node --ros-args -p use_sim_time:=false -p book_profiles_path:="$REPO/cli_exchange/config/book_profiles_measured.yaml" -p shelf_map_path:="${SIM_SHELF_MAP:-$REPO/cli_exchange/config/shelf_map_measured.yaml}" > "$LOG/task_manager.log" 2>&1
 sleep 10
 # 검출 화면 창 — 책·빈칸 검출은 요청이 올 때만 그려지므로(스캔 정지점·책 관측 때) 창은 늘 떠 있어야 놓치지 않는다.
 # 재시작 스크립트가 창을 닫고 다시 안 띄운 채 두 판을 돌렸다 (2026-09-23 19:09 지적).

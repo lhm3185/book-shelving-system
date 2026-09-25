@@ -69,9 +69,13 @@ waypoints:
     parking_distance: 1.2
 
   shelf_02:
+    # 서가 B (새 서가, prim shelf_brown__book_shelf_01, FSM shelf_02). 2026-09-25 데스크탑 실측:
+    # AABB x -1.3727~+0.0396 · y +1.6692~+1.9738 · 회전 0° · 앞면은 -y 쪽(y +1.6692).
+    # 서가 A 와 같은 규칙으로 유도 — A 는 앞면 -2.5748 에서 0.444 물러난 y -3.019 에 서고, x 는 중심 -0.037.
+    # x 는 도착 뒤 도킹 층(옆이동)이 맞추므로 정확할 필요 없다. yaw 는 A 와 같은 사원수, park_parallel 이 맞춘다.
     position:
-      x: 3.0
-      y: 2.0
+      x: -0.7035
+      y: 1.2252
       z: 0.0
     orientation:
       x: 0.0

@@ -2576,6 +2576,22 @@ class BookScene:
         # 그대로 쓰면 책이 칸 바닥에서 뜨거나 파묻힌다. 같은 칸으로 볼 수 있으면 실제 칸 바닥에 맞춘다.
         floor_z = self.snap_floor(float(_pc[2]) - Lb / 2)
         spine_final = y_front + SPINE_INSET
+        # **그림자 — 이웃 책 앞끝과 견준다.** 서가 B 는 책이 앞면에서 34 mm 뒤(A 는 5.3 mm)라 같은
+        # SPINE_INSET 으로 꽂으면 이웃보다 29 mm 튀어나온다 (2026-09-25 데스크탑 실측). 아직 값은 안
+        # 바꾼다 — 그 판의 이웃 앞끝 중앙값과 계획값의 차이만 찍어, 서가 A 회귀 판에서 이 차이가
+        # A 실측(≈ +14.7 mm, 계획이 이웃보다 안쪽)과 같은지 먼저 본다. 바꾸는 건 그다음이다.
+        try:
+            _fronts = []
+            for _path, _bb in self.shelf_book_boxes(board_z=floor_z):
+                _fa = self.yaw_to_arm([float(_bb[0]), float(_bb[1]), float(_bb[2])])
+                _fb = self.yaw_to_arm([float(_bb[3]), float(_bb[4]), float(_bb[5])])
+                _fronts.append(min(float(_fa[1]), float(_fb[1])))      # 팔 기준 y 가 작은 쪽 = 앞끝
+            if _fronts:
+                _med = float(np.median(_fronts))
+                self.say(f"[책등] 계획 spine_final(팔기준 y) {spine_final:+.4f} · 이웃 {len(_fronts)}권 앞끝 중앙값 "
+                         f"{_med:+.4f} · 계획이 이웃보다 {(spine_final - _med) * 1000:+.1f} mm 안쪽  (그림자 — 값은 그대로)")
+        except Exception as _exc:      # noqa: BLE001 - 계측이 계획을 막으면 안 된다
+            self.say(f"[책등] 이웃 앞끝을 못 쟀다: {type(_exc).__name__}: {_exc}")
         grasp = self.yaw_to_arm([bc[0], bc[1], bb[5] - TIP_DOWN])
         if book in self.grasp_local:
             c_loc, up_loc, hz = self.grasp_local[book]
