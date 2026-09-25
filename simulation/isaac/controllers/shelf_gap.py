@@ -211,6 +211,24 @@ def is_floor_group(name):
     return "floor" in str(name).lower()
 
 
+def nearest_shelf(boxes, p, max_dist=3.0):
+    """`{이름: AABB(x0 y0 z0 x1 y1 z1)}` 중 점 `p`(월드 xy)에 **xy 중심이 가장 가까운** 것 → `(이름, 거리)`.
+
+    FSM 이 DetectTargetSlot 에 shelf_id 를 안 채운다(2026-09-25 확인: job_id·book_id 만). 로봇이 어느
+    서가 앞에 서 있는지는 자리로 안다 — 팔 베이스에서 가장 가까운 서가. `max_dist` 보다 멀면 `(None, 거리)`.
+    """
+    best = None
+    for name, bb in (boxes or {}).items():
+        cx = (float(bb[0]) + float(bb[3])) / 2.0
+        cy = (float(bb[1]) + float(bb[4])) / 2.0
+        d = ((cx - float(p[0])) ** 2 + (cy - float(p[1])) ** 2) ** 0.5
+        if best is None or d < best[1]:
+            best = (name, d)
+    if best is None or best[1] > max_dist:
+        return None, (None if best is None else best[1])
+    return best
+
+
 def parse_shelf_prims(text):
     """`SIM_SHELF_PRIMS="shelf_01=/World/a;shelf_02=/World/b"` → `{shelf_id: prim}`. 비면 `{}`.
 

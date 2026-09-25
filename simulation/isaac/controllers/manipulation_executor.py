@@ -305,12 +305,27 @@ class ManipulationExecutor:
     def _select_shelf(self, cmd):
         """명령의 `shelf_id` 로 현재 서가를 고른다 (`SIM_SHELF_PRIMS`). 매핑이 없으면 아무것도 안 한다."""
         sid = str(cmd.get("shelf_id") or "").strip()
-        if not sid:
-            return
-        from shelf_gap import parse_shelf_prims
+        from shelf_gap import nearest_shelf, parse_shelf_prims
         prims = parse_shelf_prims(os.environ.get("SIM_SHELF_PRIMS", ""))
         if not prims:
             return                      # 서가 하나 — 지금까지의 동작
+        if not sid:
+            # FSM 이 shelf_id 를 안 채운다(job_id·book_id 만). 로봇이 서 있는 자리로 고른다 —
+            # 팔 베이스에서 xy 중심이 가장 가까운 서가 (2026-09-25: B 앞에 서고도 팔이 A 를 봤다)
+            boxes = {}
+            for k, pr in prims.items():
+                try:
+                    bb = np.asarray(self.scene.aabb(pr), float)
+                    if np.all(np.isfinite(bb)):
+                        boxes[k] = bb
+                except Exception:      # noqa: BLE001
+                    continue
+            name, dist = nearest_shelf(boxes, self.scene.l0p[:2])
+            if name is None:
+                self.say(f"[서가] shelf_id 없음 · 가까운 서가도 없다 (가장 가까운 거리 {dist}) — 현재 서가 그대로")
+                return
+            self.say(f"[서가] shelf_id 없음 → 자리로 고른다: {name} ({dist:.2f} m) = {prims[name]}")
+            sid = name
         prim = prims.get(sid)
         if not hasattr(self, "_shelf_seen"):
             self._shelf_seen = set()

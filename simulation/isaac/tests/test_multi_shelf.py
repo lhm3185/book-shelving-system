@@ -8,7 +8,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "controllers"))
 
-from shelf_gap import BOOKS_ROOTS, book_in_shelf, is_floor_group, parse_shelf_prims  # noqa: E402
+from shelf_gap import BOOKS_ROOTS, book_in_shelf, is_floor_group, nearest_shelf, parse_shelf_prims  # noqa: E402
 
 SHELF_A = [1.8, -2.9, 0.0, 3.3, -2.5, 2.6]      # x0 y0 z0 x1 y1 z1 (월드)
 
@@ -45,3 +45,20 @@ def test_층_그룹은_이름으로_고른다():
 
 def test_책_루트는_새_레벨을_먼저_본다():
     assert BOOKS_ROOTS[0] == "/World/bookshelves_main/books" and "/World/books" in BOOKS_ROOTS
+
+
+SHELF_B = [-1.3727, 1.6692, 0.0, 0.0396, 1.9738, 2.52]
+SHELF_A_BB = [1.8659, -2.5748, 0.0, 3.2782, -2.2702, 2.52]
+
+
+def test_서_있는_자리로_서가를_고른다():
+    """FSM 이 shelf_id 를 안 채우므로 팔 베이스 위치로 — B 앞(-0.704, 1.225)이면 B, A 앞(2.535, -3.019)이면 A."""
+    boxes = {"shelf_01": SHELF_A_BB, "shelf_02": SHELF_B}
+    assert nearest_shelf(boxes, (-0.704, 1.225))[0] == "shelf_02"
+    assert nearest_shelf(boxes, (2.535, -3.019))[0] == "shelf_01"
+
+
+def test_너무_멀면_안_고른다():
+    name, dist = nearest_shelf({"shelf_01": SHELF_A_BB}, (4.986, -5.607))    # 홈에서 A 중심까지 ≈ 4.0 m
+    assert name is None and dist > 3.0
+    assert nearest_shelf({}, (0, 0)) == (None, None)

@@ -120,7 +120,29 @@ waypoints:
     behavior: as_is
 
 # 순회 순서. 마지막에 출발점으로 돌아와 그 자리에서 파지·반납한다
+  # 서가 B 로 가는 경로 (2026-09-25 데스크탑이 레벨 격자에서 계산, 카트 반폭 0.45 m 로 전 구간 검사).
+  # 직선은 서가 5개를 관통한다 — 같은 줄 서가 사이 틈이 0.20 m 라 x 로는 못 지나가고 줄 사이 y 통로
+  # (-0.15~+1.67, 폭 1.82)로 돌아야 한다. x +4.0 열은 library_loop 가 이미 쓰는 바깥 열(서가는 +3.28 까지).
+  shelf_02_wp1:
+    position: {x: 4.000, y: -4.200, z: 0.0}
+    orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
+    behavior: as_is
+  shelf_02_wp2:
+    position: {x: 4.000, y: 0.760, z: 0.0}
+    orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
+    behavior: as_is
+  shelf_02_wp3:
+    position: {x: -0.704, y: 0.760, z: 0.0}
+    orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
+    behavior: as_is
+
 routes:
+  # nav_manager: `to_<shelf_id>` 가 있으면 그 경로로 patrol, 없으면 library_loop (shelf_01 은 그대로)
+  to_shelf_02:
+    - shelf_02_wp1
+    - shelf_02_wp2
+    - shelf_02_wp3
+    - shelf_02
   library_loop:
     - patrol_start
     - patrol_wp1
