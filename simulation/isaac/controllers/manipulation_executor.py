@@ -613,7 +613,9 @@ class ManipulationExecutor:
             self.say(f"명령 형식 오류: {text[:80]}")
             return
         kind = cmd.get("type")
-        if kind in (COMMAND_PLACE, COMMAND_SCAN, COMMAND_SWEEP):
+        # rotate_base 도 포함 — 순서가 rotate → scan → place 라, 서가를 고르기 전에 rotate 가
+        # "서가가 팔 +Y 에 없다" 로 거절했다 (2026-09-25 서가 B 첫 도착 판)
+        if kind in (COMMAND_PLACE, COMMAND_SCAN, COMMAND_SWEEP, COMMAND_ROTATE_BASE):
             self._select_shelf(cmd)
         if kind == COMMAND_PLACE:
             if self.job is not None and self.job.state["status"] == SIM_RUNNING:
