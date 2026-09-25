@@ -312,6 +312,11 @@ class ManipulationExecutor:
         if not prims:
             return                      # 서가 하나 — 지금까지의 동작
         prim = prims.get(sid)
+        if not hasattr(self, "_shelf_seen"):
+            self._shelf_seen = set()
+        if sid not in self._shelf_seen:           # 매핑이 **걸렸다는 것** 자체를 한 번은 남긴다
+            self._shelf_seen.add(sid)
+            self.say(f"[서가] shelf_id {sid!r} → {prim} (매핑 {len(prims)}개; 현재 {self.scene.shelf_prim})")
         if prim is None:
             self._shelf_warn = getattr(self, "_shelf_warn", set())
             if sid not in self._shelf_warn:
