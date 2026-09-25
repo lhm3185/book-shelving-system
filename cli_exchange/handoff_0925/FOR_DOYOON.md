@@ -1,5 +1,21 @@
 # 도윤님이 하시면 더 쉬운 것 / 육안 확인이 필요한 것
 
+## 0. 돌아오시면 띄울 명령 (네 권 풀 사이클)
+
+```bash
+cd ~/b1_arm
+SIM_LEVEL=$HOME/levels/Final_Level_Library/Final_Level_RnD.usd \
+SIM_SHELF_PRIM=/World/bookshelves_main/shelf_brown__book_shelf_11 \
+SIM_SHELF_PRIMS="shelf_01=/World/bookshelves_main/shelf_brown__book_shelf_11;shelf_02=/World/bookshelves_main/shelf_brown__book_shelf_01" \
+SIM_BOOK_IDS="['book_001','book_002','book_003','book_004']" \
+SIM_RFID_TAGS="['rfid_001','rfid_002','rfid_003','rfid_004']" \
+SIM_CLASS_CODES="['005.7','006.3','512.3','611.0']" \
+SIM_SPINE_FROM_NEIGHBOURS=1 bash scripts/demo/full_cycle.sh
+```
+
+가까이서 녹화하려면 `REC_EYE="2.55 -4.15 1.55" REC_LOOK="2.62 -2.45 0.85" REC_EVERY=15` 을 더한다
+(서가 A 기준. 기본 뷰는 방 전체라 로봇이 화면의 8% 다).
+
 자체 진행 중 쌓이는 목록. 마지막 보고 때 같이 올린다.
 **기준**: 우리가 코드로 하면 추측이 섞이는데 도윤님이 레벨·에셋을 고치거나
 화면으로 보시면 한 번에 끝나는 것들.
@@ -75,3 +91,18 @@
 ### C-3. `nav_manager` 패치가 커밋 없이 작업 트리에만 있다
 - 도윤님 지시대로 커밋 안 함 (잘 되면 나중에 팀 공유)
 - 두 PC 가 같은 내용으로 맞춰 둠. 지금 `+36 -2`
+
+### A-4. 트레이 검출 ROI 가 앞 두 칸만 덮는다 (권장도 높음 — **네 권의 관문**)
+- `perception.yaml` 의 `book_roi_max` y 상한이 **+0.30**
+- 트레이 칸 실측: 칸0 −0.188 · 칸1 −0.004 · 칸2 **+0.180**(가장자리) · 칸3 **+0.364**(밖) · 칸4 +0.548(밖)
+- 그래서 **세 권째부터 못 찾는다** — 네 권 예행이 3권째 `411 NOT_READY` 로 멈췄다
+- 두 권까지는 칸0·칸1 이라 여태 한 번도 안 걸렸다
+- 코드로는 y 상한을 0.65 로 넓히면 된다(비전팀 설정이라 상의 중).
+  **도윤님 쪽 대안**: 트레이에서 책을 **앞 두 칸에만** 놓게 배치하시면 설정을 안 건드려도 된다.
+  다만 네 권이면 칸이 모자라니, ROI 를 넓히는 쪽이 맞을 것 같다
+
+### A-5. 녹화 카메라를 작업 자리에 하나 놓아 주시면 (권장도 중)
+- 기본 녹화 뷰가 방 전체라 로봇이 **화면의 8%** — 팔이 책을 스치는지 판별이 안 된다
+- 지금은 `REC_EYE`/`REC_LOOK` 으로 그때그때 옮겨 쓰고 있다(`c99a137`)
+- **레벨에 서가 A·B 작업 자리를 보는 카메라 prim 두 개**를 놓아 주시면 매번 좌표를 안 줘도 된다
+- 서가 책에 콜리전이 없는 설계이므로, 이 그림이 **유일한 충돌 검사**다
