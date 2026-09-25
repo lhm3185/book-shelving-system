@@ -28,6 +28,7 @@ Ridgeback 은 전방향(홀로노믹)이라 몸통을 돌리지 않고 옆으로
 """
 
 import json
+from nav_mode import read_nav_mode, teleport_allowed
 import math
 import os
 import time
@@ -181,6 +182,19 @@ class NavigationExecutor:
             self.say(f"주행 명령 형식 오류: {text[:80]}")
             return
         kind = cmd.get("type")
+        # **주행 모드 스위치** (nav_mode.py). nav2 모드면 방 단위 주행(goto/patrol)은 Nav2 몫이라
+        # 여기서 거절한다 — 루트를 쓰면 OmniGraph 와 싸운다. 도킹 보정은 manipulation_executor 라 무관.
+        mode, note = read_nav_mode()
+        if note and not getattr(self, "_mode_noted", False):
+            self._mode_noted = True
+            self.say(f"[주행모드] {note}")
+        if not teleport_allowed(mode, kind):
+            self.say(f"[주행모드] SIM_NAV_MODE=nav2 — 순간이동 주행기는 {kind!r} 를 받지 않는다 "
+                     f"(Nav2 가 /cmd_vel 로 굴린다). nav_manager 를 띄웠다면 그게 잘못이다")
+            self.status = "failed"
+            self.publish(message=f"nav2 모드: {kind} 거절")
+            self.status = "idle"
+            return
         if kind == "cancel":
             self.route = []
             self.status = "idle"
