@@ -20,14 +20,15 @@ locations:
 
   return_station:
     position:
-      x: 4.72
-      y: -5.66
+      # 반납기 앞에서 padded footprint와 0.16 m 이상 간격을 둔다.
+      x: 4.60
+      y: -5.45
       z: 0.0
     orientation:
       x: 0.0
       y: 0.0
-      z: 0.7071068
-      w: 0.7071068
+      z: 1.0
+      w: 0.0
 
     waypoints:
       - position:
@@ -77,8 +78,8 @@ locations:
         orientation:
           x: 0.0
           y: 0.0
-          z: 0.405361
-          w: 0.914157
+          z: 1.0
+          w: 0.0
 
 shelves:
   shelf_01:

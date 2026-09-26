@@ -30,7 +30,7 @@ class NavigationController:
     ERROR_FINE_ALIGNMENT = 2006
     ERROR_BUSY = 2007
 
-    FINE_ALIGNMENT_TIMEOUT_SEC = 30.0
+    FINE_ALIGNMENT_TIMEOUT_SEC = 60.0
     CONTROL_PERIOD_SEC = 0.1
 
     POSITION_GAIN = 0.8
@@ -948,6 +948,22 @@ class NavigationController:
             target_pose.pose.orientation
         )
 
+        # 목표 방향이 아직 맞지 않으면 제자리 회전만 한다.
+        # 반납기에 가까이 붙으면서 동시에 회전하면 Ridgeback의
+        # 사각 footprint가 장애물과 겹쳐 collision monitor가
+        # 회전을 차단할 수 있다.
+        if yaw_error > self._yaw_tolerance:
+            signed_yaw_error = self._normalize_angle(
+                target_yaw - current_yaw
+            )
+
+            command.angular.z = self._clamp(
+                self.YAW_GAIN * signed_yaw_error,
+                -self._fine_alignment_angular_speed,
+                self._fine_alignment_angular_speed,
+            )
+            return command
+
         dx = (
             target_pose.pose.position.x
             - current_pose.pose.position.x
@@ -989,17 +1005,6 @@ class NavigationController:
 
             command.linear.x = velocity_x
             command.linear.y = velocity_y
-
-        if yaw_error > self._yaw_tolerance:
-            signed_yaw_error = self._normalize_angle(
-                target_yaw - current_yaw
-            )
-
-            command.angular.z = self._clamp(
-                self.YAW_GAIN * signed_yaw_error,
-                -self._fine_alignment_angular_speed,
-                self._fine_alignment_angular_speed,
-            )
 
         return command
 

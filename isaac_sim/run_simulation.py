@@ -90,6 +90,35 @@ ROBOT_USD = resolve_project_path(SCENE["robot"]["usd"])
 ROBOT_PRIM_PATH = SCENE["robot"]["prim_path"]
 ROS_DOMAIN_ID = int(SCENE.get("ros", {}).get("domain_id", 0))
 
+RUNTIME_CONFIG = SCENE.get("runtime", {})
+
+TRAY_CONFIG = SCENE.get("tray", {})
+
+if not TRAY_CONFIG:
+    raise ValueError(
+        "Scene configuration must contain a tray section"
+    )
+
+SCENARIO_STATE_TOPIC = str(
+    RUNTIME_CONFIG.get(
+        "scenario_state_topic",
+        "/simulation/scenario/state",
+    )
+)
+
+REQUIRED_GRAPH_PATHS = tuple(
+    str(graph_path)
+    for graph_path in RUNTIME_CONFIG.get(
+        "required_graphs",
+        (),
+    )
+)
+
+if not REQUIRED_GRAPH_PATHS:
+    raise ValueError(
+        "runtime.required_graphs must contain "
+        "at least one Action Graph path"
+    )
 
 def create_composed_stage() -> Path:
     pose = SCENE["robot"].get("simulation_pose", {})
@@ -147,6 +176,30 @@ over "World"
         float physics:gravityMagnitude = 9.81
     }}
 }}
+
+over "Graphs"
+{{
+    over "Nav2BaseController"
+    {{
+        over "ReadSimulationTime"
+        {{
+            custom bool inputs:resetOnStop = 0
+        }}
+    }}
+
+    over "LidarSensorGraph"
+    {{
+        over "ReadSimulationTime"
+        {{
+            custom bool inputs:resetOnStop = 0
+        }}
+
+        over "PublishLidarPointCloud"
+        {{
+            custom bool inputs:resetSimulationTimeOnStop = 0
+        }}
+    }}
+}}
 '''
     handle = tempfile.NamedTemporaryFile(
         mode="w",
@@ -177,10 +230,21 @@ import omni.timeline
 import omni.usd
 import omni.graph.core as og
 import carb
+import numpy as np
+from isaacsim.core.prims import SingleArticulation
 from isaacsim.core.utils import stage as stage_utils
+from isaacsim.core.utils.types import ArticulationAction
+
+from lib import ros_bridge
+from lib.scenario_runtime import ScenarioRuntime
+from lib.tray_runtime import TrayRuntime
 
 
 stop_requested = False
+scenario_node = None
+scenario_runtime = None
+tray_runtime = None
+timeline = None
 
 
 def request_stop(_signum, _frame) -> None:
@@ -204,6 +268,40 @@ def update_until_stage_loaded() -> None:
         "/exts/isaacsim.ros2.bridge/publish_without_verification", True
     )
 
+def ensure_required_graphs(stage) -> None:
+    """필수 Action Graph를 검사하고 활성화한다."""
+    for graph_path in REQUIRED_GRAPH_PATHS:
+        graph_prim = stage.GetPrimAtPath(graph_path)
+
+        if not graph_prim.IsValid():
+            raise RuntimeError(
+                f"Required graph is missing: {graph_path}"
+            )
+
+        graph = og.get_graph_by_path(graph_path)
+
+        if not graph.is_valid():
+            raise RuntimeError(
+                "OmniGraph runtime object is invalid: "
+                f"{graph_path}"
+            )
+
+        was_disabled = graph.is_disabled()
+
+        if was_disabled:
+            graph.set_disabled(False)
+
+        if graph.is_disabled():
+            raise RuntimeError(
+                f"Failed to enable graph: {graph_path}"
+            )
+
+        print(
+            f"[project] graph={graph_path} "
+            f"was_disabled={was_disabled} "
+            f"disabled={graph.is_disabled()}",
+            flush=True,
+        )
 
 try:
     extension_manager = omni.kit.app.get_app().get_extension_manager()
@@ -238,34 +336,143 @@ try:
             "Check the robot USD layer."
         )
 
-    for graph_path in ("/Graphs/Nav2BaseController", "/Graphs/LidarSensorGraph"):
-        if not stage.GetPrimAtPath(graph_path).IsValid():
-            raise RuntimeError(f"Required graph is missing: {graph_path}")
-        graph = og.get_graph_by_path(graph_path)
-        if not graph.is_valid():
-            raise RuntimeError(f"OmniGraph runtime object is invalid: {graph_path}")
-        was_disabled = graph.is_disabled()
-        if was_disabled:
-            graph.set_disabled(False)
-        print(
-            f"[project] graph={graph_path} "
-            f"was_disabled={was_disabled} disabled={graph.is_disabled()}",
-            flush=True,
-        )
+    ensure_required_graphs(stage)
 
     physics_scene_path = "/World/PhysicsScene"
     if not stage.GetPrimAtPath(physics_scene_path).IsValid():
-        raise RuntimeError(f"Required PhysicsScene is missing: {physics_scene_path}")
+        raise RuntimeError(
+            f"Required PhysicsScene is missing: "
+            f"{physics_scene_path}"
+        )
     print(f"[project] physics_scene={physics_scene_path}")
 
     timeline = omni.timeline.get_timeline_interface()
-    timeline.play()
+
+    scenario_node = ros_bridge.make_node(
+        "isaac_scenario_runtime"
+    )
+
+    scenario_runtime = ScenarioRuntime(
+        node=scenario_node,
+        timeline=timeline,
+        state_topic=SCENARIO_STATE_TOPIC,
+    )
+
+    scenario_runtime.add_reset_hook(
+        "required_action_graphs",
+        lambda: ensure_required_graphs(stage),
+    )
+
+    # 먼저 Timeline을 재생해야 PhysX articulation handle을 만들 수 있다.
+    scenario_runtime.start()
     simulation_app.update()
-    print("[project] simulation is playing; press Ctrl+C to stop")
+
+    robot = SingleArticulation(
+        prim_path=ROBOT_PRIM_PATH,
+        name="scenario_robot",
+    )
+    robot.initialize()
+
+    required_robot_joints = {
+        "dummy_base_prismatic_x_joint",
+        "dummy_base_prismatic_y_joint",
+        "dummy_base_revolute_z_joint",
+        "panda_joint1",
+        "panda_joint2",
+        "panda_joint3",
+        "panda_joint4",
+        "panda_joint5",
+        "panda_joint6",
+        "panda_joint7",
+        "panda_finger_joint1",
+        "panda_finger_joint2",
+    }
+
+    missing_robot_joints = (
+        required_robot_joints - set(robot.dof_names)
+    )
+    if missing_robot_joints:
+        raise RuntimeError(
+            "Robot articulation is missing required joints: "
+            + ", ".join(sorted(missing_robot_joints))
+        )
+
+    initial_robot_joint_positions = np.array(
+        robot.get_joint_positions(),
+        dtype=float,
+        copy=True,
+    )
+
+    if initial_robot_joint_positions.size != robot.num_dof:
+        raise RuntimeError(
+            "Failed to capture the complete robot articulation state"
+        )
+
+    initial_robot_joint_velocities = np.zeros_like(
+        initial_robot_joint_positions
+    )
+
+    print(
+        "[project] captured robot reset state: "
+        f"dof_count={robot.num_dof}",
+        flush=True,
+    )
+
+    def reset_robot_articulation() -> None:
+        robot.initialize()
+
+        robot.apply_action(
+            ArticulationAction(
+                joint_positions=initial_robot_joint_positions,
+                joint_velocities=initial_robot_joint_velocities,
+            )
+        )
+
+        robot.set_joint_positions(
+            initial_robot_joint_positions
+        )
+        robot.set_joint_velocities(
+            initial_robot_joint_velocities
+        )
+
+        print(
+            "[project] robot articulation restored",
+            flush=True,
+        )
+
+    tray_runtime = TrayRuntime(
+        node=scenario_node,
+        stage=stage,
+        timeline=timeline,
+        config=TRAY_CONFIG,
+    )
+
+    # FixedJoint를 먼저 제거한다.
+    scenario_runtime.add_reset_hook(
+        "tray_runtime",
+        tray_runtime.reset,
+    )
+
+    # 그다음 로봇을 초기 위치로 복원한다.
+    scenario_runtime.add_reset_hook(
+        "robot_articulation",
+        reset_robot_articulation,
+    )
+
+    # 모든 초기 상태와 reset hook이 준비된 후 READY를 발행한다.
+    scenario_runtime.update()
+    tray_runtime.update()
+
+    print(
+        "[project] simulation is playing; "
+        "press Ctrl+C to stop"
+    )
 
     frame_count = 0
     while simulation_app.is_running() and not stop_requested:
         simulation_app.update()
+        scenario_runtime.update()
+        tray_runtime.update()
         frame_count += 1
         if frame_count == 60:
             print(
@@ -274,9 +481,17 @@ try:
                 f"time={timeline.get_current_time():.3f}",
                 flush=True,
             )
+    if timeline is not None:
+        timeline.stop()
+        simulation_app.update()
 
-    timeline.stop()
-    simulation_app.update()
 finally:
+    if tray_runtime is not None:
+        tray_runtime.close()
+    if scenario_runtime is not None:
+        scenario_runtime.close()
+    if scenario_node is not None:
+        ros_bridge.shutdown(scenario_node)
+
     simulation_app.close()
     COMPOSED_STAGE.unlink(missing_ok=True)

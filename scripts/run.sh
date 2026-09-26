@@ -213,6 +213,19 @@ topic_is_publishing() {
         >/dev/null 2>&1
 }
 
+scenario_is_ready() {
+    timeout 3 \
+        ros2 topic echo \
+        /scenario/state \
+        shelving_interfaces/msg/ScenarioState \
+        --once \
+        --qos-reliability reliable \
+        --qos-durability transient_local \
+        2>/dev/null \
+        | grep -Eq \
+            '^[[:space:]]*state: 3[[:space:]]*$'
+}
+
 
 action_exists() {
     local action_name="$1"
@@ -382,6 +395,11 @@ wait_until \
     action_exists \
     "/place_book"
 
+wait_until \
+    "Tray /load_tray action" \
+    "$ROS_READY_TIMEOUT_SEC" \
+    action_exists \
+    "/load_tray"
 
 wait_until \
     "Nav2 BT navigator lifecycle" \
@@ -415,6 +433,11 @@ wait_until \
     "$ROS_READY_TIMEOUT_SEC" \
     service_exists \
     "/return_machine/publish_job"
+
+wait_until \
+    "Isaac scenario READY" \
+    "$ROS_READY_TIMEOUT_SEC" \
+    scenario_is_ready
 
 
 print_message "모든 구성요소가 준비됐습니다."

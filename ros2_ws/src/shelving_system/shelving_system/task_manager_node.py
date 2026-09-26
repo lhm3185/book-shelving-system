@@ -16,6 +16,7 @@ from rclpy.qos import (
 )
 
 from shelving_interfaces.action import (
+    LoadTray,
     NavigateToTarget,
     PlaceBook,
 )
@@ -46,6 +47,11 @@ class TaskManagerNode(Node):
     ERROR_NAVIGATION_FAILED = 2003
     ERROR_NAVIGATION_RESULT = 2004
 
+    ERROR_TRAY_SERVER = 3001
+    ERROR_TRAY_REJECTED = 3002
+    ERROR_TRAY_TIMEOUT = 3003
+    ERROR_TRAY_FAILED = 3004
+
     ERROR_MANIPULATION_SERVER = 4001
     ERROR_MANIPULATION_REJECTED = 4002
     ERROR_MANIPULATION_FAILED = 4003
@@ -67,6 +73,15 @@ class TaskManagerNode(Node):
 
         self.declare_parameter(
             "navigation_server_timeout_sec",
+            5.0,
+        )
+
+        self.declare_parameter(
+            "load_tray_action",
+            "/load_tray",
+        )
+        self.declare_parameter(
+            "load_tray_server_timeout_sec",
             5.0,
         )
 
@@ -122,6 +137,17 @@ class TaskManagerNode(Node):
             navigation_action,
         )
         self._navigation_goal_handle = None
+
+        self._load_tray_client = ActionClient(
+            self,
+            LoadTray,
+            str(
+                self.get_parameter(
+                    "load_tray_action"
+                ).value
+            ),
+        )
+        self._load_tray_goal_handle = None
 
         self._manipulation_client = ActionClient(self, PlaceBook, manipulation_action)
         self._manipulation_goal_handle = None
@@ -665,6 +691,159 @@ class TaskManagerNode(Node):
             "NAV_TO_RETURN -> RECEIVE_TRAY"
         )
 
+        self._send_load_tray_goal()
+
+    def _send_load_tray_goal(self) -> None:
+        """Request tray transfer from the return machine."""
+        if self._current_plan is None:
+            self._fail_tray_loading(
+                error_code=self.ERROR_TRAY_FAILED,
+                message="Current job plan does not exist.",
+            )
+            return
+
+        timeout_sec = float(
+            self.get_parameter(
+                "load_tray_server_timeout_sec"
+            ).value
+        )
+
+        self.get_logger().info(
+            "Waiting for LoadTray action server."
+        )
+
+        if not self._load_tray_client.wait_for_server(
+            timeout_sec=timeout_sec
+        ):
+            self._fail_tray_loading(
+                error_code=self.ERROR_TRAY_SERVER,
+                message=(
+                    "LoadTray action server is not "
+                    "available."
+                ),
+            )
+            return
+
+        goal = LoadTray.Goal()
+        goal.job_id = self._current_plan.job_id
+        goal.tray_id = self._current_plan.tray_id
+
+        send_goal_future = (
+            self._load_tray_client.send_goal_async(
+                goal,
+                feedback_callback=(
+                    self._handle_load_tray_feedback
+                ),
+            )
+        )
+        send_goal_future.add_done_callback(
+            self._handle_load_tray_goal_response
+        )
+
+    def _handle_load_tray_goal_response(
+        self,
+        future,
+    ) -> None:
+        try:
+            goal_handle = future.result()
+        except Exception as error:
+            self._fail_tray_loading(
+                error_code=self.ERROR_TRAY_FAILED,
+                message=(
+                    "Failed to send LoadTray goal: "
+                    f"{error}"
+                ),
+            )
+            return
+
+        if goal_handle is None or not goal_handle.accepted:
+            self._fail_tray_loading(
+                error_code=self.ERROR_TRAY_REJECTED,
+                message="LoadTray goal was rejected.",
+            )
+            return
+
+        self._load_tray_goal_handle = goal_handle
+
+        self.get_logger().info(
+            "LoadTray goal was accepted."
+        )
+
+        result_future = goal_handle.get_result_async()
+        result_future.add_done_callback(
+            self._handle_load_tray_result
+        )
+
+    def _handle_load_tray_feedback(
+        self,
+        feedback_message,
+    ) -> None:
+        feedback = feedback_message.feedback
+
+        self._status_message = (
+            "Receiving tray: "
+            f"phase={feedback.phase}, "
+            f"progress={feedback.progress:.0%}"
+        )
+        self._publish_status()
+
+        self.get_logger().info(
+            "LoadTray feedback: "
+            f"phase={feedback.phase}, "
+            f"progress={feedback.progress:.2f}"
+        )
+
+    def _handle_load_tray_result(
+        self,
+        future,
+    ) -> None:
+        try:
+            wrapped_result = future.result()
+            result = wrapped_result.result
+        except Exception as error:
+            self._fail_tray_loading(
+                error_code=self.ERROR_TRAY_FAILED,
+                message=(
+                    "Failed to receive LoadTray result: "
+                    f"{error}"
+                ),
+            )
+            return
+
+        if not result.success:
+            error_code = int(result.error_code)
+
+            if error_code == 0:
+                error_code = self.ERROR_TRAY_FAILED
+
+            self._fail_tray_loading(
+                error_code=error_code,
+                message=(
+                    result.message
+                    or "Tray loading failed."
+                ),
+            )
+            return
+
+        if (
+            self._fsm.current_state
+            is not SystemState.RECEIVE_TRAY
+        ):
+            self._fail_tray_loading(
+                error_code=self.ERROR_TRAY_FAILED,
+                message=(
+                    "LoadTray result received in state "
+                    f"'{self._fsm.current_state.name}'."
+                ),
+            )
+            return
+
+        self._load_tray_goal_handle = None
+
+        self.get_logger().info(
+            f"Tray loading succeeded: {result.message}"
+        )
+
         self._start_first_book_task()
 
     def _start_first_book_task(self) -> None:
@@ -1134,6 +1313,20 @@ class TaskManagerNode(Node):
             f"{error_message}"
         )
 
+    def _fail_tray_loading(
+        self,
+        *,
+        error_code: int,
+        message: str,
+    ) -> None:
+        self._fsm.fail(
+            error_code=error_code,
+            message=message,
+        )
+        self._status_message = message
+        self._publish_status()
+        self.get_logger().error(message)
+
     def _fail_navigation(
         self,
         error_code: int,
@@ -1191,6 +1384,7 @@ class TaskManagerNode(Node):
     def destroy_node(self) -> None:
         """Destroy the action client and node."""
         self._navigation_client.destroy()
+        self._load_tray_client.destroy()
         self._manipulation_client.destroy()
         super().destroy_node()
 

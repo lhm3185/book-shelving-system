@@ -49,6 +49,26 @@ def _launch_setup(context, *_args, **_kwargs):
             }.items(),
         ),
 
+        # Isaac의 표준 JSON 메시지를 프로젝트 인터페이스로 변환한다.
+        Node(
+            package="shelving_system",
+            executable="simulation_bridge_node",
+            name="simulation_bridge_node",
+            output="screen",
+            emulate_tty=True,
+            parameters=[
+                {
+                    "use_sim_time": use_sim_time,
+                    "raw_state_topic": (
+                        "/simulation/scenario/state"
+                    ),
+                    "scenario_state_topic": (
+                        "/scenario/state"
+                    ),
+                }
+            ],
+        ),
+
         # TrayJob을 받아 전체 작업 순서를 관리한다.
         Node(
             package="shelving_system",

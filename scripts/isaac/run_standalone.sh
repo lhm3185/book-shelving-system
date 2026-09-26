@@ -27,14 +27,23 @@ do
     fi
 done
 
-ISAAC_ROS_LIB="$ISAAC_SIM_PATH/exts/isaacsim.ros2.bridge/jazzy/lib"
-if [ ! -d "$ISAAC_ROS_LIB" ]; then
-    echo "Isaac Sim ROS 2 Jazzy bridge was not found: $ISAAC_ROS_LIB" >&2
-    exit 1
-fi
+ISAAC_ROS_ROOT="$ISAAC_SIM_PATH/exts/isaacsim.ros2.bridge/jazzy"
+ISAAC_ROS_PYTHON="$ISAAC_ROS_ROOT/rclpy"
+ISAAC_ROS_LIB="$ISAAC_ROS_ROOT/lib"
 
-# Isaac Sim 5.1 embeds Python 3.11.  Remove ROS Jazzy's system Python 3.12
-# paths before starting it, then expose only Isaac's bundled ROS bridge libs.
+for required_directory in \
+    "$ISAAC_ROS_PYTHON" \
+    "$ISAAC_ROS_LIB"
+do
+    if [ ! -d "$required_directory" ]; then
+        echo "Isaac Sim ROS 2 Jazzy path was not found: $required_directory" >&2
+        exit 1
+    fi
+done
+
+# Isaac Sim 5.1은 Python 3.11을 사용한다.
+# 시스템 ROS 2의 Python 3.12 경로를 제거하고,
+# Isaac에 포함된 Python 3.11용 ROS 패키지를 사용한다.
 strip_ros() {
     printf '%s' "$1" \
         | tr ':' '\n' \
@@ -42,8 +51,25 @@ strip_ros() {
         | paste -sd:
 }
 
-export PYTHONPATH="$(strip_ros "${PYTHONPATH:-}")"
-export LD_LIBRARY_PATH="$(strip_ros "${LD_LIBRARY_PATH:-}")"
+CLEAN_ISAAC_PYTHONPATH="$(
+    strip_ros "${PYTHONPATH:-}"
+)"
+CLEAN_ISAAC_LD_LIBRARY_PATH="$(
+    strip_ros "${LD_LIBRARY_PATH:-}"
+)"
+
+export PYTHONPATH="$ISAAC_ROS_PYTHON"
+
+if [[ -n "$CLEAN_ISAAC_PYTHONPATH" ]]; then
+    export PYTHONPATH="$PYTHONPATH:$CLEAN_ISAAC_PYTHONPATH"
+fi
+
+export LD_LIBRARY_PATH="$ISAAC_ROS_LIB"
+
+if [[ -n "$CLEAN_ISAAC_LD_LIBRARY_PATH" ]]; then
+    export LD_LIBRARY_PATH="$CLEAN_ISAAC_LD_LIBRARY_PATH:$LD_LIBRARY_PATH"
+fi
+
 unset AMENT_PREFIX_PATH CMAKE_PREFIX_PATH COLCON_PREFIX_PATH
 unset ROS_VERSION ROS_PYTHON_VERSION ROS_AUTOMATIC_DISCOVERY_RANGE
 unset FASTRTPS_DEFAULT_PROFILES_FILE
@@ -51,7 +77,6 @@ unset FASTRTPS_DEFAULT_PROFILES_FILE
 export ROS_DISTRO=jazzy
 export ROS_DOMAIN_ID=130
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$ISAAC_ROS_LIB"
 
 # run_simulation.py opens a GUI by default.  Keep --gui as a compatibility
 # alias and pass --headless through when explicitly requested.

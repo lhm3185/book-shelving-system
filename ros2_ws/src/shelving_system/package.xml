@@ -9,6 +9,7 @@
 
   <depend>rclpy</depend>
   <depend>shelving_interfaces</depend>
+  <depend>std_msgs</depend>
   <depend>std_srvs</depend>
 
   <exec_depend>python3-yaml</exec_depend>

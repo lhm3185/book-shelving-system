@@ -1,5 +1,6 @@
 string job_id
 string book_id
+string shelf_id
 shelving_interfaces/TargetSlot target_slot
 float32 book_width
 float32 book_height

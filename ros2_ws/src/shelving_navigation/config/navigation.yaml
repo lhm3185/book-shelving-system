@@ -17,8 +17,9 @@ navigation_node:
     nav2_retry_delay_sec: 1.0
 
     # 목표점에서 이 거리 안으로 진입하면 Nav2를 취소하고
-    # 저속 정밀 정렬로 전환한다.
-    approach_radius: 0.25
+    # 저속 정밀 정렬로 전환한다. 반납기 앞에서 방향을 먼저
+    # 맞출 회전 공간을 확보해야 하므로 0.40 m를 사용한다.
+    approach_radius: 0.40
 
     # 최종 성공 판정 기준
     position_tolerance: 0.05
