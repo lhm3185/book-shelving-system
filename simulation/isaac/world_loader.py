@@ -29,7 +29,10 @@ OPTIONAL_PRIMS = {
     "손목 카메라": f"{BOT.root}/{BOT.camera_prim}",
     # 라이다는 AMR 담당 구성이라 로봇마다 다르다. 없으면 건너뛴다
     "라이다": f"{BOT.root}/front_laser/Lidar",
-    "무인반납기": "/World/return_machine",
+    # 새 셰이딩 레벨(09/28)에서 이름이 `return_machine_final` 로 바뀌었다. 둘 중 하나만
+    # 있으면 된다 — 쓰는 곳은 없고 "있는지" 만 알리는 목록이라, 이름 때문에
+    # `선택 Prim 없음` 이 시연 로그에 찍히던 것을 없앤다.
+    "무인반납기": ("/World/return_machine_final", "/World/return_machine"),
 }
 
 
