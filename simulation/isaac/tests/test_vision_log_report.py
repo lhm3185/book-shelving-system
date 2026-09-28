@@ -79,3 +79,16 @@ def test_보고서가_끼어든_무리를_짚는다():
 
 def test_빈_로그도_죽지_않는다():
     assert '뽑힌 검출 0개' in report(parse_lines([]), 0.04, SLOTS)
+
+
+def test_3D_로_묶으면_y_가_가까운_다른_물체가_갈린다():
+    from vision_log_report import group_by_xyz
+    lines = [
+        '[INFO] [1790611531.869153138] [vision_manager]: Book picked(best): xyz=(-0.274, 0.121, 0.154), center=(65, 496), conf=0.55',
+        '[INFO] [1790611667.671437965] [vision_manager]: Book picked(best): xyz=(-0.452, 0.155, 0.198), center=(372, 249), conf=0.75',
+        '[INFO] [1790611836.011241233] [vision_manager]: Book picked(best): xyz=(-0.451, 0.154, 0.193), center=(371, 250), conf=0.58',
+    ]
+    picks = parse_lines(lines)['picks']
+    assert [len(g) for g in group_by_y(picks, 0.04)] == [3]            # y 로는 한 무리
+    assert [len(g) for g in group_by_xyz(picks, 0.05)] == [1, 2]       # 3D 로는 둘
+    assert all(p['time'] for p in picks)                               # epoch 시각도 읽는다

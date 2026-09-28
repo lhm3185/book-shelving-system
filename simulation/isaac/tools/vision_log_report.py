@@ -24,10 +24,12 @@
 import argparse
 import re
 import sys
+import time
 from statistics import median
 
 _NUM = r'[-+−]?\d+(?:\.\d+)?'
 _TIME = re.compile(r'(\d{2}:\d{2}:\d{2})')
+_EPOCH = re.compile(r'\[(\d{9,10})\.\d+\]')      # ROS 로그의 `[1790611527.725169433]`
 _PICK = re.compile(
     r'Book picked\(best\):\s*xyz=\(\s*(%s),\s*(%s),\s*(%s)\),\s*center=\(\s*(%s),\s*(%s)\),'
     r'\s*conf=(%s)(?:.*?후보\s*(\d+)권)?' % ((_NUM,) * 6))
@@ -42,12 +44,22 @@ def _f(text):
     return float(text.replace('−', '-'))
 
 
+def line_time(line):
+    """줄의 시각 → 'HH:MM:SS'. 합친 판 로그는 시각이 적혀 있고, 노드 로그는 epoch 초가 적혀 있다."""
+    tm = _TIME.search(line)
+    if tm:
+        return tm.group(1)
+    em = _EPOCH.search(line)
+    if em:
+        return time.strftime('%H:%M:%S', time.localtime(int(em.group(1))))
+    return ''
+
+
 def parse_lines(lines):
     """로그 줄 → `{'picks': [...], 'drops': [...], 'roi': (lo, hi) | None, 'node': [...]}`."""
     picks, drops, node, roi = [], [], [], None
     for line in lines:
-        tm = _TIME.search(line)
-        when = tm.group(1) if tm else ''
+        when = line_time(line)
         m = _PICK.search(line)
         if m:
             picks.append({
@@ -80,6 +92,26 @@ def group_by_y(items, y_group_m=0.04):
     for item in items:
         for g in groups:
             if abs(item['xyz'][1] - g[0]['xyz'][1]) <= y_group_m:
+                g.append(item)
+                break
+        else:
+            groups.append([item])
+    return groups
+
+
+def group_by_xyz(items, radius_m=0.05):
+    """
+    3D 거리로 묶는다 (첫 점 기준 반지름 `radius_m`).
+
+    y 로만 묶으면 y 가 가까운 **다른 물체**가 한 무리가 된다 — 2026-09-29 판 1: (-0.274, 0.121, 0.154) 와
+    (-0.452, 0.155, 0.198) 이 y 34 mm 차이라 한 무리로 묶여 x 범위가 178 mm 로 나왔다. 둘은 17 cm 떨어진
+    별개다. 조작 노드의 합의는 y 로 묶으므로 그 눈으로 볼 때는 `group_by_y`, 물체를 가를 때는 이것을 쓴다.
+    """
+    groups = []
+    for item in items:
+        for g in groups:
+            ref = g[0]['xyz']
+            if sum((item['xyz'][i] - ref[i]) ** 2 for i in range(3)) ** 0.5 <= radius_m:
                 g.append(item)
                 break
         else:
@@ -179,16 +211,18 @@ def _fmt_span(span, scale=1.0, digits=3):
     return f'{span[0] * scale:+.{digits}f} ~ {span[1] * scale:+.{digits}f}'
 
 
-def report(parsed, y_group_m=0.04, slots=None, slot_tol=0.05, roi=None):
+def report(parsed, y_group_m=0.04, slots=None, slot_tol=0.05, roi=None, by='y', radius_m=0.05):
     roi = roi or parsed['roi']
     lines = []
     picks, drops = parsed['picks'], parsed['drops']
     lines.append(f'뽑힌 검출 {len(picks)}개 · ROI 가 버린 검출 {len(drops)}개 · '
                  f'ROI {"없음" if roi is None else f"{list(roi[0])} ~ {list(roi[1])}"} @arm_base_link')
-    groups = group_by_y(picks, y_group_m)
+    groups = group_by_xyz(picks, radius_m) if by == 'xyz' else group_by_y(picks, y_group_m)
     sums = [summarize(g, roi, slots) for g in groups]
     lines.append('')
-    lines.append(f'[1] 뽑힌 검출 — y 로 묶은 무리 {len(groups)}개 (묶는 폭 ±{y_group_m * 1000:.0f} mm)')
+    how = (f'3D 거리로 묶은 무리 {len(groups)}개 (반지름 {radius_m * 1000:.0f} mm)' if by == 'xyz'
+           else f'y 로 묶은 무리 {len(groups)}개 (묶는 폭 ±{y_group_m * 1000:.0f} mm)')
+    lines.append(f'[1] 뽑힌 검출 — {how}')
     for index, s in enumerate(sums):
         tag = ''
         if 'slot' in s:
@@ -253,6 +287,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('log', help='vision.log 또는 합친 판 로그')
     ap.add_argument('--y-group', type=float, default=0.04, help='y 묶는 폭 (m). 조작 노드 기본과 같다')
+    ap.add_argument('--by', choices=['y', 'xyz'], default='y',
+                    help="묶는 법. y = 조작 노드의 합의와 같은 눈 · xyz = 물체를 가를 때 (3D 거리)")
+    ap.add_argument('--radius', type=float, default=0.05, help='--by xyz 의 반지름 (m)')
     ap.add_argument('--slots', default='', help='트레이 칸 y 목록 (팔 기준, 쉼표). 예: -0.19,-0.006,0.18,0.364')
     ap.add_argument('--slot-tol', type=float, default=0.05, help='칸으로 볼 y 허용치 (m)')
     ap.add_argument('--roi-min', default='', help='ROI 하한 x,y,z — 로그에 ROI 줄이 없을 때')
@@ -265,12 +302,12 @@ def main(argv=None):
     if args.since or args.until:
         kept = []
         for line in lines:
-            tm = _TIME.search(line)
-            if not tm:
+            when = line_time(line)
+            if not when:
                 continue
-            if args.since and tm.group(1) < args.since:
+            if args.since and when < args.since:
                 continue
-            if args.until and tm.group(1) > args.until:
+            if args.until and when > args.until:
                 continue
             kept.append(line)
         lines = kept
@@ -278,7 +315,8 @@ def main(argv=None):
     roi = None
     if args.roi_min and args.roi_max:
         roi = (tuple(_floats(args.roi_min)), tuple(_floats(args.roi_max)))
-    print(report(parsed, args.y_group, _floats(args.slots) if args.slots else None, args.slot_tol, roi))
+    print(report(parsed, args.y_group, _floats(args.slots) if args.slots else None, args.slot_tol, roi,
+                 args.by, args.radius))
     return 0
 
 
