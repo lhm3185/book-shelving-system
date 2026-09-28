@@ -114,10 +114,53 @@ def test_package_config_matches_contract():
     profile = parse_profile(cfg)
     slots, assignments = parse_tray(cfg)
     assert cfg['tray']['frame_id'] == 'arm_base_link'
-    assert len(slots) == 6 and assignments == {}
+    assert len(slots) == 5 and assignments == {}
     pitches = [b.center[0] - a.center[0] for a, b in zip(slots, slots[1:])]
-    assert all(p == pytest.approx(0.075, abs=1e-3) for p in pitches)
+    assert all(p > 0.08 for p in pitches)
+    assert all(slot.book is not None for slot in slots)
+    assert slots[0].center == pytest.approx(
+        (-0.526487, -0.014704, 0.178021),
+        abs=1e-6,
+    )
+    assert slots[-1].center == pytest.approx(
+        (-0.162005, -0.019663, 0.190243),
+        abs=1e-6,
+    )
     assert profile.thickness < profile.width < profile.height
+
+
+def test_current_center_height_observation_is_calibrated_to_cover58():
+    """회귀: raw z=0.1970은 윗면이 아니지만 x로 cover58을 골라 정확히 파지한다."""
+    from shelving_manipulation.grasp_planner import (
+        GraspGoal,
+        grasp_pick_center,
+        snap_grasp_to_slot,
+        validate_grasp,
+    )
+    cfg = yaml.safe_load(CONFIG.read_text(encoding='utf-8'))
+    profile = parse_profile(cfg)
+    slots, _ = parse_tray(cfg)
+    observed = replace(
+        goal(
+            book_width=profile.width,
+            book_height=profile.height,
+            book_thickness=profile.thickness,
+        ),
+        grasp=GraspGoal(
+            frame_id='arm_base_link',
+            top_center=(-0.3726, -0.0067, 0.1970),
+            spine_yaw=0.0,
+            thickness=profile.thickness,
+            width=profile.width,
+            confidence=0.885,
+        ),
+    )
+    fixed, note = snap_grasp_to_slot(observed, slots)
+    selected = slots[2]
+    assert 'slot=2' in note
+    assert fixed.book_thickness == pytest.approx(selected.book.thickness)
+    assert validate_grasp(fixed, slots).ok
+    assert grasp_pick_center(fixed) == pytest.approx(selected.center, abs=1e-9)
 
 
 def test_vision_grasp_becomes_aabb_center():
@@ -214,37 +257,38 @@ def test_snap_pulls_vision_x_onto_slot_centre():
     assert '19.9 mm' in note
 
 
-def test_snap_leaves_y_alone_by_default():
-    """기본값에서는 y 를 건드리지 않는다 — 아직 검증 전인 보정이다."""
+def test_snap_calibrates_full_pick_center():
+    """관측 y/z는 쓰지 않고 고정 지그의 실제 AABB 중심으로 교정한다."""
     from shelving_manipulation.grasp_planner import snap_grasp_to_slot
     g, slots = _obs_goal(-0.3424)
     off = replace(g, grasp=replace(g.grasp, top_center=(
-        -0.3424, 0.0788 + 0.044, g.grasp.top_center[2])))
-    fixed, _ = snap_grasp_to_slot(off, slots)
-    assert fixed.grasp.top_center[1:] == off.grasp.top_center[1:]
+        -0.3424, 0.0788 + 0.044, 0.1970)))
+    fixed, note = snap_grasp_to_slot(off, slots)
+    assert fixed.grasp.top_center == pytest.approx(
+        (-0.3623, 0.0788, 0.1119 + BOOK.width / 2.0),
+        abs=1e-9,
+    )
+    assert 'pick_center=(-0.3623, +0.0788, +0.1119)' in note
 
 
-def test_snap_y_when_switch_on():
-    """`snap_grasp_y` 를 켜면 y 도 칸 중심으로 맞춘다."""
+def test_snap_uses_slot_specific_dimensions():
+    """서로 다른 책 규격도 선택된 슬롯의 교정값으로 goal에 반영한다."""
     from shelving_manipulation.grasp_planner import snap_grasp_to_slot
-    g, slots = _obs_goal(-0.3424)
-    off = replace(g, grasp=replace(g.grasp, top_center=(
-        -0.3424, 0.0788 + 0.044, g.grasp.top_center[2])))
-    fixed, note = snap_grasp_to_slot(off, slots, {'snap_grasp_y': True})
-    assert fixed.grasp.top_center[1] == pytest.approx(0.0788, abs=1e-9)
-    assert '+44.0 mm' in note
-
-
-def test_snap_y_keeps_z_and_respects_half_book():
-    """켜져 있어도 z 는 그대로고, 책 길이 절반을 넘는 y 는 손대지 않는다."""
-    from shelving_manipulation.grasp_planner import snap_grasp_to_slot
-    g, slots = _obs_goal(-0.3623)
-    far = replace(g, grasp=replace(g.grasp, top_center=(
-        -0.3623, 0.0788 + 0.13, g.grasp.top_center[2])))
-    fixed, note = snap_grasp_to_slot(far, slots, {'snap_grasp_y': True})
-    assert fixed.grasp.top_center[1] == pytest.approx(0.0788 + 0.13, abs=1e-9)
-    assert fixed.grasp.top_center[2] == far.grasp.top_center[2]
-    assert note == ''
+    g, _ = _obs_goal(-0.35)
+    dims = BookDims(0.044274, 0.226411, 0.153139)
+    slots = [
+        TraySlot(0, (-0.435167, -0.015772, 0.195363), dims),
+        TraySlot(1, (-0.351134, -0.015748, 0.206752), BOOK),
+    ]
+    observed = replace(g, grasp=replace(g.grasp, top_center=(-0.44, -0.01, 0.1970)))
+    fixed, _ = snap_grasp_to_slot(observed, slots)
+    assert fixed.book_thickness == pytest.approx(dims.thickness)
+    assert fixed.book_height == pytest.approx(dims.height)
+    assert fixed.book_width == pytest.approx(dims.width)
+    assert fixed.grasp.thickness == pytest.approx(dims.thickness)
+    assert fixed.grasp.top_center[2] == pytest.approx(
+        slots[0].center[2] + dims.width / 2.0,
+    )
 
 
 def test_snap_does_not_move_beyond_half_pitch():

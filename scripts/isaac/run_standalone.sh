@@ -78,6 +78,15 @@ export ROS_DISTRO=jazzy
 export ROS_DOMAIN_ID=130
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 
+# R&D 최종 검증 방식: 마찰 파지는 운반 중 약 3 cm 미끄러지므로
+# 잡은 책을 손 자세에 추종시킨다.
+export SIM_GRASP_KINEMATIC="${SIM_GRASP_KINEMATIC:-1}"
+# R&D 최종 검증값:
+# 둥근 책 메시의 convexHull이 선반 위에서 책을 넘어뜨리는 문제를 방지한다.
+export SIM_BOOK_COLL="${SIM_BOOK_COLL:-boundingCube}"
+
+# R&D 최종 검증 순서: 충돌/동역학 복원 후 그리퍼를 연다.
+export SIM_RELEASE_OPEN_FIRST="${SIM_RELEASE_OPEN_FIRST:-0}"
 # run_simulation.py opens a GUI by default.  Keep --gui as a compatibility
 # alias and pass --headless through when explicitly requested.
 ARGS=()

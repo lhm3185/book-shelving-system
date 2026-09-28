@@ -17,6 +17,9 @@
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>shelving_navigation</exec_depend>
+  <exec_depend>shelving_perception</exec_depend>
+  <exec_depend>shelving_manipulation</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

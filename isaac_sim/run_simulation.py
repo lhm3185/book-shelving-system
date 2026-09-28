@@ -32,6 +32,11 @@ def parse_args() -> argparse.Namespace:
         default=str(PROJECT_ROOT / "config" / "scenes.yaml"),
     )
     parser.add_argument("--headless", action="store_true")
+    parser.add_argument(
+        "--enable-manipulation",
+        action="store_true",
+        help="Enable the production camera and Franka manipulation executor.",
+    )
     return parser.parse_args()
 
 
@@ -93,6 +98,7 @@ ROS_DOMAIN_ID = int(SCENE.get("ros", {}).get("domain_id", 0))
 RUNTIME_CONFIG = SCENE.get("runtime", {})
 
 TRAY_CONFIG = SCENE.get("tray", {})
+MANIPULATION_CONFIG = SCENE.get("manipulation", {})
 
 if not TRAY_CONFIG:
     raise ValueError(
@@ -231,6 +237,7 @@ import omni.usd
 import omni.graph.core as og
 import carb
 import numpy as np
+from pxr import UsdGeom
 from isaacsim.core.prims import SingleArticulation
 from isaacsim.core.utils import stage as stage_utils
 from isaacsim.core.utils.types import ArticulationAction
@@ -238,13 +245,97 @@ from isaacsim.core.utils.types import ArticulationAction
 from lib import ros_bridge
 from lib.scenario_runtime import ScenarioRuntime
 from lib.tray_runtime import TrayRuntime
+from lib.sensors.camera_bridge import (
+    OPTICAL_FRAME,
+    add_wrist_camera,
+    build_mobile_base_to_arm_tf_graph,
+    build_ros_graph,
+    embedded_camera_local_translation,
+)
+
+if ARGS.enable_manipulation:
+    os.environ["SIM_SHELF_PRIM"] = str(
+        MANIPULATION_CONFIG.get(
+            "shelf_prim_path",
+            "/World/bookshelves/shelf_brown__book_shelf_01",
+        )
+    )
+    os.environ["SIM_SHELF_ROW_Z"] = str(
+        MANIPULATION_CONFIG.get("shelf_row_z", 0.497)
+    )
+    sweep_boards = (
+        MANIPULATION_CONFIG.get(
+            "sweep_boards_world",
+            [1.042, 0.498],
+        )
+    )
+
+    os.environ["SIM_SWEEP_BOARDS"] = (
+        ",".join(
+            str(float(value))
+            for value in sweep_boards
+        )
+    )
+
+    os.environ["SIM_SWEEP_X_FROM"] = str(
+        MANIPULATION_CONFIG.get("sweep_x_from", -0.35)
+    )
+    os.environ["SIM_SWEEP_X_TO"] = str(
+        MANIPULATION_CONFIG.get("sweep_x_to", 0.35)
+    )
+    os.environ["SIM_SWEEP_POINTS"] = str(
+        MANIPULATION_CONFIG.get("sweep_points", 5)
+    )
+    os.environ["ARM_ROBOT"] = "franka"
+    controller_path = PROJECT_ROOT / "lib" / "controllers"
+    manipulation_package_path = (
+        PROJECT_ROOT.parent
+        / "ros2_ws"
+        / "src"
+        / "shelving_manipulation"
+    )
+    import sys
+    sys.path.insert(0, str(controller_path))
+    sys.path.insert(0, str(manipulation_package_path))
+    from book_scene import BookScene
+    from manipulation_executor import ManipulationExecutor
 
 
 stop_requested = False
 scenario_node = None
 scenario_runtime = None
 tray_runtime = None
+manipulation_scene = None
+manipulation_executor = None
+world = None
 timeline = None
+
+
+class RuntimeWorld:
+    """기존 SimulationApp의 물리 루프를 manipulation API에 맞춰 노출한다.
+
+    별도 Isaac World를 만들면 USD 안의 손목 카메라 rigid body까지 다시
+    tensor scene에 등록하려 하므로, 이미 검증된 standalone 소유권을 유지한다.
+    """
+
+    def __init__(self, app, physics_dt=1 / 60):
+        self._app = app
+        self._physics_dt = float(physics_dt)
+        self._callbacks = {}
+
+    def step(self, render=True):
+        del render  # SimulationApp이 GUI/headless 설정에 맞춰 렌더링한다.
+        self._app.update()
+        for callback in tuple(self._callbacks.values()):
+            callback(self._physics_dt)
+
+    def get_physics_dt(self):
+        return self._physics_dt
+
+    def add_physics_callback(self, name, callback):
+        if name in self._callbacks:
+            raise ValueError(f"duplicate physics callback: {name}")
+        self._callbacks[name] = callback
 
 
 def request_stop(_signum, _frame) -> None:
@@ -338,6 +429,78 @@ try:
 
     ensure_required_graphs(stage)
 
+    if ARGS.enable_manipulation:
+        embedded_camera_prim_path = str(
+            MANIPULATION_CONFIG.get("camera_prim_path", "")
+        )
+        if not embedded_camera_prim_path:
+            raise ValueError(
+                "manipulation.camera_prim_path is required in full mode"
+            )
+        if not stage.GetPrimAtPath(embedded_camera_prim_path).IsValid():
+            raise RuntimeError(
+                "Embedded manipulation camera prim is missing: "
+                f"{embedded_camera_prim_path}"
+            )
+
+        embedded_camera_translation = embedded_camera_local_translation(
+            stage,
+            ROBOT_PRIM_PATH,
+            embedded_camera_prim_path,
+        )
+
+        # 에셋의 RSD455에는 panda_hand 아래에 중첩된 rigid body가 있다.
+        # PhysX 오류를 막기 위해 해당 body만 독립 xform stack으로 두되, 이
+        # 카메라는 영상 소스로 사용하지 않는다. 부모 변환이 끊겨 검은 화면이
+        # 되기 때문이다. 팀원 R&D 코드와 같이 물리 body가 없는 경량 카메라를
+        # panda_hand에 별도로 달아 manipulation 영상만 발행한다.
+        embedded_camera_body_path = embedded_camera_prim_path.rsplit("/", 1)[0]
+        embedded_camera_body_prim = stage.GetPrimAtPath(
+            embedded_camera_body_path
+        )
+        if embedded_camera_body_prim.IsValid():
+            UsdGeom.Xformable(
+                embedded_camera_body_prim
+            ).SetResetXformStack(True)
+            print(
+                "[project] isolated embedded camera rigid body: "
+                f"{embedded_camera_body_path}",
+                flush=True,
+            )
+
+        camera_prim_path = add_wrist_camera(
+            stage,
+            ROBOT_PRIM_PATH,
+            mount_offset=embedded_camera_translation,
+        )
+        build_ros_graph(
+            camera_prim_path,
+            ROBOT_PRIM_PATH,
+            graph_path="/Graphs/ArmCameraGraph",
+            frame_id=OPTICAL_FRAME,
+            publish_clock=False,
+        )
+
+        arm_base_tf_graph = (
+            build_mobile_base_to_arm_tf_graph(
+                ROBOT_PRIM_PATH,
+                graph_path="/Graphs/ArmBaseTfGraph",
+            )
+        )
+
+        print(
+            "[project] mobile-base TF bridge="
+            f"{arm_base_tf_graph} "
+            "base_link -> panda_link0",
+            flush=True,
+        )
+
+        print(
+            f"[project] manipulation_camera={camera_prim_path} "
+            f"frame_id={OPTICAL_FRAME}",
+            flush=True,
+        )
+
     physics_scene_path = "/World/PhysicsScene"
     if not stage.GetPrimAtPath(physics_scene_path).IsValid():
         raise RuntimeError(
@@ -366,6 +529,8 @@ try:
     # 먼저 Timeline을 재생해야 PhysX articulation handle을 만들 수 있다.
     scenario_runtime.start()
     simulation_app.update()
+
+    world = RuntimeWorld(simulation_app)
 
     robot = SingleArticulation(
         prim_path=ROBOT_PRIM_PATH,
@@ -447,6 +612,53 @@ try:
         config=TRAY_CONFIG,
     )
 
+    if ARGS.enable_manipulation:
+        manipulation_scene = BookScene(
+            app=simulation_app,
+            usd=str(COMPOSED_STAGE),
+            tray_usd=str(TRAY_USD),
+            tray_center=TRAY_CONFIG["handoff_position_base"][:2],
+            n_books=len(tray_runtime.book_paths),
+            place_dx=(),
+            say=lambda message: print(
+                f"[manipulation] {message}",
+                flush=True,
+            ),
+            stage=stage,
+            world=world,
+            robot=robot,
+            tray_path=tray_runtime.tray_path,
+            book_paths=tray_runtime.book_paths,
+        )
+        manipulation_executor = ManipulationExecutor(
+            scene=manipulation_scene,
+            node=scenario_node,
+            say=lambda message: print(
+                f"[manipulation] {message}",
+                flush=True,
+            ),
+            command_topic=str(
+                MANIPULATION_CONFIG.get(
+                    "command_topic",
+                    "/manipulation/sim/command",
+                )
+            ),
+            state_topic=str(
+                MANIPULATION_CONFIG.get(
+                    "state_topic",
+                    "/manipulation/sim/state",
+                )
+            ),
+            start_home="move",
+            render=True,
+            gui=not ARGS.headless,
+            tray_runtime=tray_runtime,
+        )
+        print(
+            "[project] production manipulation executor enabled",
+            flush=True,
+        )
+
     # FixedJoint를 먼저 제거한다.
     scenario_runtime.add_reset_hook(
         "tray_runtime",
@@ -470,7 +682,10 @@ try:
 
     frame_count = 0
     while simulation_app.is_running() and not stop_requested:
-        simulation_app.update()
+        if manipulation_executor is None:
+            simulation_app.update()
+        else:
+            manipulation_executor.spin()
         scenario_runtime.update()
         tray_runtime.update()
         frame_count += 1
@@ -484,6 +699,20 @@ try:
     if timeline is not None:
         timeline.stop()
         simulation_app.update()
+
+except BaseException as error:
+    if stop_requested:
+        print(
+            f"[project] shutdown completed after {type(error).__name__}",
+            flush=True,
+        )
+    else:
+        print(
+            "[project] fatal runtime error: "
+            f"{type(error).__name__}: {error!r}",
+            flush=True,
+        )
+        raise
 
 finally:
     if tray_runtime is not None:

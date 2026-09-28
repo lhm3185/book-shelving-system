@@ -218,6 +218,9 @@ class TrayRuntime:
             if path != self._tray_path
         )
 
+        # Manipulation이 집기 시작한 책은 더 이상 트레이를 따라가지 않는다.
+        self._claimed_book_paths: set[str] = set()
+
         self._carrier = SingleXFormPrim(
             self._carrier_path
         )
@@ -256,6 +259,47 @@ class TrayRuntime:
             f"objects={len(self._objects)}, "
             f"tray={self._tray_path}, "
             f"carrier={self._carrier_path}"
+        )
+
+    @property
+    def tray_path(self) -> str:
+        return self._tray_path
+
+    @property
+    def book_paths(self) -> tuple[str, ...]:
+        return self._book_paths
+
+    @property
+    def loaded(self) -> bool:
+        return self._loaded
+
+    def claim_book(self, book_path: str) -> None:
+        """선택된 책의 제어권을 manipulation에 넘긴다."""
+        if not self._loaded:
+            raise RuntimeError(
+                "Tray must be loaded before claiming a book"
+            )
+
+        if book_path not in self._book_paths:
+            raise ValueError(
+                f"Book is not part of the tray group: {book_path}"
+            )
+
+        if book_path in self._claimed_book_paths:
+            return
+
+        self._claimed_book_paths.add(book_path)
+
+        rigid_api = self._rigid_apis[book_path]
+        rigid_api.CreateKinematicEnabledAttr().Set(False)
+
+        zero = Gf.Vec3f(0.0, 0.0, 0.0)
+        rigid_api.CreateVelocityAttr().Set(zero)
+        rigid_api.CreateAngularVelocityAttr().Set(zero)
+
+        self._node.get_logger().info(
+            "Book control transferred to manipulation: "
+            f"{book_path}"
         )
 
     def _capture_relative_transforms(
@@ -349,6 +393,8 @@ class TrayRuntime:
         for path, relative in (
             self._relative_transforms.items()
         ):
+            if path in self._claimed_book_paths:
+                continue
             object_matrix = tray_matrix @ relative
             position, orientation = _matrix_pose(
                 object_matrix
@@ -370,11 +416,11 @@ class TrayRuntime:
     def _zero_velocities(self) -> None:
         zero = Gf.Vec3f(0.0, 0.0, 0.0)
 
-        for rigid_api in self._rigid_apis.values():
+        for path, rigid_api in self._rigid_apis.items():
+            if path in self._claimed_book_paths:
+                continue
             rigid_api.CreateVelocityAttr().Set(zero)
-            rigid_api.CreateAngularVelocityAttr().Set(
-                zero
-            )
+            rigid_api.CreateAngularVelocityAttr().Set(zero)
 
     def _restore_initial_state(self) -> None:
         self._set_group_kinematic(True)
@@ -667,6 +713,7 @@ class TrayRuntime:
             )
 
         self._clear_active_command()
+        self._claimed_book_paths.clear()
         self._restore_initial_state()
 
         self._node.get_logger().info(

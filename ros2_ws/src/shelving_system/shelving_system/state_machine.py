@@ -72,6 +72,7 @@ class StateMachine:
         },
         SystemState.SELECT_BOOK: {
             SystemState.NAV_TO_SHELF,
+            SystemState.PLACE_BOOK,
             SystemState.FAILED,
             SystemState.WAIT_FOR_OPERATOR,
         },

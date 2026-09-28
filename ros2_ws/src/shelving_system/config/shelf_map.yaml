@@ -95,7 +95,7 @@ shelves:
     observation_pose:
       position:
         x: 2.229003667831421
-        y: -3.2
+        y: -3.0101053714752197
         z: 0.0
       orientation:
         x: 0.0

@@ -1,16 +1,15 @@
-string job_id
-string book_id
-string shelf_id
+# Vision이 선택한 책의 크기를 기준으로
+# 현재 보이는 서가에서 적합한 빈 슬롯을 선택한다.
+
 float32 book_width
 float32 book_height
 float32 book_thickness
-float32 safety_margin
-uint32 max_recaptures
-
+# Isaac이 USD AABB와 현재 arm_base_link 자세로 계산한 서가 기하.
+# 비어 있는 칸의 depth는 서가 뒤쪽 벽을 가리키므로, 해당 depth를
+# 삽입면으로 쓰지 않고 검출 픽셀의 광선을 이 평면과 교차시킨다.
+float32 shelf_plane_y
+float32 shelf_floor_z
 builtin_interfaces/Time not_before
-# **이 시각 이후의 영상만 쓸 것.** 로봇팔이 관측 자세에서 멈춘 시각이다
-# (흔들리는 중에 찍으면 깊이가 튄다). 조건은 DetectGraspPoint.action 에 적어 두었다.
-# 0 이면 "아무 영상이나" — 예전 호출과 호환된다
 ---
 bool success
 shelving_interfaces/TargetSlot target_slot

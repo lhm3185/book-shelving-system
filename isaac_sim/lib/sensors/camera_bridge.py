@@ -16,10 +16,13 @@ import sys
 
 import omni.graph.core as og
 import usdrt.Sdf
-from pxr import Gf, UsdGeom
+from pxr import Gf, Usd, UsdGeom
 
 # 로봇별 장착 위치는 프로파일에서 온다 (config/robot_profiles.py)
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config"))
+_ISAAC_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+sys.path.insert(0, os.path.join(_ISAAC_ROOT, "config"))
 from robot_profiles import profile  # noqa: E402
 
 BOT = profile()
@@ -30,13 +33,41 @@ CAMERA_NAME = "wrist_camera"
 OPTICAL_FRAME = "wrist_camera_optical_frame"
 
 
-def add_wrist_camera(stage, robot_path):
+def embedded_camera_local_translation(stage, robot_path, camera_path):
+    """Return only the embedded camera position relative to ``panda_hand``.
+
+    The embedded RSD455 rotation points away from the tray and must not be
+    copied.  Its position is still useful because it is outside the hand
+    housing and therefore does not self-occlude the render camera.
+    """
+    camera_prim = stage.GetPrimAtPath(camera_path)
+    hand_prim = stage.GetPrimAtPath(
+        f"{robot_path}/{BOT.hand_link}"
+    )
+    if not camera_prim.IsValid() or not hand_prim.IsValid():
+        raise RuntimeError(
+            "Cannot compute wrist-camera translation: "
+            f"camera={camera_path}, hand={hand_prim.GetPath()}"
+        )
+
+    cache = UsdGeom.XformCache(Usd.TimeCode.Default())
+    camera_world = cache.GetLocalToWorldTransform(camera_prim)
+    hand_world = cache.GetLocalToWorldTransform(hand_prim)
+    local = camera_world * hand_world.GetInverse()
+    translation = local.ExtractTranslation()
+    return tuple(float(value) for value in translation)
+
+
+def add_wrist_camera(stage, robot_path, mount_offset=None):
     path = f"{robot_path}/{BOT.hand_link}/{CAMERA_NAME}"
     cam = UsdGeom.Camera.Define(stage, path)
     xf = UsdGeom.Xformable(cam)
     xf.ClearXformOpOrder()
-    xf.AddTranslateOp().Set(Gf.Vec3d(*MOUNT_OFFSET))
-    xf.AddRotateXYZOp().Set(Gf.Vec3f(180.0, 0.0, 0.0))     # USD 카메라 -Z → 손 +Z(접근축)
+    offset = MOUNT_OFFSET if mount_offset is None else mount_offset
+    xf.AddTranslateOp().Set(Gf.Vec3d(*offset))
+    xf.AddRotateXYZOp().Set(
+        Gf.Vec3f(180.0, 0.0, 0.0)
+    )
     aperture = 20.955
     cam.CreateHorizontalApertureAttr(aperture)
     cam.CreateVerticalApertureAttr(aperture * RES[1] / RES[0])
@@ -46,48 +77,54 @@ def add_wrist_camera(stage, robot_path):
 
 
 def build_ros_graph(camera_path, robot_path, rgb="/rgb", depth="/depth", info="/camera_info",
-                    tf="/tf", clock="/clock", graph_path="/World/ArmRosGraph"):
+                    tf="/tf", clock="/clock", graph_path="/World/ArmRosGraph",
+                    frame_id=None, publish_clock=True):
+    image_frame = frame_id or OPTICAL_FRAME
     keys = og.Controller.Keys
+    nodes = [
+        ("Tick", "omni.graph.action.OnPlaybackTick"),
+        ("SimTime", "isaacsim.core.nodes.IsaacReadSimulationTime"),
+        ("RenderProduct", "isaacsim.core.nodes.IsaacCreateRenderProduct"),
+        ("RGB", "isaacsim.ros2.bridge.ROS2CameraHelper"),
+        ("Depth", "isaacsim.ros2.bridge.ROS2CameraHelper"),
+        ("Info", "isaacsim.ros2.bridge.ROS2CameraInfoHelper"),
+        ("TF", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
+    ]
+    values = [
+        ("RenderProduct.inputs:cameraPrim", [usdrt.Sdf.Path(camera_path)]),
+        ("RenderProduct.inputs:width", RES[0]),
+        ("RenderProduct.inputs:height", RES[1]),
+        ("RGB.inputs:type", "rgb"), ("RGB.inputs:topicName", rgb), ("RGB.inputs:frameId", image_frame),
+        ("Depth.inputs:type", "depth"), ("Depth.inputs:topicName", depth), ("Depth.inputs:frameId", image_frame),
+        ("Info.inputs:topicName", info), ("Info.inputs:frameId", image_frame),
+        ("TF.inputs:topicName", tf),
+        ("TF.inputs:targetPrims", [usdrt.Sdf.Path(camera_path)]),
+        ("TF.inputs:parentPrim", [usdrt.Sdf.Path(f"{robot_path}/{BOT.base_link}")]),
+    ]
+    connections = [
+        ("Tick.outputs:tick", "RenderProduct.inputs:execIn"),
+        ("RenderProduct.outputs:execOut", "RGB.inputs:execIn"),
+        ("RenderProduct.outputs:execOut", "Depth.inputs:execIn"),
+        ("RenderProduct.outputs:execOut", "Info.inputs:execIn"),
+        ("RenderProduct.outputs:renderProductPath", "RGB.inputs:renderProductPath"),
+        ("RenderProduct.outputs:renderProductPath", "Depth.inputs:renderProductPath"),
+        ("RenderProduct.outputs:renderProductPath", "Info.inputs:renderProductPath"),
+        ("Tick.outputs:tick", "TF.inputs:execIn"),
+        ("SimTime.outputs:simulationTime", "TF.inputs:timeStamp"),
+    ]
+    if publish_clock:
+        nodes.append(("Clock", "isaacsim.ros2.bridge.ROS2PublishClock"))
+        values.append(("Clock.inputs:topicName", clock))
+        connections.extend([
+            ("Tick.outputs:tick", "Clock.inputs:execIn"),
+            ("SimTime.outputs:simulationTime", "Clock.inputs:timeStamp"),
+        ])
     og.Controller.edit(
         {"graph_path": graph_path, "evaluator_name": "execution"},
         {
-            keys.CREATE_NODES: [
-                ("Tick", "omni.graph.action.OnPlaybackTick"),
-                ("SimTime", "isaacsim.core.nodes.IsaacReadSimulationTime"),
-                ("RenderProduct", "isaacsim.core.nodes.IsaacCreateRenderProduct"),
-                ("RGB", "isaacsim.ros2.bridge.ROS2CameraHelper"),
-                ("Depth", "isaacsim.ros2.bridge.ROS2CameraHelper"),
-                ("Info", "isaacsim.ros2.bridge.ROS2CameraInfoHelper"),
-                ("TF", "isaacsim.ros2.bridge.ROS2PublishTransformTree"),
-                ("Clock", "isaacsim.ros2.bridge.ROS2PublishClock"),
-            ],
-            keys.SET_VALUES: [
-                ("RenderProduct.inputs:cameraPrim", [usdrt.Sdf.Path(camera_path)]),
-                ("RenderProduct.inputs:width", RES[0]),
-                ("RenderProduct.inputs:height", RES[1]),
-                ("RGB.inputs:type", "rgb"), ("RGB.inputs:topicName", rgb), ("RGB.inputs:frameId", OPTICAL_FRAME),
-                ("Depth.inputs:type", "depth"), ("Depth.inputs:topicName", depth), ("Depth.inputs:frameId", OPTICAL_FRAME),
-                ("Info.inputs:topicName", info), ("Info.inputs:frameId", OPTICAL_FRAME),
-                ("TF.inputs:topicName", tf),
-                # 로봇 루트를 넣으면 ridgeback_franka 트리가 world→panda_link2→…→base_link→…→world 로 **고리**가 된다
-                # (2026-09-17 실측, tf2 "tree contains a loop"). 비전에 필요한 panda_link0→wrist_camera 만 낸다
-                ("TF.inputs:targetPrims", [usdrt.Sdf.Path(camera_path)]),
-                ("TF.inputs:parentPrim", [usdrt.Sdf.Path(f"{robot_path}/{BOT.base_link}")]),
-                ("Clock.inputs:topicName", clock),
-            ],
-            keys.CONNECT: [
-                ("Tick.outputs:tick", "RenderProduct.inputs:execIn"),
-                ("RenderProduct.outputs:execOut", "RGB.inputs:execIn"),
-                ("RenderProduct.outputs:execOut", "Depth.inputs:execIn"),
-                ("RenderProduct.outputs:execOut", "Info.inputs:execIn"),
-                ("RenderProduct.outputs:renderProductPath", "RGB.inputs:renderProductPath"),
-                ("RenderProduct.outputs:renderProductPath", "Depth.inputs:renderProductPath"),
-                ("RenderProduct.outputs:renderProductPath", "Info.inputs:renderProductPath"),
-                ("Tick.outputs:tick", "TF.inputs:execIn"),
-                ("SimTime.outputs:simulationTime", "TF.inputs:timeStamp"),
-                ("Tick.outputs:tick", "Clock.inputs:execIn"),
-                ("SimTime.outputs:simulationTime", "Clock.inputs:timeStamp"),
-            ],
+            keys.CREATE_NODES: nodes,
+            keys.SET_VALUES: values,
+            keys.CONNECT: connections,
         },
     )
     return graph_path
@@ -125,6 +162,80 @@ def build_supplement_graph(camera_path, robot_path, tf="/tf", clock="/clock", gr
     )
     return graph_path
 
+def build_mobile_base_to_arm_tf_graph(
+    robot_path,
+    mobile_base_link="base_link",
+    tf="/tf",
+    graph_path="/Graphs/ArmBaseTfGraph",
+):
+    """Ridgeback base_link와 Franka panda_link0를 하나의 ROS TF 트리로 연결합니다."""
+    keys = og.Controller.Keys
+
+    mobile_base_path = (
+        f"{robot_path}/{mobile_base_link}"
+    )
+    arm_base_path = (
+        f"{robot_path}/{BOT.base_link}"
+    )
+
+    og.Controller.edit(
+        {
+            "graph_path": graph_path,
+            "evaluator_name": "execution",
+        },
+        {
+            keys.CREATE_NODES: [
+                (
+                    "Tick",
+                    "omni.graph.action.OnPlaybackTick",
+                ),
+                (
+                    "SimTime",
+                    "isaacsim.core.nodes."
+                    "IsaacReadSimulationTime",
+                ),
+                (
+                    "TF",
+                    "isaacsim.ros2.bridge."
+                    "ROS2PublishTransformTree",
+                ),
+            ],
+            keys.SET_VALUES: [
+                (
+                    "TF.inputs:topicName",
+                    tf,
+                ),
+                (
+                    "TF.inputs:parentPrim",
+                    [
+                        usdrt.Sdf.Path(
+                            mobile_base_path
+                        )
+                    ],
+                ),
+                (
+                    "TF.inputs:targetPrims",
+                    [
+                        usdrt.Sdf.Path(
+                            arm_base_path
+                        )
+                    ],
+                ),
+            ],
+            keys.CONNECT: [
+                (
+                    "Tick.outputs:tick",
+                    "TF.inputs:execIn",
+                ),
+                (
+                    "SimTime.outputs:simulationTime",
+                    "TF.inputs:timeStamp",
+                ),
+            ],
+        },
+    )
+
+    return graph_path
 
 def apply_amr_test_overrides(stage, robot_path, say=print):
     """franka_camera.usd(AMR 담당) 라이다·TF 그래프를 **시험 실행에서만** 보완한다. 파일은 수정하지 않는다.

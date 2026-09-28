@@ -12,7 +12,8 @@ PlaceBook 목표 검사와 시뮬 작업 명령 생성. ROS 에 의존하지 않
 - book_height    : 책등 길이 (세웠을 때 높이)       예 0.237
 - book_width     : 책등→앞마구리 (서가에서의 깊이)  예 0.163
 
-1차 전제: 트레이 칸 좌표는 설정값(book_profiles.yaml)이다. 비전은 그림자 모드(동작에 쓰지 않음).
+트레이는 위치를 아는 고정 지그다. 비전 관측은 어느 책인지 고르는 데 사용하고,
+실제 파지 중심과 책 치수는 book_profiles.yaml의 슬롯별 교정값을 사용한다.
 """
 
 from dataclasses import dataclass, replace
@@ -110,11 +111,11 @@ DEFAULT_LIMITS = {
     'max_target_age_s': 0.0,           # 0 이면 검사하지 않음 (Isaac sim time 정합 전)
     'require_slot_dimensions': False,  # False 면 폭·높이 0 은 '미제공' 으로 보고 넘어간다
     'max_book_dimension': 0.5,
-    # 검증된 꽂기 범위 (Isaac 레벨 v3, 책 4곳 × 트레이 6칸 계획 통과 영역 + 여유)
+    # AMR 횡이동 후 빈칸은 arm x=-0.35 부근으로 정렬된다.
+    # y는 현재 서가의 삽입 깊이, z는 하단과 상단 선반을 모두 포함한다.
+    # 실제 도달성·충돌은 Isaac plan_job이 다시 판정한다.
     'place_region_min': [-0.56, 0.45, 0.25],
-    # 0.45 → 0.55: M0609 는 팔 베이스가 높아 꽂는 단이 팔 기준 0.5097 이다 (manipulation.yaml 과 같이 유지).
-    # 이 값이 계약 좌표를 담는지는 test/test_contract_coords.py 가 지킨다
-    'place_region_max': [-0.22, 0.65, 0.55],
+    'place_region_max': [-0.22, 0.85, 0.95],
     # 파지 y 를 칸 중심에 맞출 것인가. **기본 꺼짐 — 아직 검증 전이다.**
     # 근거: 9/21 에 '설정 칸 y 가 실제와 어긋난다' 며 껐는데, 그 측정이 좌표계가
     # 4.36° 돌아간 상태에서 읽은 값이었다. 기울기를 걷어내면 칸별 퍼짐이 0 이다.
@@ -203,7 +204,11 @@ def validate_grasp(goal: PlaceGoal, tray_slots, limits: Optional[dict] = None) -
             return Check(410, f'파지 관측 x {g.top_center[0]:+.3f} 가 트레이 범위 밖')
         if not (min(ys) - 0.15 <= g.top_center[1] <= max(ys) + 0.15):
             return Check(410, f'파지 관측 y {g.top_center[1]:+.3f} 가 트레이 범위 밖')
-        want_top = tray_slots[0].center[2] + goal.book_width / 2.0
+        nearest_slot = min(
+            tray_slots,
+            key=lambda sl: abs(sl.center[0] - g.top_center[0]),
+        )
+        want_top = nearest_slot.center[2] + goal.book_width / 2.0
         if goal.book_width > 0 and abs(g.top_center[2] - want_top) > 0.01:
             return Check(410,
                          f'관측 높이가 책 규격과 다르다: top z {g.top_center[2]:.4f}, '
@@ -247,21 +252,21 @@ def validate_grasp(goal: PlaceGoal, tray_slots, limits: Optional[dict] = None) -
 
 def snap_grasp_to_slot(goal: PlaceGoal, tray_slots, limits: Optional[dict] = None):
     """
-    비전이 준 x 를 가장 가까운 트레이 칸 중심에 맞춘다 → (새 goal, 알린 글 또는 '').
+    비전 관측으로 책의 슬롯을 고르고, 실제 파지 기하를 슬롯 교정값으로 바꾼다.
 
     왜 이렇게 하나: 트레이는 좌표를 **아는** 고정 지그다. 비전이 정할 것은
     "몇 번 칸에 있는 책인가"이고, 그 칸의 정확한 x 는 지그 형상이 이미 알고 있다.
     비전 x 는 실측에서 한 판마다 20 mm 까지 흔들렸는데(2026-09-21, 같은 장면에서
     -0.3620 → -0.3424), 손가락 여유는 8.3 mm 뿐이라 그대로 쓰면 옆 책을 친다.
 
-    **칸 간격의 절반을 넘게 벗어나면 손대지 않는다.** 그때는 어느 칸인지 알 수 없고,
-    엉뚱한 칸으로 당겨 붙이면 옆 책을 집으러 간다 — validate_grasp 가 거절하게 둔다.
-    z 는 건드리지 않는다 (높이는 책 규격에서 나오고 validate_grasp 가 따로 검사한다).
-    y 는 `snap_grasp_y` 가 켜졌을 때만 맞춘다.
+    현재 perception의 마스크 중앙 깊이는 책 윗면과 AABB 중심 사이를 오갈 수 있으므로
+    raw y/z를 로봇 명령에 직접 사용하지 않는다. 관측 x가 슬롯 간격 절반보다 가까운
+    경우에만 그 슬롯으로 식별하고, x/y/z와 책 치수를 함께 교정한다.
     """
-    lim = _merged(limits)
     g = goal.grasp
     if g is None or not tray_slots or len(tray_slots) < 2:
+        return goal, ''
+    if not all(math.isfinite(v) for v in g.top_center):
         return goal, ''
     centers = sorted(sl.center[0] for sl in tray_slots)
     pitch = min(b - a for a, b in zip(centers, centers[1:]))
@@ -270,26 +275,42 @@ def snap_grasp_to_slot(goal: PlaceGoal, tray_slots, limits: Optional[dict] = Non
     if abs(dx) >= pitch / 2.0:
         return goal, ''
 
-    # y 는 **스위치가 켜졌을 때만** 맞춘다 (`snap_grasp_y`). 9/21 에 한 번 껐는데,
-    # 끈 근거였던 측정이 좌표계가 4.36° 돌아간 상태에서 읽은 값이었다 —
-    # 기울기를 걷어내면 칸별 퍼짐이 0 이므로 '칸마다 어긋난다' 는 틀린 결론이었다.
-    # 복귀 보정이 들어간 지금 다시 재야 해서 A/B 스위치로 둔다.
-    dy = 0.0
-    new_y = g.top_center[1]
-    if lim['snap_grasp_y']:
-        dy = g.top_center[1] - slot.center[1]
-        # 책 길이의 절반을 넘게 벗어났으면 그 책을 보고 있는 것이 아니다 — 손대지 않는다
-        y_limit = goal.book_height / 2.0 if goal.book_height > 0 else 0.10
-        if abs(dy) < y_limit:
-            new_y = slot.center[1]
-
-    if abs(dx) < 1e-6 and new_y == g.top_center[1]:
+    book = slot.book or BookDims(
+        goal.book_thickness,
+        goal.book_height,
+        goal.book_width,
+    )
+    if min(book.thickness, book.height, book.width) <= 0.0:
         return goal, ''
-    snapped = replace(g, top_center=(slot.center[0], new_y, g.top_center[2]))
-    moved_y = '' if new_y == g.top_center[1] else f', y {dy * 1000:+.1f} mm'
-    return (replace(goal, grasp=snapped),
-            f'파지 좌표를 칸 중심에 맞췄다: x {g.top_center[0]:+.4f} → {slot.center[0]:+.4f} '
-            f'({dx * 1000:+.1f} mm{moved_y}, 칸 간격 {pitch * 1000:.0f} mm)')
+
+    calibrated_top = (
+        slot.center[0],
+        slot.center[1],
+        slot.center[2] + book.width / 2.0,
+    )
+    snapped = replace(
+        g,
+        top_center=calibrated_top,
+        thickness=book.thickness,
+        width=book.width,
+    )
+    calibrated_goal = replace(
+        goal,
+        grasp=snapped,
+        book_thickness=book.thickness,
+        book_height=book.height,
+        book_width=book.width,
+    )
+    return (
+        calibrated_goal,
+        '비전 관측을 실제 트레이 슬롯으로 교정했다: '
+        f'slot={slot.index}, raw=('
+        f'{g.top_center[0]:+.4f}, {g.top_center[1]:+.4f}, {g.top_center[2]:+.4f}) '
+        f'→ pick_center=('
+        f'{slot.center[0]:+.4f}, {slot.center[1]:+.4f}, {slot.center[2]:+.4f}), '
+        f'x_offset={dx * 1000:+.1f} mm, '
+        f'pitch_min={pitch * 1000:.1f} mm',
+    )
 
 
 def grasp_pick_center(goal: PlaceGoal):
@@ -366,6 +387,7 @@ def insertion_speed(goal: PlaceGoal, limits: Optional[dict] = None) -> float:
 class TraySlot:
     index: int
     center: Tuple[float, float, float]
+    book: Optional[BookDims] = None
 
 
 def select_tray_slot(book_id: str, slots: Sequence[TraySlot], assignments: Dict[str, int],
@@ -388,8 +410,21 @@ def select_tray_slot(book_id: str, slots: Sequence[TraySlot], assignments: Dict[
 
 def parse_tray(config: dict) -> Tuple[List[TraySlot], Dict[str, int]]:
     tray = config.get('tray', {}) or {}
-    slots = [TraySlot(int(s['index']), tuple(float(v) for v in s['center']))
-             for s in tray.get('slots', [])]
+    slots = []
+    for item in tray.get('slots', []):
+        raw_book = item.get('book')
+        book = None
+        if raw_book:
+            book = BookDims(
+                float(raw_book['thickness']),
+                float(raw_book['height']),
+                float(raw_book['width']),
+            )
+        slots.append(TraySlot(
+            int(item['index']),
+            tuple(float(v) for v in item['center']),
+            book,
+        ))
     assignments = {str(k): int(v) for k, v in (tray.get('assignments') or {}).items()}
     return slots, assignments
 

@@ -1,15 +1,6 @@
-string job_id
-string book_id
-string shelf_id
-shelving_interfaces/TargetSlot target_slot
-float32 book_width
-float32 book_height
-float32 book_thickness
-float32 insertion_speed
+# TaskManager는 manipulation 작업 시작만 요청한다.
+# 집을 책과 배치할 슬롯은 perception이 결정한다.
 
-# 비전이 본 파지점. has_grasp=false면 설정된 트레이 칸을 사용한다.
-shelving_interfaces/GraspObservation grasp
-bool has_grasp
 ---
 bool success
 string failed_phase

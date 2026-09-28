@@ -23,6 +23,19 @@ scenes:
         - /Graphs/Nav2BaseController
         - /Graphs/LidarSensorGraph
 
+    manipulation:
+      camera_prim_path: /World/ridgeback_franka/panda_hand/rsd455/RSD455/Camera_OmniVision_OV9782_Color
+      shelf_prim_path: /World/bookshelves/shelf_brown__book_shelf_01
+      shelf_row_z: 0.498
+      sweep_boards_world:
+        - 1.042
+        - 0.498
+      sweep_x_from: -0.35
+      sweep_x_to: 0.35
+      sweep_points: 5
+      command_topic: /manipulation/sim/command
+      state_topic: /manipulation/sim/state
+
     tray:
       group_prim_path: /World/tray_books
       tray_prim_path: /World/tray_books/tray_04

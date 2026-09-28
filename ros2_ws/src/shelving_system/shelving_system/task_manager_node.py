@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import math
+
 import rclpy
 from ament_index_python.packages import (
     get_package_share_directory,
@@ -9,6 +11,8 @@ from ament_index_python.packages import (
 from geometry_msgs.msg import PoseStamped
 from rclpy.action import ActionClient
 from rclpy.node import Node
+from rclpy.time import Time
+from tf2_ros import Buffer, TransformException, TransformListener
 from rclpy.qos import (
     HistoryPolicy,
     QoSProfile,
@@ -76,6 +80,25 @@ class TaskManagerNode(Node):
             5.0,
         )
 
+        # Nav2 위치 허용오차 5cm를 고려하여 35cm 목표를 보내고,
+        # 실제로는 약 30cm 이상 책장에서 후퇴하도록 한다.
+        self.declare_parameter(
+            "shelf_retreat_goal_distance_m",
+            0.35,
+        )
+        self.declare_parameter(
+            "global_frame",
+            "map",
+        )
+        self.declare_parameter(
+            "robot_base_frame",
+            "base_link",
+        )
+        self.declare_parameter(
+            "arm_base_frame",
+            "arm_base_link",
+        )
+
         self.declare_parameter(
             "load_tray_action",
             "/load_tray",
@@ -137,6 +160,13 @@ class TaskManagerNode(Node):
             navigation_action,
         )
         self._navigation_goal_handle = None
+
+        self._tf_buffer = Buffer()
+        self._tf_listener = TransformListener(
+            self._tf_buffer,
+            self,
+            spin_thread=False,
+        )
 
         self._load_tray_client = ActionClient(
             self,
@@ -403,6 +433,154 @@ class TaskManagerNode(Node):
             enable_fine_alignment=True,
         )
 
+    @staticmethod
+    def _yaw_from_quaternion(quaternion) -> float:
+        """Return planar yaw from a quaternion."""
+        sin_yaw = 2.0 * (
+            quaternion.w * quaternion.z
+            + quaternion.x * quaternion.y
+        )
+        cos_yaw = 1.0 - 2.0 * (
+            quaternion.y * quaternion.y
+            + quaternion.z * quaternion.z
+        )
+        return math.atan2(sin_yaw, cos_yaw)
+
+    def _send_shelf_retreat(self) -> None:
+        """Retreat from the shelf before requesting the home route."""
+        global_frame = str(
+            self.get_parameter("global_frame").value
+        )
+        robot_base_frame = str(
+            self.get_parameter("robot_base_frame").value
+        )
+        arm_base_frame = str(
+            self.get_parameter("arm_base_frame").value
+        )
+        retreat_distance = float(
+            self.get_parameter(
+                "shelf_retreat_goal_distance_m"
+            ).value
+        )
+
+        # 이 목표가 0.40m 접근 반경 밖이면 Start occupied 발생 시
+        # navigation_node가 정밀 정렬 후퇴로 전환할 수 없다.
+        if not 0.0 < retreat_distance < 0.40:
+            self._fail_navigation(
+                error_code=self.ERROR_NAVIGATION_RESULT,
+                message=(
+                    "Shelf retreat distance must be between "
+                    f"0.0 and 0.40 m: {retreat_distance:.3f}"
+                ),
+            )
+            return
+
+        try:
+            base_transform = self._tf_buffer.lookup_transform(
+                global_frame,
+                robot_base_frame,
+                Time(),
+            )
+            arm_transform = self._tf_buffer.lookup_transform(
+                global_frame,
+                arm_base_frame,
+                Time(),
+            )
+        except TransformException as error:
+            self._fail_navigation(
+                error_code=self.ERROR_NAVIGATION_RESULT,
+                message=(
+                    "Failed to obtain TF for shelf retreat: "
+                    f"{error}"
+                ),
+            )
+            return
+
+        base_translation = (
+            base_transform.transform.translation
+        )
+        base_rotation = (
+            base_transform.transform.rotation
+        )
+        arm_rotation = (
+            arm_transform.transform.rotation
+        )
+
+        arm_yaw = self._yaw_from_quaternion(
+            arm_rotation
+        )
+
+        # arm_base_link +Y가 책장 방향이므로 -Y가 후퇴 방향이다.
+        target_x = (
+            base_translation.x
+            + math.sin(arm_yaw) * retreat_distance
+        )
+        target_y = (
+            base_translation.y
+            - math.cos(arm_yaw) * retreat_distance
+        )
+
+        retreat_pose = {
+            "position": {
+                "x": target_x,
+                "y": target_y,
+                "z": base_translation.z,
+            },
+            "orientation": {
+                "x": base_rotation.x,
+                "y": base_rotation.y,
+                "z": base_rotation.z,
+                "w": base_rotation.w,
+            },
+        }
+
+        self._status_message = (
+            "Retreating from the shelf before returning home."
+        )
+        self._publish_status()
+
+        self.get_logger().info(
+            "Sending shelf-retreat navigation goal: "
+            f"goal_distance={retreat_distance:.2f}m, "
+            f"target_map=({target_x:+.3f}, {target_y:+.3f})"
+        )
+
+        self._send_navigation_goal(
+            target_type="shelf_retreat",
+            target_id="shelf_retreat",
+            frame_id=global_frame,
+            target_pose=retreat_pose,
+            waypoints=[],
+            enable_fine_alignment=True,
+        )
+
+    def _handle_shelf_retreat_arrival(self) -> None:
+        """Send the normal home goal after clearing the shelf."""
+        if (
+            self._fsm.current_state
+            is not SystemState.RETURN_HOME
+        ):
+            self._fail_navigation(
+                error_code=self.ERROR_NAVIGATION_RESULT,
+                message=(
+                    "Shelf-retreat result received in "
+                    f"state '{self._fsm.current_state.name}'."
+                ),
+            )
+            return
+
+        self.get_logger().info(
+            "Shelf retreat completed. "
+            "Sending the home navigation goal."
+        )
+
+        self._status_message = (
+            "Shelf retreat completed. Returning home."
+        )
+        self._publish_status()
+
+        self._send_navigation_home()
+
     def _send_navigation_home(self) -> None:
         """Send a navigation goal for the home position."""
         if self._current_plan is None:
@@ -643,6 +821,13 @@ class TaskManagerNode(Node):
             == "return_station"
         ):
             self._handle_return_station_arrival()
+            return
+
+        if (
+            self._active_navigation_target_type
+            == "shelf_retreat"
+        ):
+            self._handle_shelf_retreat_arrival()
             return
 
         if self._active_navigation_target_type == "shelf":
@@ -895,6 +1080,41 @@ class TaskManagerNode(Node):
             f"{len(self._current_plan.tasks)}, "
             f"target_shelf={task.shelf_id}"
         )
+
+        same_shelf_as_previous = False
+
+        if self._current_task_index > 0:
+            previous_task = self._current_plan.tasks[
+                self._current_task_index - 1
+            ]
+            same_shelf_as_previous = (
+                previous_task.shelf_id == task.shelf_id
+                and previous_task.shelf_frame_id
+                == task.shelf_frame_id
+            )
+
+        if same_shelf_as_previous:
+            self._fsm.transition(
+                SystemState.PLACE_BOOK
+            )
+            self._status_message = (
+                f"Already at shelf '{task.shelf_id}'. "
+                "Starting the next book placement."
+            )
+            self._publish_status()
+
+            self.get_logger().info(
+                "Same shelf as previous task; "
+                "skipping redundant shelf navigation: "
+                f"shelf_id={task.shelf_id}"
+            )
+            self.get_logger().info(
+                "FSM transition completed: "
+                "SELECT_BOOK -> PLACE_BOOK"
+            )
+
+            self._send_place_book_goal()
+            return
 
         self._fsm.transition(
             SystemState.NAV_TO_SHELF
@@ -1277,7 +1497,7 @@ class TaskManagerNode(Node):
             "NEXT_BOOK -> RETURN_HOME"
         )
 
-        self._send_navigation_home()
+        self._send_shelf_retreat()
 
     def _fail_manipulation(
         self,

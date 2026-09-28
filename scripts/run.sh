@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 # Book Shelving System 통합 실행 진입점.
 #
-# 현재 지원 모드:
-#   navigation-test
-#
-# 향후 지원 예정:
-#   full
+# 지원 모드:
+#   navigation-test  Nav2 + mock manipulation
+#   full             Nav2 + perception + actual Isaac manipulation
 
 set -Eeo pipefail
 
@@ -256,13 +254,6 @@ case "$MODE" in
         ;;
 
     full)
-        print_error \
-            "full 모드는 아직 구현되지 않았습니다."
-
-        print_error \
-            "현재는 navigation-test만 사용할 수 있습니다."
-
-        exit 2
         ;;
 
     *)
@@ -271,7 +262,7 @@ case "$MODE" in
         printf '%s\n' \
             "사용 가능한 모드:" \
             "  navigation-test" \
-            "  full  (아직 미구현)" \
+            "  full" \
             >&2
 
         exit 2
@@ -310,6 +301,19 @@ fi
 source /opt/ros/jazzy/setup.bash
 source "$ROS_WORKSPACE/install/setup.bash"
 
+# Perception의 YOLO/PyTorch는 프로젝트 가상환경에 설치되어 있다. ROS 노드는
+# 시스템 Python으로 실행되므로 해당 site-packages만 명시적으로 노출한다.
+PERCEPTION_SITE_PACKAGES="$REPO_ROOT/.venv/lib/python3.12/site-packages"
+if [[ "$MODE" == "full" ]]; then
+    if [[ ! -d "$PERCEPTION_SITE_PACKAGES/ultralytics" ]]; then
+        print_error \
+            "full 모드에 필요한 ultralytics가 프로젝트 .venv에 없습니다:"
+        print_error "$PERCEPTION_SITE_PACKAGES"
+        exit 1
+    fi
+    export PYTHONPATH="$PERCEPTION_SITE_PACKAGES${PYTHONPATH:+:$PYTHONPATH}"
+fi
+
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-130}"
 export RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}"
 
@@ -333,7 +337,12 @@ if pgrep -f -- "$REPO_ROOT/isaac_sim/run_simulation.py" >/dev/null; then
 fi
 print_message "Isaac Sim 실행"
 
-setsid "$ISAAC_RUNNER" &
+ISAAC_ARGUMENTS=()
+if [[ "$MODE" == "full" ]]; then
+    ISAAC_ARGUMENTS+=(--enable-manipulation)
+fi
+
+setsid "$ISAAC_RUNNER" "${ISAAC_ARGUMENTS[@]}" &
 ISAAC_PID=$!
 
 
@@ -356,6 +365,29 @@ wait_until \
     topic_is_publishing \
     "/lidar/points_raw" \
     "sensor_msgs/msg/PointCloud2"
+
+if [[ "$MODE" == "full" ]]; then
+    wait_until \
+        "Franka camera RGB /rgb" \
+        "$STARTUP_TIMEOUT_SEC" \
+        topic_is_publishing \
+        "/rgb" \
+        "sensor_msgs/msg/Image"
+
+    wait_until \
+        "Franka camera depth /depth" \
+        "$STARTUP_TIMEOUT_SEC" \
+        topic_is_publishing \
+        "/depth" \
+        "sensor_msgs/msg/Image"
+
+    wait_until \
+        "Franka camera info /camera_info" \
+        "$STARTUP_TIMEOUT_SEC" \
+        topic_is_publishing \
+        "/camera_info" \
+        "sensor_msgs/msg/CameraInfo"
+fi
 
 print_message "ROS 통합 launch 실행"
 
@@ -389,11 +421,31 @@ wait_until \
     "/navigate_to_target"
 
 
-wait_until \
-    "Mock /place_book action" \
-    "$ROS_READY_TIMEOUT_SEC" \
-    action_exists \
-    "/place_book"
+if [[ "$MODE" == "navigation-test" ]]; then
+    wait_until \
+        "Mock /place_book action" \
+        "$ROS_READY_TIMEOUT_SEC" \
+        action_exists \
+        "/place_book"
+else
+    wait_until \
+        "Perception /detect_grasp_point action" \
+        "$ROS_READY_TIMEOUT_SEC" \
+        action_exists \
+        "/detect_grasp_point"
+
+    wait_until \
+        "Perception /detect_target_slot action" \
+        "$ROS_READY_TIMEOUT_SEC" \
+        action_exists \
+        "/detect_target_slot"
+
+    wait_until \
+        "Production /place_book action" \
+        "$ROS_READY_TIMEOUT_SEC" \
+        action_exists \
+        "/place_book"
+fi
 
 wait_until \
     "Tray /load_tray action" \
