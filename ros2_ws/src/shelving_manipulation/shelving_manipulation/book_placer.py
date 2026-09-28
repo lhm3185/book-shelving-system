@@ -570,6 +570,33 @@ class MockSimExecutor:
         return dict(base, status=SIM_RUNNING, phase=phase)
 
 
+def gate_book_points(points, region_min, region_max):
+    """
+    책 관측을 **한 점씩** 파지 허용 범위로 거른다 → `(남긴 점들, 버린 점들)`.
+
+    왜 (2026-09-28, 새 텍스처 레벨): 트레이에 한 권만 남으면 비전의 1등이 서가 책으로
+    넘어가는 프레임이 섞였다. 지금까지는 **먼저 합의하고 나서** 범위를 봤다 — 범위 밖 무리가
+    먼저 두 번 보이면 그 무리가 뽑히고, 곧바로 `410` 으로 끝났다. 범위 안 관측(트레이 책)이
+    뒤따라오고 있어도 기다리지 않았고, `410` 은 FSM 이 전이하지 못하는 코드다.
+
+    **문턱은 그대로다.** 같은 범위를 합의 뒤가 아니라 합의 앞에 적용할 뿐이다. 범위 밖 좌표로는
+    전에도 안 갔고 지금도 안 간다. 달라지는 것은 범위 밖 관측이 **합의를 가로채지 못한다**는 것과,
+    끝까지 범위 안 관측이 없으면 `410` 이 아니라 `411`(재시도 가능)로 끝난다는 것이다.
+
+    좌표는 전부 팔 기준(arm_base_link), 단위 m.
+    """
+    lo = [float(v) for v in region_min]
+    hi = [float(v) for v in region_max]
+    kept, dropped = [], []
+    for point in points:
+        p = (float(point[0]), float(point[1]), float(point[2]))
+        if all(lo[i] <= p[i] <= hi[i] for i in range(3)):
+            kept.append(p)
+        else:
+            dropped.append(p)
+    return kept, dropped
+
+
 def steady_book(points, y_group_m=0.04, min_count=2):
     """
     여러 프레임의 책 관측에서 **한 권을 골라 안정된 좌표**를 낸다.

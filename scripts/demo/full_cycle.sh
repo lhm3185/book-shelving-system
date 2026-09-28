@@ -158,6 +158,7 @@ spawn ros2 run shelving_perception vision_manager --ros-args \
 #   칸4(+0.548)까지 덮는다. 서가 책(y 0.52~0.59)은 x 상한 -0.26 이 거른다 (서가 책 x -0.02~+0.46).
 spawn ros2 run shelving_manipulation manipulation_node --ros-args \
     --params-file "$REPO/ros2_ws/src/shelving_manipulation/config/manipulation.yaml" -p executor:=sim \
+    -p book_obs_prefilter:="${MAN_BOOK_PREFILTER:-false}" \
     ${MAN_EXTRA:-} > "$LOG/manipulation.log" 2>&1
 spawn ros2 run shelving_navigation nav_manager --ros-args \
     --params-file "$REPO/ros2_ws/src/shelving_navigation/config/navigation.yaml" \

@@ -549,3 +549,24 @@ def test_scan_cache_decision():
     assert scan_cache_decision(cache, True, '/World/x/_11')[0] == 'use'
     how, why = scan_cache_decision(cache, True, '/World/x/_01')
     assert how == 'sweep' and '서가가 바뀜' in why
+
+
+def test_gate_book_points_범위_밖은_한_점씩_빠진다():
+    from shelving_manipulation.book_placer import gate_book_points, steady_book
+    lo, hi = [-0.70, -0.35, 0.05], [-0.15, 0.42, 0.30]
+    tray = [(-0.337, 0.364, 0.210), (-0.338, 0.365, 0.209)]
+    intruder = [(-0.384, 0.477, 0.223), (-0.384, 0.477, 0.222)]
+    kept, out = gate_book_points(intruder + tray, lo, hi)
+    assert kept == tray and out == intruder
+    # 거르지 않으면 먼저 두 번 보인 끼어든 무리가 합의를 가져간다 — 그게 410 이던 길이다
+    assert abs(steady_book(intruder + tray)[1] - 0.477) < 1e-9
+    assert abs(steady_book(kept)[1] - 0.3645) < 1e-9
+
+
+def test_gate_book_points_경계값은_안이고_전부_밖이면_빈_목록이다():
+    from shelving_manipulation.book_placer import gate_book_points
+    lo, hi = [-0.70, -0.35, 0.05], [-0.15, 0.42, 0.30]
+    kept, out = gate_book_points([(-0.15, 0.42, 0.30)], lo, hi)
+    assert kept == [(-0.15, 0.42, 0.30)] and out == []
+    kept, out = gate_book_points([(0.0, 0.5, 0.4)], lo, hi)
+    assert kept == [] and len(out) == 1

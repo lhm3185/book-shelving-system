@@ -37,7 +37,7 @@ from .book_placer import (cancel_command, choose_gap_any_board, COMMAND_MEASURE,
                           COMMAND_ROTATE_BASE, decode, encode, error_name, internal_failure,
                           MockSimExecutor, Outcome, PlaceTracker, publish_feedback_safely,
                           scan_cache_decision, SIM_CANCELLED, SIM_FAILED, SIM_SUCCEEDED,
-                          stale_gap_reason, steady_book)
+                          stale_gap_reason, steady_book, gate_book_points)
 from .grasp_planner import (build_place_command, DEFAULT_LIMITS, GraspGoal, parse_profile,
                             parse_tray, PlaceGoal, resolve_book, select_tray_slot, SlotGoal,
                             snap_grasp_to_slot, validate_goal, validate_grasp)
@@ -95,6 +95,10 @@ class ManipulationNode(Node):
         self.place_standoff_m = float(p('place_standoff_m', 0.444).value)
         self.scan_timeout_s = float(p('scan_timeout_s', 180.0).value)
         self.book_detect_timeout_s = float(p('book_detect_timeout_s', 15.0).value)
+        # 책 관측을 **합의 전에** 파지 허용 범위로 거른다 (2026-09-28). 기본 꺼짐 = 지금까지의 동작
+        # (합의 뒤에 범위를 보고, 밖이면 곧바로 410). 켜면 범위 밖 관측이 합의를 가로채지 못하고,
+        # 범위 안 관측이 끝내 없으면 411 로 끝난다. 범위 값 자체는 바뀌지 않는다.
+        self.book_obs_prefilter = bool(p('book_obs_prefilter', False).value)
         self.slot_center_inset = float(p('slot_center_inset', 0.024).value)
         self.fixed_insertion_depth = float(p('fixed_insertion_depth', 0.30).value)
         self.vision_grasp_min = tuple(float(v) for v in p(
@@ -694,6 +698,7 @@ class ManipulationNode(Node):
             self._book_observations.clear()
         started = time.monotonic()
         last_trigger = 0.0
+        dropped_seen = 0
         self._feedback(goal_handle, 'DETECTING_BOOK', 0.18)
         while time.monotonic() - started < self.book_detect_timeout_s:
             now = time.monotonic()
@@ -709,11 +714,23 @@ class ManipulationNode(Node):
                           if observed_at >= started
                           and msg.header.frame_id == self.limits['frame_id']]
             if recent:
+                _pts = [(m.point.x, m.point.y, m.point.z) for m in recent]
+                if self.book_obs_prefilter:
+                    _pts, _out = gate_book_points(
+                        _pts, self.vision_grasp_min, self.vision_grasp_max)
+                    if len(_out) != dropped_seen:
+                        dropped_seen = len(_out)
+                        _last = tuple(round(v, 3) for v in _out[-1])
+                        self.get_logger().info(
+                            f'[책관측] 범위 밖 관측 {len(_out)}개를 합의에서 뺀다 — 마지막 {_last} '
+                            f'(범위 {self.vision_grasp_min} ~ {self.vision_grasp_max}). '
+                            f'범위 안 {len(_pts)}개')
+                    if not _pts:
+                        continue
                 # **마지막 프레임 하나를 쓰지 않는다.** 2026-09-24 실측: 한 판 안에서
                 # 같은 책의 x 가 50 mm 튀고, 프레임마다 **다른 책**이 뽑히기도 한다.
                 # 어느 프레임이 마지막이냐가 결과를 정하고 있었다 (41 mm 어긋나 411).
-                _bx, _by, _bz, _why = steady_book(
-                    [(m.point.x, m.point.y, m.point.z) for m in recent])
+                _bx, _by, _bz, _why = steady_book(_pts)
                 if _bx is None:
                     self.get_logger().warning(f'책 관측이 안 정해진다: {_why} — 더 본다')
                     continue
@@ -728,8 +745,9 @@ class ManipulationNode(Node):
                     spine_yaw=0.0, thickness=goal.book_thickness,
                     width=goal.book_width, confidence=1.0, age_s=0.0)
                 return replace(goal, grasp=grasp), 0, ''
+        _note = f' (범위 밖 관측 {dropped_seen}개는 뺐다)' if dropped_seen else ''
         return None, 411, \
-            f'책 관측 자세에서 {self.book_detect_timeout_s:.0f}s 동안 책 좌표 없음'
+            f'책 관측 자세에서 {self.book_detect_timeout_s:.0f}s 동안 책 좌표 없음{_note}'
 
     def _auto_perception(self, goal_handle, goal):
         """
