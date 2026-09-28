@@ -118,9 +118,9 @@ NVIDIA 공식 문서(License FAQ)에서 확인한 것:
 
 ## 4. 현장 관문 — 순서
 
-**2026-09-29 갱신**: 새 레벨이 집 데스크탑에서 세 판 연속 섰다(코드 2a9e074). **태그 `freeze-20260929-shaded` 는
-쓰지 않는다** — 시작하자마자 죽는 커밋을 가리킨다. 새 태그 `freeze-20260929-shaded-r1` 이 찍히면 그것을, 그 전에는
-`work/demo_0928` 의 머리를 체크아웃한다. 설정은 `cli_exchange/handoff_0929/demo_env.sh` 의 경로만 이 PC 에 맞춘다.
+**2026-09-29 갱신**: 새 레벨이 집 데스크탑에서 섰다. **쓰는 태그는 `freeze-20260929-shaded-r1` (5c77c0b)** — 새 셸에서
+`source cli_exchange/handoff_0929/demo_env.sh` → `bash scripts/demo/full_cycle.sh` 두 줄로 4/4 가 선 커밋이다.
+r1 없는 `freeze-20260929-shaded` 는 시작하자마자 죽으니 쓰지 않는다. 현장에서는 `demo_env.sh` 맨 위 세 줄만 고친다.
 로봇 에셋은 하나씩 옮기지 못한다 — `ridgeback_franka.usd` 가 다시 13개, `rsd455.usd` 가 5개를 참조한다(2026-09-29 실측).
 Collect 본이 없으면 인터넷이 필수다.
 
