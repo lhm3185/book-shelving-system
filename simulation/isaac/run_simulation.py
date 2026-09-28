@@ -219,7 +219,13 @@ if args.record_dir:
     os.makedirs(_out, exist_ok=True)
     from isaacsim.core.utils.stage import get_current_stage as _get_stage
     _st = _get_stage()
-    _UsdLux.DomeLight.Define(_st, "/World/rec_dome").CreateIntensityAttr(600.0)
+    # **녹화용 돔 라이트.** 헤드리스 렌더가 너무 어두워 붙인 것인데, 레벨의 조명을
+    # 도윤님이 손으로 맞춘 뒤로는 그림을 바꿔 버린다. `SIM_REC_DOME=0` 이면 안 만든다.
+    _dome = float(os.environ.get("SIM_REC_DOME", "600"))
+    if _dome > 0:
+        _UsdLux.DomeLight.Define(_st, "/World/rec_dome").CreateIntensityAttr(_dome)
+    else:
+        say("녹화: 돔 라이트 안 붙인다 (SIM_REC_DOME=0) — 레벨 조명 그대로 찍는다")
     # 카메라는 아래에서 **시점마다** 만든다 (`/World/rec_cam_<이름>`).
     # 로봇·트레이가 한 화면에 들어오도록 **로봇 AABB 로 자동 구도**를 잡는다
     from isaacsim.core.utils.bounds import compute_aabb as _aabb, create_bbox_cache as _bbc
@@ -234,6 +240,20 @@ if args.record_dir:
     _eye = (_np.array(args.record_eye, float) if args.record_eye
             else _mid + _np.array([_rad * 0.9, -_rad * 1.0, _rad * 0.55]))
     _shots = {"": (_eye, _tgt)}
+    # **시점을 더 붙인다.** `SIM_REC_SHOTS="이름=ex,ey,ez@tx,ty,tz;…"`.
+    # 자동 구도는 시작할 때 로봇 AABB 로 한 번 잡고 고정이라 로봇을 따라가지 않는다 —
+    # 서가까지 주행하는 판을 한 화면에 담으려면 넓은 시점을 따로 줘야 한다 (2026-09-29).
+    for _spec in os.environ.get("SIM_REC_SHOTS", "").split(";"):
+        _spec = _spec.strip()
+        if not _spec:
+            continue
+        try:
+            _nm, _rest = _spec.split("=", 1)
+            _e_s, _t_s = _rest.split("@", 1)
+            _shots[_nm.strip()] = (_np.array([float(v) for v in _e_s.split(",")], float),
+                                   _np.array([float(v) for v in _t_s.split(",")], float))
+        except (ValueError, IndexError):
+            say(f"녹화: 시점을 못 읽었다 — {_spec!r} (꼴: 이름=ex,ey,ez@tx,ty,tz)")
     say(f"녹화 구도: 로봇 중심 {_np.round(_mid,2).tolist()} 크기 {_rad:.2f} m "
         f"→ 카메라 {_np.round(_eye,2).tolist()}")
     def _look_at(_e, _t):
