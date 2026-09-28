@@ -2191,6 +2191,43 @@ class BookScene:
         return None, (f"j1 한계: q1={q1_now:+.3f} Δφ 후보 {[round(c, 3) for c in cands]} "
                       f"한계 {lo[0]:+.3f}~{hi[0]:+.3f}")
 
+    def _d_retry_seeds(self, q_tr, pre_ins, HORIZ):
+        """d 의 끝 자세(pre_ins@HORIZ)를 **다른 씨앗으로 다시 풀어** 처짐이 가장 작은 관절 경로를 고른다.
+
+        왜 (2026-09-29 새 레벨 판 2 · 옛 레벨 기준선): 꽂기 직전 자세는 팔 기준으로 매번 같은 자리인데,
+        IK 가 떨어지는 가지는 **출발 자세(어느 트레이 자리의 책을 집었나)** 에 달려 있었다.
+
+                  j1      j2      j3      j4      j5      j6      j7
+            옛 레벨 네 권 · 새 레벨 1·2권째   j2 음수 · j6 2.43 ~ 2.82          처짐 0 mm
+            새 레벨 3권째 (트레이 y +0.155)    j2 +1.141 · j5 -2.627 · j6 +0.881   처짐 184 mm · 후퇴 403
+
+        좋은 가지는 관절 6 의 한계(3.0) 바로 아래에 있어서, 씨앗이 조금만 달라도 한계를 넘는 해가 먼저 나와
+        버려지고 먼 가지가 남는다. **앞 권이 같은 자리에 도착했던 관절값**을 씨앗으로 주면 그 가지로 떨어진다.
+        가지를 숫자(j2 부호 · j6 크기)로 고르지 않는다 — **처짐을 재서** 가장 작은 것을 쓴다.
+        돌려주는 값: `(처짐 m, 씨앗 이름, 관절 경로[q_tr 포함], 후보별 기록)` 또는 `(None, None, None, 기록)`.
+        """
+        q_tr = np.asarray(q_tr, float)
+        seeds = [(f"앞 권 {i + 1}", q) for i, q in enumerate(reversed(getattr(self, "_pre_ins_seeds", [])))]
+        best = None
+        notes = []
+        for name, seed in seeds:
+            sol, ok = self.ik_joints(np.asarray(pre_ins, float), np.asarray(HORIZ, float),
+                                     np.asarray(seed, float))
+            if not ok:
+                notes.append(f"{name}: IK 실패")
+                continue
+            sol = np.asarray(sol, float)
+            path = [q_tr.copy()] + [np.asarray(v, float) for v in self._joint_interp(q_tr, sol)]
+            zs = [float(self.lula.compute_forward_kinematics(BOT.ee_frame, _q)[0][2]) for _q in path]
+            rep = sag_report(zs, 0.0, None)
+            notes.append(f"{name}: 처짐 {rep['sag_m'] * 1000:.0f} mm · 관절 Δ최대 "
+                         f"{float(np.max(np.abs(sol - q_tr))):.2f} rad · 끝 j2 {sol[1]:+.2f} j6 {sol[5]:+.2f}")
+            if best is None or rep["sag_m"] < best[0]:
+                best = (rep["sag_m"], name, path)
+        if best is None:
+            return None, None, None, notes
+        return best[0], best[1], best[2], notes
+
     def _swing_fallback(self, q_start, p_sw, O_sw, pre_ins, HORIZ, err):
         """되돌림 경로 — 바깥으로 뻗어 손목을 돌리고 HORIZ 직선으로 pre_ins 까지.
 
@@ -2352,6 +2389,7 @@ class BookScene:
         except ValueError:
             _sag_max = 0.0
         _cd = None
+        _sag = None
         _use_fb = part is None
         _why_fb = f"c(reach) 직교 실패: {err}"
         if part is not None:
@@ -2370,7 +2408,6 @@ class BookScene:
             # **d 의 처짐을 잰다.** 처짐 = 양 끝 중 낮은 쪽보다 더 내려간 만큼. 꽂기 직전 자세는 아래 판
             # (0.4976)이 트레이 책 윗면(0.53~0.56)보다 낮아 **설계상** 바닥선 아래이므로, 바닥선 여유가 아니라
             # 처짐으로 판단한다.
-            _sag = None
             try:
                 _zs_d = [float(self.lula.compute_forward_kinematics(
                     BOT.ee_frame, np.asarray(_q, float))[0][2]) for _q in part_d]
@@ -2381,10 +2418,26 @@ class BookScene:
             except Exception as _exc:      # noqa: BLE001 - 계측이 계획을 죽이면 안 된다
                 self.say(f"[스윙] d(reorient) 처짐 계측 실패 — {_exc}")
             if _sag_max > 0.0 and _sag is not None and _sag["sag_m"] > _sag_max:
-                _use_fb = True
                 _why_fb = (f"d 처짐 {_sag['sag_m'] * 1000:.0f} mm > {_sag_max * 1000:.0f} mm "
                            f"[SIM_D_SAG_MAX_M]")
-                self.say(f"[스윙] {_why_fb} → c·d 를 버리고 되돌림으로 바꿔 본다")
+                # **첫째 수 — 끝 자세를 앞 권의 관절값을 씨앗으로 다시 푼다.** c·d 의 꼴과 도착 가지가
+                # 검증된 판과 같아진다. 그래도 내려앉으면 되돌림으로 간다.
+                _s_alt, _n_alt, _p_alt, _notes = None, None, None, []
+                try:
+                    _s_alt, _n_alt, _p_alt, _notes = self._d_retry_seeds(_c[-1], pre_ins, HORIZ)
+                except Exception as _exc:      # noqa: BLE001 - 새 수가 계획을 죽이면 안 된다
+                    _notes = [f"씨앗 바꾸기 실패 — {_exc}"]
+                self.say(f"[스윙] {_why_fb} → 끝 자세를 다른 씨앗으로 다시 푼다: "
+                         f"{' | '.join(_notes) if _notes else '쓸 씨앗이 없다(이 판의 첫 권)'}")
+                if _s_alt is not None and _s_alt <= _sag_max:
+                    part_d = _p_alt
+                    how = f"관절공간·씨앗 {_n_alt}(처짐 {_s_alt * 1000:.0f} mm)"
+                    _cd = (_c, part_d, how)
+                    _sag = dict(_sag, sag_m=_s_alt)
+                    self.say(f"[스윙] d 를 씨앗 '{_n_alt}' 의 해로 잇는다 — 처짐 {_s_alt * 1000:.0f} mm")
+                else:
+                    _use_fb = True
+                    self.say("[스윙] 씨앗을 바꿔도 내려앉는다 → c·d 를 버리고 되돌림으로 바꿔 본다")
         _fb = None
         if _use_fb:
             _fb, _fb_err = self._swing_fallback(qs[-1], p_sw, O_sw, pre_ins, HORIZ, _why_fb)
@@ -2433,6 +2486,17 @@ class BookScene:
             q_c_path = _c
             qs.extend(part_d[1:])
             n_d = len(part_d) - 1
+        # **꽂기 직전에 도착한 관절값을 기억한다** — 다음 권의 d 가 내려앉을 때 씨앗으로 쓴다.
+        # 내려앉은 채 도착한 값(먼 가지)은 넣지 않는다.
+        try:
+            _ok_end = _fb is not None or _sag is None or _sag["sag_m"] <= 0.03
+            if _ok_end and len(qs):
+                if not hasattr(self, "_pre_ins_seeds"):
+                    self._pre_ins_seeds = []
+                self._pre_ins_seeds.append(np.asarray(qs[-1], float).copy())
+                self._pre_ins_seeds = self._pre_ins_seeds[-6:]
+        except Exception:      # noqa: BLE001 - 기억 못 해도 계획은 간다
+            pass
         self._swing = {"dphi": dphi, "p_sw": p_sw, "O_sw": O_sw,
                        "q_b_start": np.asarray(qs[n_a], float).copy(), "q_b_end": q_b_end,
                        "q_c_path": q_c_path}       # q_sw … 운반 끝. return 이 거꾸로 되짚는다
