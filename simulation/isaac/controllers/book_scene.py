@@ -190,6 +190,11 @@ MAX_STEP = float(os.environ.get("SIM_MAX_STEP", "0.12"))
 #: 스윙 되돌림에서 손목을 돌리는 반지름 (팔 기준, m). 오프라인 표에서 HORIZ 여유가 0.6 대로
 #: 넉넉하고, 매달린 책 끝(y +0.19)이 서가 앞면(0.444)에 못 미치는 값 (2026-09-25).
 SWING_TURN_R = 0.50
+#: 손목을 돌리는 자리를 스윙 높이에서 이만큼씩 올려 가며 시도한다(m). 관절공간 되돌림이 손끝을 200 mm
+#: 내려앉혀 트레이 책을 쳤다(2026-09-28 도윤님 육안). 첫 후보 0 이 통과하면 지금 경로 그대로다.
+SWING_TURN_UPS = (0.0, 0.10, 0.20, 0.30)
+#: 돌리는 구간에서 쥔 책 바닥이 트레이 책 윗면보다 이만큼은 높아야 한다(m)
+SWING_TURN_CLEAR_M = 0.03
 # 관절 경로 제한 시간. **안전장치이지 성능 목표가 아니다** — 팔이 명령 속도를
 # 그대로 따라가지 못하면 계산한 시간보다 오래 걸린다. 2.0/3.0 으로는 팔이
 # 경유점 24/36 까지 잘 가고 있는데도 404 로 잘렸다 (2026-09-21 실측).
@@ -2259,31 +2264,76 @@ class BookScene:
             p_sw_arm = self.to_arm(p_sw)
             r_sw = float(math.hypot(p_sw_arm[0], p_sw_arm[1]))
             phi = math.atan2(float(p_sw_arm[1]), float(p_sw_arm[0]))
+            r_out = max(r_sw, SWING_TURN_R)
+            # **손목을 돌리는 동안 손끝이 내려앉는다.** 관절공간 되돌림(직교가 손목 특이점으로 실패할 때)은
+            # 양 끝 위치가 같아도 사이 위치를 안 지킨다 — 2026-09-28 도윤님 육안: 서가 A 2권째에서 팔이
+            # 트레이 위에서 200 mm 내려앉은 채 90° 를 돌아 트레이 책과 서가를 쳤다(FK 궤적: 손끝 0.672 → 0.479,
+            # 책 바닥이 트레이 책 윗면 0.533 보다 118 mm 아래). 그래서 돌리는 자리의 **높이를 올려 가며**
+            # 시도하고, 돌리는 구간의 책 바닥 최저점이 트레이 책 윗면(+여유)보다 높은 첫 후보를 쓴다.
+            # 바닥선은 트레이에 남은 책들의 AABB 윗면에서 잰다(쥔 책은 들려 있어 빠진다).
+            _floor = None
+            try:
+                _tops = [float(self.aabb(_b)[5]) for _b in self.books
+                         if float(self.aabb(_b)[2]) < float(self.tray_floor_z) + 0.10]
+                _floor = (max(_tops) if _tops else float(self.tray_floor_z)) + SWING_TURN_CLEAR_M
+            except Exception:      # noqa: BLE001 - 바닥선을 못 재면 높이만 올려 본다
+                _floor = None
+            _hang = float(getattr(self, "L", 0.2265)) - TIP_DOWN            # 손끝 아래로 매달린 책 길이
+            best = None
+            tried = []
+            for _up in SWING_TURN_UPS:
+                p_out = self.to_world([r_out * math.cos(phi), r_out * math.sin(phi), float(p_sw_arm[2]) + _up])
+                _parts = []
+                _q0 = qs[-1]
+                if r_sw < SWING_TURN_R - 1e-3 or _up > 1e-6:
+                    part, _w, err_o = self.plan_path([(p_sw, O_sw), (p_out, O_sw)], _q0)
+                    if part is None:
+                        tried.append(f"위로 {_up:.2f}: 바깥/위로 못 감({err_o})")
+                        continue
+                    _parts.append(("out", part))
+                    _q0 = part[-1]
+                wps_r = [(p_out, O_sw), (p_out, HORIZ)]
+                part, _w, err_r = self.plan_path(wps_r, _q0)
+                how_r = "직교"
+                if part is None:
+                    part, _w, err_r2 = self.plan_joint_path(wps_r, _q0)
+                    if part is None:
+                        tried.append(f"위로 {_up:.2f}: 손목 직교 {err_r} / 관절 {err_r2}")
+                        continue
+                    how_r = f"관절(직교 실패: {err_r})"
+                _parts.append(("turn", part))
+                # 돌리는 구간의 책 바닥 최저점 (월드 z)
+                _zmin = None
+                for _q in part:
+                    _pw, _ = self.lula.compute_forward_kinematics(BOT.ee_frame, np.asarray(_q, float))
+                    _zb = float(_pw[2]) - _hang
+                    _zmin = _zb if _zmin is None else min(_zmin, _zb)
+                _ok = _floor is None or _zmin >= _floor
+                tried.append(f"위로 {_up:.2f}: 손목 {how_r.split('(')[0]} 최저 책바닥 {_zmin:.3f}"
+                             f"{'' if _floor is None else f' (바닥선 {_floor:.3f})'}{' ✓' if _ok else ' ✗'}")
+                if best is None or (_zmin is not None and _zmin > best[0]):
+                    best = (_zmin, _up, p_out, _parts, how_r)
+                if _ok:
+                    break
+            if best is None:
+                return None, 0.0, f"스윙 c(reach): 직교 {err} / 되돌림 후보 전부 실패 — {' | '.join(tried)}"
+            _zmin, _up, p_out, _parts, how_r = best
+            if _floor is not None and _zmin < _floor:
+                self.say(f"[스윙] **경고** 돌리는 구간 책 바닥 최저 {_zmin:.3f} 가 바닥선 {_floor:.3f} 아래 — "
+                         f"후보 중 가장 높은 것을 쓴다: {' | '.join(tried)}")
+            else:
+                self.say(f"[스윙] 손목 돌리는 자리 위로 {_up:.2f} m (책 바닥 최저 {_zmin:.3f}"
+                         f"{'' if _floor is None else f', 바닥선 {_floor:.3f}'}) — {' | '.join(tried)}")
             q_c_path = []
             n_o = 0
-            p_out = p_sw
-            if r_sw < SWING_TURN_R - 1e-3:
-                p_out = self.to_world([SWING_TURN_R * math.cos(phi), SWING_TURN_R * math.sin(phi),
-                                       float(p_sw_arm[2])])
-                part, _w, err_o = self.plan_path([(p_sw, O_sw), (p_out, O_sw)], qs[-1])
-                if part is None:
-                    return None, 0.0, f"스윙 c(reach): 직교 {err} / 바깥으로 r {r_sw:.3f}→{SWING_TURN_R}: {err_o}"
-                n_o = len(part) - 1
-                q_c_path.extend(np.asarray(v, float).copy() for v in part)
+            for _kind, part in _parts:
+                if _kind == "out":
+                    n_o = len(part) - 1
+                    q_c_path.extend(np.asarray(v, float).copy() for v in part)
+                else:
+                    n_r = len(part) - 1
+                    q_c_path.extend(np.asarray(v, float).copy() for v in (part if not q_c_path else part[1:]))
                 qs.extend(part[1:])
-            # 손목 돌리기 — d 와 같은 순서: 직교(자세만 slerp) → 안 되면 관절공간
-            wps_r = [(p_out, O_sw), (p_out, HORIZ)]
-            part, _w, err_r = self.plan_path(wps_r, qs[-1])
-            how_r = "직교"
-            if part is None:
-                part, _w, err_r2 = self.plan_joint_path(wps_r, qs[-1])
-                if part is None:
-                    return None, 0.0, (f"스윙 c(reach): 직교 {err} / 손목(r {SWING_TURN_R}): "
-                                       f"직교 {err_r} / 관절 {err_r2}")
-                how_r = f"관절(직교 실패: {err_r})"
-            n_r = len(part) - 1
-            q_c_path.extend(np.asarray(v, float).copy() for v in (part if not q_c_path else part[1:]))
-            qs.extend(part[1:])
             part, _w, err_l = self.plan_path([(p_out, HORIZ), (np.asarray(pre_ins, float), HORIZ)], qs[-1])
             if part is None:
                 return None, 0.0, f"스윙 c(reach): 직교 {err} / 손목 뒤 HORIZ 직선: {err_l}"
@@ -2292,7 +2342,7 @@ class BookScene:
             n_c = len(part) - 1
             n_d = 0
             how = "없음"
-            how_c = (f"되돌림: 바깥 r {r_sw:.3f}→{SWING_TURN_R} ({n_o}점) → 손목 {n_r}점[{how_r}] "
+            how_c = (f"되돌림: 바깥 r {r_sw:.3f}→{r_out:.2f} 위로 {_up:.2f} ({n_o}점) → 손목 {n_r}점[{how_r}] "
                      f"→ HORIZ 직선 (직교 실패: {err})")
             self.say(f"[스윙] c(reach) 직교 실패 → 바깥으로 뻗어 손목 돌리고 HORIZ 로 올라간다 — {err}")
         self._swing = {"dphi": dphi, "p_sw": p_sw, "O_sw": O_sw,
