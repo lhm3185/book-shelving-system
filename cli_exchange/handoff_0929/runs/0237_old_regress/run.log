@@ -1,0 +1,454 @@
+책 대체: 저장소 usd_v2 4권
+      (뷰포트 녹화 끔 — REC_EVERY=0)
+[1/4] Isaac 시작 (약 3~4분) — 레벨 Final_Level_RnD.usd  02:37:19
+      준비 대기...
+      준비 완료 02:37:49
+ [py stderr]: ### 레벨 책 5권을 그대로 쓴다
+ [py stderr]: ### 장면 준비: 트레이 칸 6개, 책 5권, 원본 0종
+ [py stderr]: ###   팔 베이스 출발 자리 (+4.9850, -5.3071) yaw +90.00° — 돌아왔을 때 여기로 맞춘다
+ [py stderr]: ###   루트 출발 자리 (+4.9859, -5.6067) — **복귀는 여기로 간다** (팔 베이스와 0.300 m 다르다)
+[2/4] TF·비전·로봇팔·주행·FSM 노드  02:37:49
+[3/4] 반납 작업 1건 투입 (25.0s 뒤)  02:37:59
+[4/4] 진행 상태 — 검출 좌표·단계 전이를 실시간으로 (같은 내용이 /home/bryankim0200/b1_arm/logs/detections.log 에 남는다)  02:37:59
+   02:37:59 [조작] PlaceBook /place_book executor=sim profile=default tray_slots=6 status=/robot/status perception_bridge=True
+   02:37:59 [시뮬] 관측 자세 손목(관절 7) -59.2° → +30.8° 로 돌림 [SIM_HOME_J7_DEG=+90] (홈은 그대로)
+   02:37:59 [시뮬] 관측 자세 이동 [0.0, 0.0, 0.1] m: 손 [-0.389, 0.079, 0.573] → [-0.389, 0.079, 0.673], 관절 [2.811, -0.514, 0.102, -2.213, 0.051, 1.701, 0.538] → [2.094, -0.576, 0.563, -1.891, 0.3, 1.397, 0.278] (한계 여유 0.873) [SIM_HOME_SHIFT] (홈은
+   02:38:25 [FSM] FSM transition completed: PLANNING -> NAV_TO_RETURN
+   02:38:25 [FSM] Navigation succeeded: Navigation waypoint is already satisfied in simulation.
+   02:38:25 [FSM] FSM transition completed: NAV_TO_RETURN -> RECEIVE_TRAY
+   02:38:25 [FSM] FSM transition completed: RECEIVE_TRAY -> SELECT_BOOK
+   02:38:25 [FSM] FSM transition completed: SELECT_BOOK -> NAV_TO_SHELF
+   02:38:53 [시뮬] [주행] 도착 (-0.548, +1.225)
+   02:38:56 [시뮬] [주행] 회전 끝 — **실측** yaw +0.00° (목표 +0.00°)
+   02:38:56 [시뮬] [주행] 도착 (-0.548, +1.225)
+   02:38:57 [FSM] Navigation succeeded: Navigation completed.
+   02:38:57 [FSM] FSM transition completed: NAV_TO_SHELF -> DETECT_TARGET_SLOT
+   02:38:57 [조작] 베이스 회전 명령 전송 (목표 yaw +0°, 서가 거리 0.444)
+   02:38:57 [시뮬] 서가 앞면 0.443 m → 목표 0.444 m (앞뒤 -0.001), 서가 중심 팔기준 x -0.417 → 옆으로 -0.417: 차체를 0.417 m 옮긴다
+   02:39:01 [조작] 베이스 회전 완료
+   02:39:01 [시뮬] 서가 앞면 실측 0.444 m (목표 0.444), 서가 x 범위 팔기준 -0.71~+0.71
+   02:39:01 [시뮬] [스윕] 시작 자세 q=[2.811, -0.514, 0.102, -2.213, 0.051, 1.701, -1.033]
+   02:39:01 [시뮬] [스윕] 판 1.042 (팔기준 z 0.712, 앞면 0.444) 정지점 5/5 여유 0.171 rad 최대변화 0.06 길이 3.95
+   02:39:01 [시뮬] [스윕] 판 0.498 (팔기준 z 0.168, 앞면 0.444) 정지점 5/5 여유 0.225 rad 최대변화 0.05 길이 2.52
+   02:39:01 [시뮬] 스윕 시작: 판 [1.042, 0.498], 정지점 10개, 정지 1.2s
+   02:39:01 [시뮬] [판목록] 레벨 실측 [0.4976, 1.0417, 1.5812, 2.0582, 2.52] · 쓰는 값 [0.497, 0.498, 1.042] · 차이 [-0.3, -0.4, +0.6] mm  (그림자 — 판단은 상수 그대로)
+   02:39:08 [비전] ROI 밖 책: (0.022, 0.576, 0.395) @arm_base_link
+   02:39:08 [비전] ROI 밖 책: (-0.015, 0.578, 0.392) @arm_base_link
+   02:39:08 [비전] ROI 밖 책: (0.063, 0.576, 0.394) @arm_base_link
+   02:39:08 [비전] ROI 밖 책: (-0.084, 0.551, 0.398) @arm_base_link
+   02:39:08 [비전] ROI 밖 책: (-0.078, 0.529, 0.394) @arm_base_link
+   02:39:08 [비전] ROI 밖 책: (0.107, 0.575, 0.395) @arm_base_link
+   02:39:08 [비전] ROI 밖 책 6권 제외 (남은 0권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:39:08 [비전] Empty center pixel=(276, 259), shelf_front_z=1.528m; Depth L/C/R=0.432/6.085/2.624m; center-left=5.653m, center-right=3.461m; contrast=PASS
+   02:39:08 [비전] Empty shelf target: xyz=(-0.562, 1.650, 0.917)
+   02:39:08 [비전] ROI 밖 책: (0.064, 0.578, 0.392) @arm_base_link
+   02:39:08 [비전] ROI 밖 책: (0.023, 0.574, 0.397) @arm_base_link
+   02:39:08 [비전] ROI 밖 책: (0.103, 0.582, 0.395) @arm_base_link
+   02:39:08 [비전] ROI 밖 책: (-0.047, 0.575, 0.393) @arm_base_link
+   02:39:08 [비전] ROI 밖 책: (0.148, 0.579, 0.394) @arm_base_link
+   02:39:08 [비전] ROI 밖 책: (-0.031, 0.575, 0.394) @arm_base_link
+   02:39:08 [비전] ROI 밖 책: (-0.010, 0.580, 0.393) @arm_base_link
+   02:39:08 [비전] ROI 밖 책: (0.332, 0.575, 0.379) @arm_base_link
+   02:39:08 [비전] ROI 밖 책: (0.316, 0.564, 0.362) @arm_base_link
+   02:39:08 [비전] ROI 밖 책: (0.222, 0.554, 0.422) @arm_base_link
+   02:39:08 [비전] ROI 밖 책: (0.121, 0.582, 0.395) @arm_base_link
+   02:39:08 [비전] ROI 밖 책: (-0.066, 0.576, 0.395) @arm_base_link
+   02:39:08 [비전] ROI 밖 책: (-0.082, 0.555, 0.397) @arm_base_link
+   02:39:08 [비전] ROI 밖 책: (-0.057, 0.541, 0.395) @arm_base_link
+   02:39:08 [비전] ROI 밖 책: (-0.119, 0.531, 0.405) @arm_base_link
+   02:39:08 [비전] ROI 밖 책: (-0.227, 0.521, 0.337) @arm_base_link
+   02:39:08 [비전] ROI 밖 책 16권 제외 (남은 0권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (0.488, 0.578, 0.392) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (0.215, 0.536, 0.833) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (0.150, 0.584, 0.393) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (-0.031, 0.578, 0.393) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (0.200, 0.557, 0.415) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (-0.052, 0.576, 0.395) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (0.395, 0.568, 0.395) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (0.097, 0.579, 0.396) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (0.512, 0.583, 0.394) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (0.190, 0.581, 0.396) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (0.175, 0.533, 0.398) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (-0.074, 0.580, 0.395) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (0.063, 0.577, 0.392) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (0.351, 0.576, 0.395) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (0.435, 0.570, 0.395) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (0.133, 0.582, 0.393) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (0.097, 0.533, 0.395) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (0.172, 0.581, 0.396) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (0.452, 0.550, 0.394) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (0.460, 0.577, 0.394) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (0.374, 0.547, 0.395) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (0.529, 0.581, 0.396) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (0.457, 0.531, 0.394) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (0.333, 0.553, 0.371) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (0.022, 0.578, 0.395) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (0.108, 0.582, 0.395) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (-0.117, 0.590, 0.406) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (-0.047, 0.534, 0.392) @arm_base_link
+   02:39:10 [비전] ROI 밖 책: (-0.013, 0.578, 0.393) @arm_base_link
+   02:39:10 [비전] ROI 밖 책 29권 제외 (남은 0권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:39:10 [비전] Empty center pixel=(478, 567), shelf_front_z=0.534m; Depth L/C/R=0.500/0.649/0.568m; center-left=0.149m, center-right=0.081m; contrast=PASS
+   02:39:10 [비전] Empty shelf target: xyz=(0.261, 0.547, 0.391)
+   02:39:11 [비전] ROI 밖 책: (0.500, 0.579, 0.394) @arm_base_link
+   02:39:11 [비전] ROI 밖 책: (0.434, 0.569, 0.394) @arm_base_link
+   02:39:11 [비전] ROI 밖 책: (-0.071, 0.580, 0.395) @arm_base_link
+   02:39:11 [비전] ROI 밖 책: (-0.019, 0.578, 0.392) @arm_base_link
+   02:39:11 [비전] ROI 밖 책: (-0.049, 0.578, 0.394) @arm_base_link
+   02:39:11 [비전] ROI 밖 책: (-0.035, 0.578, 0.392) @arm_base_link
+   02:39:11 [비전] ROI 밖 책: (0.058, 0.576, 0.392) @arm_base_link
+   02:39:11 [비전] ROI 밖 책: (0.010, 0.577, 0.395) @arm_base_link
+   02:39:11 [비전] ROI 밖 책: (0.099, 0.575, 0.395) @arm_base_link
+   02:39:11 [비전] ROI 밖 책: (0.535, 0.574, 0.394) @arm_base_link
+   02:39:11 [비전] ROI 밖 책: (0.021, 0.575, 0.395) @arm_base_link
+   02:39:11 [비전] ROI 밖 책: (0.373, 0.533, 0.396) @arm_base_link
+   02:39:11 [비전] ROI 밖 책: (0.464, 0.574, 0.394) @arm_base_link
+   02:39:11 [비전] ROI 밖 책: (-0.118, 0.593, 0.404) @arm_base_link
+   02:39:11 [비전] ROI 밖 책: (0.575, 0.576, 0.394) @arm_base_link
+   02:39:11 [비전] ROI 밖 책: (0.084, 0.580, 0.395) @arm_base_link
+   02:39:11 [비전] ROI 밖 책: (0.042, 0.576, 0.395) @arm_base_link
+   02:39:11 [비전] ROI 밖 책: (0.143, 0.583, 0.393) @arm_base_link
+   02:39:11 [비전] ROI 밖 책: (0.208, 0.535, 0.835) @arm_base_link
+   02:39:11 [비전] ROI 밖 책: (0.335, 0.537, 0.389) @arm_base_link
+   02:39:11 [비전] ROI 밖 책: (0.292, 0.506, 0.866) @arm_base_link
+   02:39:11 [비전] ROI 밖 책: (0.397, 0.579, 0.395) @arm_base_link
+   02:39:11 [비전] ROI 밖 책 22권 제외 (남은 0권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:39:13 [비전] ROI 밖 책: (0.502, 0.576, 0.392) @arm_base_link
+   02:39:13 [비전] ROI 밖 책: (0.433, 0.580, 0.394) @arm_base_link
+   02:39:13 [비전] ROI 밖 책: (0.569, 0.577, 0.393) @arm_base_link
+   02:39:13 [비전] ROI 밖 책: (0.010, 0.576, 0.394) @arm_base_link
+   02:39:13 [비전] ROI 밖 책: (0.484, 0.575, 0.392) @arm_base_link
+   02:39:13 [비전] ROI 밖 책: (0.143, 0.584, 0.392) @arm_base_link
+   02:39:13 [비전] ROI 밖 책: (-0.031, 0.576, 0.394) @arm_base_link
+   02:39:13 [비전] ROI 밖 책: (0.088, 0.579, 0.395) @arm_base_link
+   02:39:13 [비전] ROI 밖 책: (0.604, 0.575, 0.397) @arm_base_link
+   02:39:13 [비전] ROI 밖 책: (0.053, 0.577, 0.393) @arm_base_link
+   02:39:13 [비전] ROI 밖 책: (0.540, 0.574, 0.396) @arm_base_link
+   02:39:13 [비전] ROI 밖 책: (-0.080, 0.577, 0.397) @arm_base_link
+   02:39:13 [비전] ROI 밖 책: (0.216, 0.556, 0.430) @arm_base_link
+   02:39:13 [비전] ROI 밖 책: (0.171, 0.582, 0.396) @arm_base_link
+   02:39:13 [비전] ROI 밖 책: (0.592, 0.541, 0.395) @arm_base_link
+   02:39:13 [비전] ROI 밖 책: (0.464, 0.573, 0.393) @arm_base_link
+   02:39:13 [비전] ROI 밖 책: (0.390, 0.571, 0.395) @arm_base_link
+   02:39:13 [비전] ROI 밖 책: (0.105, 0.504, 0.354) @arm_base_link
+   02:39:13 [비전] ROI 밖 책: (0.210, 0.536, 0.830) @arm_base_link
+   02:39:13 [비전] ROI 밖 책: (0.421, 0.578, 0.394) @arm_base_link
+   02:39:13 [비전] ROI 밖 책: (0.111, 0.583, 0.395) @arm_base_link
+   02:39:13 [비전] ROI 밖 책: (0.349, 0.578, 0.396) @arm_base_link
+   02:39:13 [비전] ROI 밖 책 22권 제외 (남은 0권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:39:13 [비전] Empty center pixel=(286, 550), shelf_front_z=0.618m; Depth L/C/R=0.677/1.387/0.558m; center-left=0.710m, center-right=0.829m; contrast=PASS
+   02:39:13 [비전] Empty shelf target: xyz=(0.283, 0.624, 0.344)
+   02:39:16 [비전] Book picked(best): xyz=(-0.364, -0.018, 0.209), center=(309, 594), conf=0.87, depth=patch, yaw=0.000 rad (후보 1권)
+   02:39:16 [비전] Empty center pixel=(157, 338), shelf_front_z=0.836m; Depth L/C/R=0.911/1.050/0.761m; center-left=0.140m, center-right=0.289m; contrast=PASS
+   02:39:16 [비전] Empty shelf target: xyz=(-0.780, 0.504, 0.177)
+   02:39:17 [비전] ROI 밖 책: (0.189, 0.511, 0.362) @arm_base_link
+   02:39:17 [비전] ROI 밖 책: (0.133, 0.511, 0.340) @arm_base_link
+   02:39:17 [비전] ROI 밖 책: (0.089, 0.506, 0.343) @arm_base_link
+   02:39:17 [비전] ROI 밖 책 3권 제외 (남은 1권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:39:17 [비전] Book picked(best): xyz=(-0.361, -0.023, 0.200), center=(179, 599), conf=0.82, depth=patch, yaw=0.000 rad (후보 1권)
+   02:39:17 [비전] Empty center pixel=(100, 363), shelf_front_z=0.872m; Depth L/C/R=0.924/1.029/0.820m; center-left=0.105m, center-right=0.209m; contrast=PASS
+   02:39:17 [비전] Empty shelf target: xyz=(-0.781, 0.485, 0.098)
+   02:39:19 [비전] ROI 밖 책: (0.493, 0.582, 0.392) @arm_base_link
+   02:39:19 [비전] ROI 밖 책: (0.199, 0.527, 0.383) @arm_base_link
+   02:39:19 [비전] ROI 밖 책 2권 제외 (남은 1권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:39:19 [비전] Book picked(best): xyz=(-0.312, -0.026, 0.189), center=(86, 604), conf=0.89, depth=patch, yaw=0.000 rad (후보 1권)
+   02:39:19 [비전] Empty center pixel=(432, 275), shelf_front_z=0.734m; Depth L/C/R=0.720/2.016/0.748m; center-left=1.296m, center-right=1.268m; contrast=PASS
+   02:39:19 [비전] Empty shelf target: xyz=(0.259, 0.523, 0.356)
+   02:39:20 [비전] ROI 밖 책: (0.494, 0.584, 0.393) @arm_base_link
+   02:39:20 [비전] ROI 밖 책: (-0.251, 0.066, 0.189) @arm_base_link
+   02:39:20 [비전] ROI 밖 책 2권 제외 (남은 0권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:39:20 [비전] Empty center pixel=(359, 274), shelf_front_z=0.713m; Depth L/C/R=0.690/2.043/0.735m; center-left=1.353m, center-right=1.308m; contrast=PASS
+   02:39:20 [비전] Empty shelf target: xyz=(0.262, 0.506, 0.369)
+   02:39:22 [비전] ROI 밖 책: (-0.021, 0.588, 0.394) @arm_base_link
+   02:39:22 [비전] ROI 밖 책: (0.018, 0.582, 0.397) @arm_base_link
+   02:39:22 [비전] ROI 밖 책: (-0.079, 0.586, 0.395) @arm_base_link
+   02:39:22 [비전] ROI 밖 책 3권 제외 (남은 0권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:39:22 [비전] Empty center pixel=(294, 273), shelf_front_z=0.745m; Depth L/C/R=0.777/2.052/0.713m; center-left=1.275m, center-right=1.339m; contrast=PASS
+   02:39:22 [비전] Empty shelf target: xyz=(0.287, 0.536, 0.354)
+   02:39:26 [FSM] Empty slot detected: frame_id=arm_base_link, x=-0.350, y=0.544, z=0.340, confidence=1.00, candidate_count=8
+   02:39:26 [FSM] FSM transition completed: DETECT_TARGET_SLOT -> PLACE_BOOK
+   02:39:26 [FSM] Book-placement goal was accepted.
+   02:39:26 [조작] 빈칸 관측 버림 (서가 밖): (-0.780, 0.504, 0.177) 서가 x -0.66~0.66 y 0.41~0.80 z -0.33~2.19
+   02:39:26 [조작] 빈칸 관측 버림 (서가 밖): (-0.781, 0.485, 0.098) 서가 x -0.66~0.66 y 0.41~0.80 z -0.33~2.19
+   02:39:26 [조작] 빈칸 선택: 책 사이 틈 관측 (0.273, 0.523, 0.356) → 칸 중심 y 0.544, z 0.340 (판 높이로 스냅); 꽂기 전 차체를 옆으로 +0.623 m 옮겨 틈을 x -0.35 에 둔다
+   02:39:26 [조작] 빈 슬롯 스캔 완료: (-0.35, 0.5439, 0.3399), 삽입깊이 0.300m
+   02:39:26 [조작] 베이스 회전 명령 전송 (목표 yaw +0°, 서가 거리 0.444)
+   02:39:26 [시뮬] 작업 job_1b5f927831ad:scan SUCCEEDED {'phase': 'scan_done', 'message': '서가 스캔 완료', 'placement_verified': False, 'sim_steps': 2039, 'render_steps': 2039} (25.1s)
+   02:39:27 [시뮬] 서가 앞면 0.444 m → 목표 0.444 m (앞뒤 -0.000), 서가 중심 팔기준 x +0.623 → 옆으로 +0.623: 차체를 0.623 m 옮긴다
+   02:39:32 [비전] ROI 밖 책: (-0.531, 0.505, 0.207) @arm_base_link
+   02:39:32 [비전] ROI 밖 책 1권 제외 (남은 2권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:39:32 [비전] Book picked(best): xyz=(-0.362, -0.000, 0.203), center=(264, 311), conf=0.77, depth=patch, yaw=0.000 rad (후보 2권)
+   02:39:32 [조작] 베이스 회전 완료
+   02:39:32 [시뮬] 서가 앞면 실측 0.444 m (목표 0.444), 서가 x 범위 팔기준 -1.33~+0.08
+   02:39:33 [비전] ROI 밖 책: (-0.533, 0.505, 0.207) @arm_base_link
+   02:39:33 [비전] ROI 밖 책 1권 제외 (남은 2권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:39:33 [비전] Book picked(best): xyz=(-0.362, -0.002, 0.203), center=(263, 311), conf=0.78, depth=patch, yaw=0.000 rad (후보 2권)
+   02:39:33 [조작] 책 좌표 정함 (-0.3619, -0.0011, +0.2029) — 관측 2개 · 책 1권 · 고른 책 2개 (x 흔들림 0 mm) → 축마다 중앙값
+   02:39:33 [조작] 작업 job_1b5f927831ad book=book_003 트레이 칸 0 파지 [-0.3619143149285522, -0.0010530085328931335, 0.12708665866518554] (vision) → (-0.35, 0.5438500024676323, 0.3399) 삽입 속도 0.030 m/s
+   02:39:43 [시뮬] [JUDGE] 손 안 어긋남(406) **판별불가** — 키네마틱 파지는 매 스텝 책을 손에 맞춰 다시 써 넣는다. 이 신호는 마찰 파지(SIM_GRASP_KINEMATIC=0)에서만 의미가 있다
+   02:39:50 [시뮬] [JUDGE] rise=16.9cm(ok) width=13.6mm = 지령 13.6mm (책 반두께 17.6) → **판별불가** [키네마틱 파지라 빈손이어도 같은 값이 나온다]
+   02:41:25 [FSM] FSM transition completed: PLACE_BOOK -> UPDATE_DATA
+   02:41:25 [FSM] FSM transition completed: UPDATE_DATA -> NEXT_BOOK
+   02:41:25 [FSM] FSM transition completed: NEXT_BOOK -> SELECT_BOOK
+   02:41:25 [FSM] FSM transition completed: SELECT_BOOK -> NAV_TO_SHELF
+   02:41:25 [FSM] Navigation succeeded: Navigation waypoint is already satisfied in simulation.
+   02:41:25 [FSM] FSM transition completed: NAV_TO_SHELF -> DETECT_TARGET_SLOT
+   02:41:25 [조작] PlaceBook 성공 job=job_1b5f927831ad code=0(OK) phase= 배치 확인
+   02:41:25 [조작] 베이스 회전 명령 전송 (목표 yaw +0°, 서가 거리 0.444)
+   02:41:25 [시뮬] [JUDGE] width_hold=판별불가[키네마틱] (13.6 → 최소 13.6 mm, 한쪽 기준)
+   02:41:25 [시뮬] 작업 job_1b5f927831ad SUCCEEDED {'phase': 'verify', 'message': '배치 확인', 'placement_verified': True, 'checks': {'upright': True, 'depth': True, 'spine': True, 'x': True, 'floor': True, 'skew': True, 'no_jam': True}, 'fallen
+   02:41:26 [시뮬] 서가 앞면 0.444 m → 목표 0.444 m (앞뒤 +0.000), 서가 중심 팔기준 x -0.623 → 옆으로 -0.623: 차체를 0.623 m 옮긴다
+   02:41:30 [조작] 베이스 회전 완료
+   02:41:30 [시뮬] 서가 앞면 실측 0.444 m (목표 0.444), 서가 x 범위 팔기준 -0.71~+0.71
+   02:41:30 [시뮬] [재측정] 스윕 없이 빈칸만 다시 재고 관측 자세로 돌아간다 — 서가 /World/bookshelves_main/shelf_brown__book_shelf_01 · 판 [1.042, 0.498] · 빈칸 4개 · 관측 자세까지 Δ최대 1.311 rad
+   02:41:34 [FSM] Empty slot detected: frame_id=arm_base_link, x=-0.350, y=0.544, z=0.884, confidence=1.00, candidate_count=8
+   02:41:34 [FSM] FSM transition completed: DETECT_TARGET_SLOT -> PLACE_BOOK
+   02:41:34 [FSM] Book-placement goal was accepted.
+   02:41:34 [조작] 빈칸 관측 버림 (서가 밖): (-0.780, 0.504, 0.177) 서가 x -0.66~0.66 y 0.41~0.80 z -0.33~2.19
+   02:41:34 [조작] 빈칸 관측 버림 (서가 밖): (-0.781, 0.485, 0.098) 서가 x -0.66~0.66 y 0.41~0.80 z -0.33~2.19
+   02:41:34 [조작] 빈칸 선택: 책 사이 틈 관측 (-0.401, 0.523, 0.356) → 칸 중심 y 0.544, z 0.884 (판 높이로 스냅); 꽂기 전 차체를 옆으로 -0.051 m 옮겨 틈을 x -0.35 에 둔다
+   02:41:34 [조작] 빈 슬롯 스캔 완료: (-0.35, 0.5439, 0.8839), 삽입깊이 0.300m
+   02:41:34 [조작] 베이스 회전 명령 전송 (목표 yaw +0°, 서가 거리 0.444)
+   02:41:34 [시뮬] 작업 job_1b5f927831ad:scan SUCCEEDED {'phase': 'scan_done', 'message': '서가 스캔 완료', 'placement_verified': False, 'sim_steps': 324, 'render_steps': 324} (4.2s)
+   02:41:34 [시뮬] 서가 앞면 0.444 m → 목표 0.444 m (앞뒤 -0.000), 서가 중심 팔기준 x -0.051 → 옆으로 -0.051: 차체를 0.051 m 옮긴다
+   02:41:35 [비전] ROI 밖 책: (-0.087, 0.522, 0.192) @arm_base_link
+   02:41:35 [비전] ROI 밖 책 1권 제외 (남은 1권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:41:35 [비전] Book picked(best): xyz=(-0.345, -0.103, 0.204), center=(192, 323), conf=0.63, depth=patch, yaw=0.000 rad (후보 1권)
+   02:41:35 [비전] ROI 밖 책: (-0.087, 0.522, 0.192) @arm_base_link
+   02:41:35 [비전] ROI 밖 책: (-0.496, 0.522, 0.200) @arm_base_link
+   02:41:35 [비전] ROI 밖 책: (-0.472, 0.522, 0.201) @arm_base_link
+   02:41:35 [비전] ROI 밖 책: (-0.107, 0.522, 0.192) @arm_base_link
+   02:41:35 [비전] ROI 밖 책 4권 제외 (남은 1권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:41:35 [비전] Book picked(best): xyz=(-0.345, -0.101, 0.204), center=(193, 323), conf=0.67, depth=patch, yaw=0.000 rad (후보 1권)
+   02:41:35 [조작] 베이스 회전 완료
+   02:41:35 [조작] 책 좌표 정함 (-0.3448, -0.1022, +0.2042) — 관측 2개 · 책 1권 · 고른 책 2개 (x 흔들림 0 mm) → 축마다 중앙값
+   02:41:35 [조작] 작업 job_1b5f927831ad book=book_004 트레이 칸 1 파지 [-0.3448337474713722, -0.10218306408257934, 0.1283315602526683] (vision) → (-0.35, 0.5438500024676323, 0.8839) 삽입 속도 0.030 m/s
+   02:41:35 [시뮬] 서가 앞면 실측 0.444 m (목표 0.444), 서가 x 범위 팔기준 -0.66~+0.76
+   02:41:47 [시뮬] [JUDGE] 손 안 어긋남(406) **판별불가** — 키네마틱 파지는 매 스텝 책을 손에 맞춰 다시 써 넣는다. 이 신호는 마찰 파지(SIM_GRASP_KINEMATIC=0)에서만 의미가 있다
+   02:41:54 [시뮬] [JUDGE] rise=16.9cm(ok) width=17.6mm = 지령 17.6mm (책 반두께 21.6) → **판별불가** [키네마틱 파지라 빈손이어도 같은 값이 나온다]
+   02:43:28 [FSM] FSM transition completed: PLACE_BOOK -> UPDATE_DATA
+   02:43:28 [FSM] FSM transition completed: UPDATE_DATA -> NEXT_BOOK
+   02:43:28 [FSM] FSM transition completed: NEXT_BOOK -> SELECT_BOOK
+   02:43:28 [FSM] FSM transition completed: SELECT_BOOK -> NAV_TO_SHELF
+   02:43:28 [조작] PlaceBook 성공 job=job_1b5f927831ad code=0(OK) phase= 배치 확인
+   02:43:28 [시뮬] [JUDGE] width_hold=판별불가[키네마틱] (17.6 → 최소 17.6 mm, 한쪽 기준)
+   02:43:28 [시뮬] 작업 job_1b5f927831ad SUCCEEDED {'phase': 'verify', 'message': '배치 확인', 'placement_verified': True, 'checks': {'upright': True, 'depth': True, 'spine': True, 'x': True, 'floor': True, 'skew': True, 'no_jam': True}, 'fallen
+   02:43:50 [시뮬] [주행] 도착 (+2.535, -3.019)
+   02:43:52 [시뮬] [주행] 회전 끝 — **실측** yaw +0.00° (목표 +0.00°)
+   02:43:53 [FSM] Navigation succeeded: Navigation completed.
+   02:43:53 [FSM] FSM transition completed: NAV_TO_SHELF -> DETECT_TARGET_SLOT
+   02:43:53 [조작] 베이스 회전 명령 전송 (목표 yaw +0°, 서가 거리 0.444)
+   02:43:53 [시뮬] [주행] 도착 (+2.535, -3.019)
+   02:43:53 [시뮬] 서가 앞면 0.443 m → 목표 0.444 m (앞뒤 -0.001), 서가 중심 팔기준 x -0.261 → 옆으로 -0.261: 차체를 0.261 m 옮긴다
+   02:43:55 [조작] 베이스 회전 완료
+   02:43:55 [시뮬] 서가 앞면 실측 0.444 m (목표 0.444), 서가 x 범위 팔기준 -0.71~+0.71
+   02:43:55 [시뮬] [재측정] 스윕 없이 빈칸만 다시 재고 관측 자세로 돌아간다 — 서가 /World/bookshelves_main/shelf_brown__book_shelf_11 · 판 [1.042, 0.498] · 빈칸 2개 · 관측 자세까지 Δ최대 1.544 rad
+   02:44:00 [시뮬] 작업 job_1b5f927831ad:scan SUCCEEDED {'phase': 'scan_done', 'message': '서가 스캔 완료', 'placement_verified': False, 'sim_steps': 379, 'render_steps': 379} (4.8s)
+   02:44:00 [시뮬] [스윕] 시작 자세 q=[2.0937, -0.5756, 0.5627, -1.8915, 0.2999, 1.3974, 0.2783]
+   02:44:00 [시뮬] [스윕] 판 1.042 (팔기준 z 0.712, 앞면 0.444) 정지점 5/5 여유 0.518 rad 최대변화 0.06 길이 2.68
+   02:44:00 [시뮬] [스윕] 판 0.498 (팔기준 z 0.168, 앞면 0.444) 정지점 5/5 여유 0.221 rad 최대변화 0.05 길이 2.45
+   02:44:00 [시뮬] 스윕 시작: 판 [1.042, 0.498], 정지점 10개, 정지 1.2s
+   02:44:00 [시뮬] [판목록] 레벨 실측 [0.4976, 1.0417, 1.5812, 2.0582, 2.52] · 쓰는 값 [0.497, 0.498, 1.042] · 차이 [-0.3, -0.4, +0.6] mm  (그림자 — 판단은 상수 그대로)
+   02:44:03 [비전] ROI 밖 책: (0.156, 0.600, 0.394) @arm_base_link
+   02:44:03 [비전] ROI 밖 책: (0.023, 0.542, 0.395) @arm_base_link
+   02:44:03 [비전] ROI 밖 책: (-0.265, 0.524, 0.406) @arm_base_link
+   02:44:03 [비전] ROI 밖 책: (-0.172, 0.524, 0.406) @arm_base_link
+   02:44:03 [비전] ROI 밖 책: (-0.031, 0.533, 0.380) @arm_base_link
+   02:44:03 [비전] ROI 밖 책: (0.150, 0.558, 0.394) @arm_base_link
+   02:44:03 [비전] ROI 밖 책: (0.123, 0.547, 0.394) @arm_base_link
+   02:44:03 [비전] ROI 밖 책: (0.060, 0.545, 0.394) @arm_base_link
+   02:44:03 [비전] ROI 밖 책: (0.084, 0.527, 0.395) @arm_base_link
+   02:44:03 [비전] ROI 밖 책: (-0.231, 0.525, 0.405) @arm_base_link
+   02:44:03 [비전] ROI 밖 책: (0.010, 0.523, 0.395) @arm_base_link
+   02:44:03 [비전] ROI 밖 책: (0.053, 0.524, 0.394) @arm_base_link
+   02:44:03 [비전] ROI 밖 책 12권 제외 (남은 0권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:44:03 [비전] Empty center pixel=(263, 197), shelf_front_z=2.393m; Depth L/C/R=2.391/4.410/2.395m; center-left=2.018m, center-right=2.015m; contrast=PASS
+   02:44:03 [비전] Empty shelf target: xyz=(-0.780, 2.612, 1.392)
+   02:44:05 [비전] ROI 밖 책: (0.183, 0.526, 0.827) @arm_base_link
+   02:44:05 [비전] ROI 밖 책: (0.063, 0.549, 0.394) @arm_base_link
+   02:44:05 [비전] ROI 밖 책: (0.091, 0.526, 0.396) @arm_base_link
+   02:44:05 [비전] ROI 밖 책: (0.143, 0.547, 0.394) @arm_base_link
+   02:44:05 [비전] ROI 밖 책: (0.025, 0.549, 0.396) @arm_base_link
+   02:44:05 [비전] ROI 밖 책: (0.204, 0.507, 0.830) @arm_base_link
+   02:44:05 [비전] ROI 밖 책: (-0.027, 0.523, 0.392) @arm_base_link
+   02:44:05 [비전] ROI 밖 책: (0.165, 0.524, 0.396) @arm_base_link
+   02:44:05 [비전] ROI 밖 책: (0.273, 0.517, 0.401) @arm_base_link
+   02:44:05 [비전] ROI 밖 책: (0.225, 0.555, 0.419) @arm_base_link
+   02:44:05 [비전] ROI 밖 책 10권 제외 (남은 0권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.485, 0.553, 0.393) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.172, 0.521, 0.396) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.094, 0.522, 0.396) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.148, 0.554, 0.394) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (-0.034, 0.543, 0.392) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.208, 0.507, 0.830) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.433, 0.536, 0.394) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.018, 0.534, 0.396) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.057, 0.534, 0.392) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.378, 0.525, 0.396) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.040, 0.526, 0.394) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.305, 0.535, 0.397) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.459, 0.527, 0.394) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.345, 0.529, 0.396) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.179, 0.551, 0.397) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.184, 0.571, 0.820) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.188, 0.512, 0.829) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.504, 0.557, 0.393) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.208, 0.545, 0.427) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.345, 0.546, 0.395) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.426, 0.526, 0.394) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.258, 0.520, 0.396) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.139, 0.526, 0.393) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.473, 0.520, 0.393) @arm_base_link
+   02:44:06 [비전] ROI 밖 책: (0.517, 0.559, 0.394) @arm_base_link
+   02:44:06 [비전] ROI 밖 책 25권 제외 (남은 0권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:44:06 [비전] Empty center pixel=(273, 574), shelf_front_z=0.550m; Depth L/C/R=0.581/0.753/0.519m; center-left=0.171m, center-right=0.234m; contrast=PASS
+   02:44:06 [비전] Empty shelf target: xyz=(-0.082, 0.559, 0.364)
+   02:44:07 [비전] ROI 밖 책: (0.430, 0.536, 0.394) @arm_base_link
+   02:44:07 [비전] ROI 밖 책: (0.500, 0.546, 0.393) @arm_base_link
+   02:44:07 [비전] ROI 밖 책: (0.378, 0.525, 0.396) @arm_base_link
+   02:44:07 [비전] ROI 밖 책: (0.201, 0.507, 0.831) @arm_base_link
+   02:44:07 [비전] ROI 밖 책: (0.265, 0.545, 0.394) @arm_base_link
+   02:44:07 [비전] ROI 밖 책: (0.091, 0.524, 0.395) @arm_base_link
+   02:44:07 [비전] ROI 밖 책: (0.263, 0.522, 0.393) @arm_base_link
+   02:44:07 [비전] ROI 밖 책: (0.573, 0.548, 0.394) @arm_base_link
+   02:44:07 [비전] ROI 밖 책: (0.049, 0.546, 0.394) @arm_base_link
+   02:44:07 [비전] ROI 밖 책: (0.003, 0.548, 0.394) @arm_base_link
+   02:44:07 [비전] ROI 밖 책: (0.447, 0.538, 0.393) @arm_base_link
+   02:44:07 [비전] ROI 밖 책: (0.140, 0.540, 0.393) @arm_base_link
+   02:44:07 [비전] ROI 밖 책: (0.017, 0.546, 0.396) @arm_base_link
+   02:44:07 [비전] ROI 밖 책: (0.297, 0.520, 0.395) @arm_base_link
+   02:44:07 [비전] ROI 밖 책: (0.583, 0.522, 0.394) @arm_base_link
+   02:44:07 [비전] ROI 밖 책: (0.126, 0.523, 0.394) @arm_base_link
+   02:44:07 [비전] ROI 밖 책 16권 제외 (남은 0권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:44:07 [비전] Empty center pixel=(176, 566), shelf_front_z=0.554m; Depth L/C/R=0.576/0.770/0.532m; center-left=0.194m, center-right=0.238m; contrast=PASS
+   02:44:07 [비전] Empty shelf target: xyz=(-0.077, 0.565, 0.373)
+   02:44:09 [비전] ROI 밖 책: (0.498, 0.543, 0.393) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (0.165, 0.557, 0.395) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (0.140, 0.555, 0.392) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (0.242, 0.545, 0.395) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (0.428, 0.535, 0.394) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (0.566, 0.547, 0.393) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (0.479, 0.540, 0.393) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (0.054, 0.547, 0.392) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (0.268, 0.521, 0.394) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (0.229, 0.547, 0.399) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (0.211, 0.564, 0.436) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (0.201, 0.507, 0.838) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (-0.001, 0.485, 0.823) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (0.098, 0.532, 0.395) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (0.461, 0.534, 0.393) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (-0.013, 0.522, 0.394) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (0.385, 0.522, 0.396) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (0.536, 0.544, 0.394) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (0.415, 0.537, 0.394) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (0.327, 0.523, 0.397) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (0.262, 0.545, 0.392) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (0.287, 0.519, 0.395) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (0.602, 0.545, 0.397) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (0.015, 0.548, 0.395) @arm_base_link
+   02:44:09 [비전] ROI 밖 책: (0.306, 0.529, 0.396) @arm_base_link
+   02:44:09 [비전] ROI 밖 책 25권 제외 (남은 0권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:44:09 [비전] Empty center pixel=(183, 295), shelf_front_z=0.454m; Depth L/C/R=0.495/4.647/0.414m; center-left=4.152m, center-right=4.233m; contrast=PASS
+   02:44:09 [비전] Empty shelf target: xyz=(0.153, 0.548, 0.849)
+   02:44:12 [비전] ROI 밖 책: (0.175, 0.501, 0.379) @arm_base_link
+   02:44:12 [비전] ROI 밖 책 1권 제외 (남은 1권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:44:12 [비전] Book picked(best): xyz=(-0.367, 0.064, 0.212), center=(308, 522), conf=0.55, depth=patch, yaw=0.000 rad (후보 1권)
+   02:44:12 [비전] Empty center pixel=(156, 334), shelf_front_z=0.845m; Depth L/C/R=0.937/1.080/0.753m; center-left=0.143m, center-right=0.327m; contrast=PASS
+   02:44:12 [비전] Empty shelf target: xyz=(-0.787, 0.518, 0.177)
+   02:44:13 [비전] ROI 밖 책: (0.186, 0.491, 0.372) @arm_base_link
+   02:44:13 [비전] ROI 밖 책: (0.164, 0.484, 0.342) @arm_base_link
+   02:44:13 [비전] ROI 밖 책 2권 제외 (남은 0권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:44:13 [비전] Empty center pixel=(101, 365), shelf_front_z=0.887m; Depth L/C/R=0.949/1.058/0.825m; center-left=0.108m, center-right=0.233m; contrast=PASS
+   02:44:13 [비전] Empty shelf target: xyz=(-0.791, 0.492, 0.083)
+   02:44:15 [비전] ROI 밖 책: (0.195, 0.493, 0.380) @arm_base_link
+   02:44:15 [비전] ROI 밖 책: (0.173, 0.483, 0.337) @arm_base_link
+   02:44:15 [비전] ROI 밖 책: (0.090, 0.475, 0.348) @arm_base_link
+   02:44:15 [비전] ROI 밖 책 3권 제외 (남은 2권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:44:15 [비전] Book picked(best): xyz=(-0.355, 0.150, 0.184), center=(119, 472), conf=0.75, depth=patch, yaw=0.000 rad (후보 2권)
+   02:44:15 [비전] Empty center pixel=(286, 280), shelf_front_z=0.704m; Depth L/C/R=0.716/1.990/0.692m; center-left=1.274m, center-right=1.298m; contrast=PASS
+   02:44:15 [비전] Empty shelf target: xyz=(-0.076, 0.490, 0.364)
+   02:44:16 [비전] ROI 밖 책: (0.177, 0.482, 0.343) @arm_base_link
+   02:44:16 [비전] ROI 밖 책: (-0.250, 0.065, 0.192) @arm_base_link
+   02:44:16 [비전] ROI 밖 책 2권 제외 (남은 0권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:44:16 [비전] Empty center pixel=(216, 280), shelf_front_z=0.719m; Depth L/C/R=0.745/1.973/0.693m; center-left=1.229m, center-right=1.281m; contrast=PASS
+   02:44:16 [비전] Empty shelf target: xyz=(-0.066, 0.503, 0.356)
+   02:44:18 [비전] ROI 밖 책: (0.380, 0.475, 0.345) @arm_base_link
+   02:44:18 [비전] ROI 밖 책: (0.615, 0.483, 0.366) @arm_base_link
+   02:44:18 [비전] ROI 밖 책 2권 제외 (남은 0권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:44:18 [비전] Empty center pixel=(140, 279), shelf_front_z=0.716m; Depth L/C/R=0.742/0.822/0.690m; center-left=0.080m, center-right=0.132m; contrast=PASS
+   02:44:18 [비전] Empty shelf target: xyz=(-0.060, 0.502, 0.359)
+   02:44:23 [FSM] Empty slot detected: frame_id=arm_base_link, x=-0.350, y=0.544, z=0.340, confidence=1.00, candidate_count=9
+   02:44:23 [FSM] FSM transition completed: DETECT_TARGET_SLOT -> PLACE_BOOK
+   02:44:23 [FSM] Book-placement goal was accepted.
+   02:44:23 [조작] 빈칸 관측 버림 (서가 밖): (-0.780, 2.612, 1.392) 서가 x -0.66~0.66 y 0.41~0.80 z -0.33~2.19
+   02:44:23 [조작] 빈칸 관측 버림 (서가 밖): (-0.787, 0.518, 0.177) 서가 x -0.66~0.66 y 0.41~0.80 z -0.33~2.19
+   02:44:23 [조작] 빈칸 관측 버림 (서가 밖): (-0.791, 0.492, 0.083) 서가 x -0.66~0.66 y 0.41~0.80 z -0.33~2.19
+   02:44:23 [조작] 빈칸 선택: 책 사이 틈 관측 (-0.090, 0.502, 0.359) → 칸 중심 y 0.544, z 0.340 (판 높이로 스냅); 꽂기 전 차체를 옆으로 +0.260 m 옮겨 틈을 x -0.35 에 둔다
+   02:44:23 [조작] 빈 슬롯 스캔 완료: (-0.35, 0.5439, 0.3399), 삽입깊이 0.300m
+   02:44:23 [조작] 베이스 회전 명령 전송 (목표 yaw +0°, 서가 거리 0.444)
+   02:44:23 [시뮬] 작업 job_1b5f927831ad:scan SUCCEEDED {'phase': 'scan_done', 'message': '서가 스캔 완료', 'placement_verified': False, 'sim_steps': 1829, 'render_steps': 1829} (22.5s)
+   02:44:23 [시뮬] 서가 앞면 0.444 m → 목표 0.444 m (앞뒤 +0.000), 서가 중심 팔기준 x +0.260 → 옆으로 +0.260: 차체를 0.260 m 옮긴다
+   02:44:24 [조작] 베이스 회전 완료
+   02:44:24 [시뮬] 서가 앞면 실측 0.444 m (목표 0.444), 서가 x 범위 팔기준 -0.97~+0.45
+   02:44:25 [비전] ROI 밖 책: (-0.158, 0.476, 0.222) @arm_base_link
+   02:44:25 [비전] ROI 밖 책: (-0.381, 0.050, 0.578) @arm_base_link
+   02:44:25 [비전] ROI 밖 책: (-0.490, 0.494, 0.208) @arm_base_link
+   02:44:25 [비전] ROI 밖 책 3권 제외 (남은 1권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:44:25 [비전] Book picked(best): xyz=(-0.367, -0.179, 0.185), center=(146, 308), conf=0.82, depth=patch, yaw=0.000 rad (후보 1권)
+   02:44:25 [비전] ROI 밖 책: (-0.158, 0.476, 0.222) @arm_base_link
+   02:44:25 [비전] ROI 밖 책: (-0.490, 0.494, 0.208) @arm_base_link
+   02:44:25 [비전] ROI 밖 책 2권 제외 (남은 2권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:44:25 [비전] Book picked(best): xyz=(-0.369, -0.178, 0.184), center=(147, 307), conf=0.81, depth=patch, yaw=0.000 rad (후보 2권)
+   02:44:25 [조작] 책 좌표 정함 (-0.3678, -0.1785, +0.1847) — 관측 2개 · 책 1권 · 고른 책 2개 (x 흔들림 2 mm) → 축마다 중앙값
+   02:44:25 [조작] 작업 job_1b5f927831ad book=book_001 트레이 칸 2 파지 [-0.3677926450131911, -0.1784975957047365, 0.10887502169832691] (vision) → (-0.35, 0.5438500024676323, 0.3399) 삽입 속도 0.030 m/s
+   02:44:35 [시뮬] [JUDGE] 손 안 어긋남(406) **판별불가** — 키네마틱 파지는 매 스텝 책을 손에 맞춰 다시 써 넣는다. 이 신호는 마찰 파지(SIM_GRASP_KINEMATIC=0)에서만 의미가 있다
+   02:44:41 [시뮬] [JUDGE] rise=16.9cm(ok) width=15.1mm = 지령 15.1mm (책 반두께 19.1) → **판별불가** [키네마틱 파지라 빈손이어도 같은 값이 나온다]
+   02:46:17 [FSM] FSM transition completed: PLACE_BOOK -> UPDATE_DATA
+   02:46:17 [FSM] FSM transition completed: UPDATE_DATA -> NEXT_BOOK
+   02:46:17 [FSM] FSM transition completed: NEXT_BOOK -> SELECT_BOOK
+   02:46:17 [FSM] FSM transition completed: SELECT_BOOK -> NAV_TO_SHELF
+   02:46:17 [FSM] Navigation succeeded: Navigation waypoint is already satisfied in simulation.
+   02:46:17 [FSM] FSM transition completed: NAV_TO_SHELF -> DETECT_TARGET_SLOT
+   02:46:17 [조작] PlaceBook 성공 job=job_1b5f927831ad code=0(OK) phase= 배치 확인
+   02:46:17 [조작] 베이스 회전 명령 전송 (목표 yaw +0°, 서가 거리 0.444)
+   02:46:17 [시뮬] [JUDGE] width_hold=판별불가[키네마틱] (15.1 → 최소 15.1 mm, 한쪽 기준)
+   02:46:17 [시뮬] 작업 job_1b5f927831ad SUCCEEDED {'phase': 'verify', 'message': '배치 확인', 'placement_verified': True, 'checks': {'upright': True, 'depth': True, 'spine': True, 'x': True, 'floor': True, 'skew': True, 'no_jam': True}, 'fallen
+   02:46:17 [시뮬] 서가 앞면 0.444 m → 목표 0.444 m (앞뒤 -0.000), 서가 중심 팔기준 x -0.260 → 옆으로 -0.260: 차체를 0.260 m 옮긴다
+   02:46:19 [조작] 베이스 회전 완료
+   02:46:19 [시뮬] 서가 앞면 실측 0.444 m (목표 0.444), 서가 x 범위 팔기준 -0.71~+0.71
+   02:46:19 [시뮬] [재측정] 스윕 없이 빈칸만 다시 재고 관측 자세로 돌아간다 — 서가 /World/bookshelves_main/shelf_brown__book_shelf_11 · 판 [1.042, 0.498] · 빈칸 3개 · 관측 자세까지 Δ최대 1.311 rad
+   02:46:23 [FSM] Empty slot detected: frame_id=arm_base_link, x=-0.350, y=0.544, z=0.884, confidence=1.00, candidate_count=9
+   02:46:23 [FSM] FSM transition completed: DETECT_TARGET_SLOT -> PLACE_BOOK
+   02:46:23 [FSM] Book-placement goal was accepted.
+   02:46:23 [조작] 빈칸 관측 버림 (서가 밖): (-0.780, 2.612, 1.392) 서가 x -0.66~0.66 y 0.41~0.80 z -0.33~2.19
+   02:46:23 [조작] 빈칸 관측 버림 (서가 밖): (-0.787, 0.518, 0.177) 서가 x -0.66~0.66 y 0.41~0.80 z -0.33~2.19
+   02:46:23 [조작] 빈칸 관측 버림 (서가 밖): (-0.791, 0.492, 0.083) 서가 x -0.66~0.66 y 0.41~0.80 z -0.33~2.19
+   02:46:23 [조작] 빈칸 선택: 책 사이 틈 관측 (0.139, 0.502, 0.359) → 칸 중심 y 0.544, z 0.884 (판 높이로 스냅); 꽂기 전 차체를 옆으로 +0.489 m 옮겨 틈을 x -0.35 에 둔다
+   02:46:23 [조작] 빈 슬롯 스캔 완료: (-0.35, 0.5439, 0.8839), 삽입깊이 0.300m
+   02:46:23 [조작] 베이스 회전 명령 전송 (목표 yaw +0°, 서가 거리 0.444)
+   02:46:23 [시뮬] 작업 job_1b5f927831ad:scan SUCCEEDED {'phase': 'scan_done', 'message': '서가 스캔 완료', 'placement_verified': False, 'sim_steps': 324, 'render_steps': 324} (4.1s)
+   02:46:23 [시뮬] 서가 앞면 0.444 m → 목표 0.444 m (앞뒤 +0.000), 서가 중심 팔기준 x +0.489 → 옆으로 +0.489: 차체를 0.489 m 옮긴다
+   02:46:27 [비전] ROI 밖 책: (-0.398, 0.475, 0.224) @arm_base_link
+   02:46:27 [비전] ROI 밖 책 1권 제외 (남은 1권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:46:27 [비전] Book picked(best): xyz=(-0.420, 0.077, 0.206), center=(318, 270), conf=0.56, depth=patch, yaw=0.000 rad (후보 1권)
+   02:46:27 [비전] ROI 밖 책: (-0.398, 0.475, 0.224) @arm_base_link
+   02:46:27 [비전] ROI 밖 책 1권 제외 (남은 2권). ROI [-0.69, -0.2, 0.0] ~ [-0.26, 0.42, 0.32] @arm_base_link
+   02:46:27 [비전] Book picked(best): xyz=(-0.362, 0.076, 0.207), center=(317, 311), conf=0.61, depth=patch, yaw=0.000 rad (후보 2권)
+   02:46:27 [조작] 베이스 회전 완료
+   02:46:27 [조작] 책 좌표 정함 (-0.3909, +0.0763, +0.2063) — 관측 2개 · 책 1권 · 고른 책 2개 (x 흔들림 58 mm) → 축마다 중앙값
+   02:46:27 [조작] 작업 job_1b5f927831ad book=book_002 트레이 칸 3 파지 [-0.3908944151260224, 0.0762713622380875, 0.1304185252834068] (vision) → (-0.35, 0.5438500024676323, 0.8839) 삽입 속도 0.030 m/s
+   02:46:27 [시뮬] 서가 앞면 실측 0.444 m (목표 0.444), 서가 x 범위 팔기준 -1.20~+0.22
+   02:46:41 [시뮬] [JUDGE] 손 안 어긋남(406) **판별불가** — 키네마틱 파지는 매 스텝 책을 손에 맞춰 다시 써 넣는다. 이 신호는 마찰 파지(SIM_GRASP_KINEMATIC=0)에서만 의미가 있다
+   02:46:47 [시뮬] [JUDGE] rise=16.9cm(ok) width=18.1mm = 지령 18.1mm (책 반두께 22.1) → **판별불가** [키네마틱 파지라 빈손이어도 같은 값이 나온다]
+   02:48:27 [FSM] FSM transition completed: PLACE_BOOK -> UPDATE_DATA
+   02:48:27 [FSM] FSM transition completed: UPDATE_DATA -> NEXT_BOOK
+   02:48:27 [FSM] FSM transition completed: NEXT_BOOK -> RETURN_HOME
+   02:48:27 [조작] PlaceBook 성공 job=job_1b5f927831ad code=0(OK) phase= 배치 확인
+   02:48:27 [시뮬] [JUDGE] width_hold=판별불가[키네마틱] (18.1 → 최소 18.1 mm, 한쪽 기준)
+   02:48:27 [시뮬] 작업 job_1b5f927831ad SUCCEEDED {'phase': 'verify', 'message': '배치 확인', 'placement_verified': True, 'checks': {'upright': True, 'depth': True, 'spine': True, 'x': True, 'floor': True, 'skew': True, 'no_jam': True}, 'fallen
+   02:48:34 [시뮬] [주행] 회전 끝 — **실측** yaw +90.00° (목표 +90.00°)
+   02:48:36 [FSM] Navigation succeeded: Navigation completed.
+   02:48:36 [FSM] FSM transition completed: RETURN_HOME -> COMPLETED
+   02:48:36 [FSM] FSM transition completed: COMPLETED -> IDLE
+   02:48:36 [시뮬] [주행] 도착 (+4.986, -5.607)
+끝 02:48:37 — 로그: /home/bryankim0200/b1_arm/logs (Isaac·노드는 그대로 떠 있다)
