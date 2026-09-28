@@ -2391,7 +2391,35 @@ class BookScene:
             if _fb is None:
                 if _cd is None:
                     return None, 0.0, _fb_err
-                self.say(f"[스윙] **경고** 되돌림도 안 된다 — 내려앉는 d 를 그대로 쓴다: {_fb_err}")
+                self.say(f"[스윙] 되돌림이 안 된다 — d 를 잘게 나눠 본다: {_fb_err}")
+                # **둘째 수 — d 의 직선 위에 경유점을 심는다.** 관절공간 보간은 두 끝 사이를 안 지키지만,
+                # 사이에 직교 경유점(위치는 직선, 자세는 slerp)을 넣으면 내려앉는 폭이 경유점 간격으로
+                # 묶인다. 걸음 크기 제한은 관절공간 그대로라 손목 특이점은 넘어간다.
+                _c, _pd0, _how0 = _cd
+                _p0 = np.asarray(transfer, float); _p1 = np.asarray(pre_ins, float)
+                _best_k = None
+                for _k in (2, 4, 8):
+                    _wps = [(_p0, O_sw)] + [(_p0 + (_p1 - _p0) * (_i / _k), slerp(O_sw, HORIZ, _i / _k))
+                                            for _i in range(1, _k + 1)]
+                    _pk, _w, _ek = self.plan_joint_path(_wps, _c[-1])
+                    if _pk is None:
+                        self.say(f"[스윙] d 를 {_k} 조각: {_ek}")
+                        continue
+                    _zk = [float(self.lula.compute_forward_kinematics(
+                        BOT.ee_frame, np.asarray(_q, float))[0][2]) for _q in _pk]
+                    _sk = sag_report(_zk, 0.0, None)
+                    self.say(f"[스윙] d 를 {_k} 조각: 처짐 {_sk['sag_m'] * 1000:.0f} mm "
+                             f"(손끝 {_zk[0]:.3f} → 최저 {_sk['tip_min']:.3f} → {_zk[-1]:.3f}, {len(_pk) - 1}점)")
+                    if _best_k is None or _sk["sag_m"] < _best_k[0]:
+                        _best_k = (_sk["sag_m"], _k, _pk)
+                    if _sk["sag_m"] <= _sag_max:
+                        break
+                if _best_k is not None and _best_k[0] < _sag["sag_m"]:
+                    _cd = (_c, _best_k[2], f"관절공간 {_best_k[1]} 조각(처짐 {_best_k[0] * 1000:.0f} mm)")
+                    self.say(f"[스윙] d 를 {_best_k[1]} 조각으로 쓴다 — 처짐 {_sag['sag_m'] * 1000:.0f} → "
+                             f"{_best_k[0] * 1000:.0f} mm")
+                else:
+                    self.say("[스윙] **경고** 나눠도 나아지지 않는다 — 내려앉는 d 를 그대로 쓴다")
         if _fb is not None:
             qs.extend(_fb["qs"])
             q_c_path = _fb["q_c_path"]
