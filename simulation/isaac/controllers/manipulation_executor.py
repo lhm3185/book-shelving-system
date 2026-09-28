@@ -98,7 +98,7 @@ class ManipulationExecutor:
         self.pub.publish(String(data=encode(dict(state, stamp=time.time(), ready=self.ready))))
 
     def finish(self, status, **extra):
-        if self.job is not None and self.job.cmd.get("type") in (COMMAND_SCAN, COMMAND_SWEEP):
+        if self.job is not None and self.job.cmd.get("type") in (COMMAND_SCAN, COMMAND_SWEEP, COMMAND_MEASURE):
             self.scene.set_scan_tray_guard(False)
         if self.gate is not None and self.sensor_policy == "gated":
             self.gate.all(True, "— 작업 끝, 관측 대기")
@@ -463,19 +463,36 @@ class ManipulationExecutor:
         기하 계산이라 한 스텝이면 끝난다. 스캔과 같은 상태(scan_plan → scan_done)를 내보내 노드의 대기
         루프가 그대로 쓰인다. 서가 prim 을 같이 실어 노드가 캐시 유효성(같은 서가인가)을 확인한다.
         """
+        import arm_kinematics as ak
+        from arm_primitives import MoveJoint, Sequence
+        from book_scene import named, JointPath
+
         token = cmd.get("token") or uuid.uuid4().hex
         job_id = cmd.get("job_id", "")
         self.scene.refresh_base()
         boards = self._sweep_boards(cmd)
+        # **스윕은 생략하되 관측 자세 복귀는 한다.** 첫 판(2026-09-28 13:20)은 "팔 이동 없이" 바로 scan_done 을
+        # 냈고, 팔은 앞 권의 retreat 자리에 남아 카메라가 트레이를 안 봐 2권째 책 검출이 0줄이었다(411) —
+        # 9/23 에 스윕 끝에 관측 자세 복귀를 붙인 그 이유 그대로. 스윕의 마지막 두 스텝만 그대로 가져온다.
+        q_now = np.asarray(self.robot.get_joint_positions()[self.scene.idx_arm], float)
+        q_obs = np.asarray(getattr(self.scene, "q_observe", self.scene.q_home), float)
+        steps = [named(JointPath("measure_return_obs", ak.move_j(q_now, q_obs, 0.05), speed=0.25),
+                       "measure_return_obs"),
+                 named(MoveJoint(q_obs, speed_scale=0.3, timeout_s=12.0, tolerance=0.03),
+                       "measure_obs_settle")]
+        self.scene.job_active = False
         self.job = Job(dict(cmd, token=token, job_id=job_id))
         self.job.state = {"token": token, "job_id": job_id, "status": SIM_RUNNING, "phase": "measure"}
+        self.publish(self.job.state)
         gaps = self._shelf_gaps_arm(boards)
-        self.say(f"[재측정] 팔 이동 없이 빈칸만 다시 잰다 — 서가 {self.scene.shelf_prim} · 판 {boards} · 빈칸 {len(gaps)}개")
+        self.say(f"[재측정] 스윕 없이 빈칸만 다시 재고 관측 자세로 돌아간다 — 서가 {self.scene.shelf_prim} · "
+                 f"판 {boards} · 빈칸 {len(gaps)}개 · 관측 자세까지 Δ최대 "
+                 f"{float(np.max(np.abs(q_obs - q_now))):.3f} rad")
         self.publish(dict(self.job.state, phase="scan_plan", shelf_box=self._shelf_box_arm(),
                           shelf_gaps=gaps, shelf_prim=str(self.scene.shelf_prim),
                           boards=[{"board_z": b, "name": f"measure_{b:.3f}", "reachable": True} for b in boards]))
-        self.finish(SIM_SUCCEEDED, phase="scan_done", message="빈칸 재측정 완료 (팔 이동 없음)",
-                    placement_verified=False)
+        self.scene.set_scan_tray_guard(True)
+        self.arm.enqueue(Sequence("scan", steps))       # 끝나면 spin 이 scan_done 으로 마감한다 (스윕과 같은 길)
 
     def start_rotate_base(self, cmd):
         """차체를 **팔 베이스를 축으로** 목표 yaw(월드, 도) 로 돌린다 — 작업 전에 서가를 팔 +Y 에 두려고.
@@ -728,7 +745,7 @@ class ManipulationExecutor:
         job = self.job
         running = job is not None and job.state["status"] == SIM_RUNNING and job.plan is not None
         scanning = (job is not None and job.state["status"] == SIM_RUNNING
-                    and job.cmd.get("type") in (COMMAND_SCAN, COMMAND_SWEEP))
+                    and job.cmd.get("type") in (COMMAND_SCAN, COMMAND_SWEEP, COMMAND_MEASURE))
         if scanning:
             name = arm.phase.split(":")[-1]
             if name != "idle":
