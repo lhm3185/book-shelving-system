@@ -134,6 +134,7 @@ COMMAND_CANCEL = 'cancel'
 COMMAND_SCAN = 'scan_shelf'
 # 서가 수평 스윕 스캔 — arm_kinematics 로 판마다 왼쪽→오른쪽 직선(moveL) 경로를 한 번에 계획해 훑는다 (2026-09-23)
 COMMAND_SWEEP = 'scan_sweep'
+COMMAND_MEASURE = 'measure_gaps'     # 팔을 안 움직이고 실측 빈칸·서가 상자만 다시 잰다 (스캔 캐시용)
 #: franka 로봇팔 베이스를 90도 회전시킨다. 작업 시작 전에 호출된다.
 COMMAND_ROTATE_BASE = 'rotate_base'
 
@@ -245,6 +246,27 @@ def gaps_on_board(gaps, want_rel_z, tol=0.06):
     if abs(near - float(want_rel_z)) > tol:
         return [], near
     return [g for g in tagged if abs((float(g[2]) - base) - near) <= 1e-6], near
+
+
+def scan_cache_decision(cache, enabled, measured_prim=None):
+    """
+    스캔 캐시를 쓸지 → `('use'|'sweep', 사유)`.
+
+    2026-09-28 도윤님: "한 번 스캔할 때 빈칸 두 곳이 검출되는데, 권마다 다시 스캔하지 말고 기억해 뒀다가
+    바로 꽂자." 관측은 이미 스캔 한 번에 전부 들어오므로(모든 빈칸), 두 번째 요청부터는 **팔 스윕을 생략**
+    하고 저장된 관측을 쓴다. 단 빈칸 자체는 첫 권을 꽂으면 바뀌므로 실측 빈칸은 **팔 없이** 다시 잰다
+    (`measure_gaps`). 캐시는 그 서가(prim)에서 잰 것일 때만 유효하다 — 서가가 바뀌면(주행 뒤) 스윕한다.
+
+    `measured_prim` 이 None 이면 아직 안 쟀다는 뜻이라 "캐시가 있고 켜져 있으면 use(재측정 뒤 다시 판단)".
+    """
+    if not enabled:
+        return 'sweep', '캐시 꺼짐'
+    if not cache or not cache.get('slots'):
+        return 'sweep', '캐시 없음'
+    if (measured_prim is not None and cache.get('shelf_prim')
+            and measured_prim != cache['shelf_prim']):
+        return 'sweep', f"서가가 바뀜 {cache['shelf_prim']} → {measured_prim}"
+    return 'use', f"관측 {len(cache['slots'])}개 ({cache.get('shelf_prim') or '서가 미상'})"
 
 
 def choose_gap_any_board(gaps, want_x, want_rel_z, thickness,

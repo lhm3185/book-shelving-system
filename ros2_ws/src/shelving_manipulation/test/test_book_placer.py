@@ -536,3 +536,16 @@ def test_untagged_gaps_still_work():
     from shelving_manipulation.book_placer import choose_gap_any_board
     gx, _gw, rel, _why = choose_gap_any_board([[-0.1065, -0.0466]], -0.0651, 0.0, 0.0352)
     assert gx is not None and rel is None
+
+
+def test_scan_cache_decision():
+    """스캔 캐시 — 꺼짐/없음이면 스윕, 있으면 후보, 서가가 바뀌었으면 무효."""
+    from shelving_manipulation.book_placer import scan_cache_decision
+    assert scan_cache_decision(None, True)[0] == 'sweep'
+    assert scan_cache_decision({'slots': []}, True)[0] == 'sweep'
+    cache = {'slots': ['a', 'b'], 'shelf_prim': '/World/x/_11'}
+    assert scan_cache_decision(cache, False)[0] == 'sweep'
+    assert scan_cache_decision(cache, True)[0] == 'use'                       # 아직 안 쟀다 → 후보
+    assert scan_cache_decision(cache, True, '/World/x/_11')[0] == 'use'
+    how, why = scan_cache_decision(cache, True, '/World/x/_01')
+    assert how == 'sweep' and '서가가 바뀜' in why

@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from std_msgs.msg import Bool, String
 
 from shelving_manipulation.book_placer import (
-    COMMAND_CANCEL, COMMAND_PLACE, COMMAND_ROTATE_BASE, COMMAND_SCAN, COMMAND_SWEEP, decode, encode, pick_cancel, SIM_CANCELLED, SIM_FAILED,
+    COMMAND_CANCEL, COMMAND_MEASURE, COMMAND_PLACE, COMMAND_ROTATE_BASE, COMMAND_SCAN, COMMAND_SWEEP, decode, encode, pick_cancel, SIM_CANCELLED, SIM_FAILED,
     SIM_IDLE, SIM_RUNNING, SIM_SUCCEEDED)
 
 from base_move import refuse_far_move, within_shelf_span
@@ -443,10 +443,39 @@ class ManipulationExecutor:
         except Exception as _exc:      # noqa: BLE001 - 계측이 스캔을 막으면 안 된다
             self.say(f"[판목록] 못 견줬다: {type(_exc).__name__}: {_exc}")
         self.publish(dict(self.job.state, phase="scan_plan", shelf_box=self._shelf_box_arm(),
-                          shelf_gaps=self._shelf_gaps_arm(boards),
+                          shelf_gaps=self._shelf_gaps_arm(boards), shelf_prim=str(self.scene.shelf_prim),
                           boards=[{"board_z": b, "name": f"sweep_{b:.3f}", "reachable": True} for b in boards]))
         self.scene.set_scan_tray_guard(True)
         self.arm.enqueue(Sequence("scan", steps))
+
+    def _sweep_boards(self, cmd):
+        """스윕·재측정이 재는 판 목록 (월드 z) — start_sweep 과 같은 규칙."""
+        _env_boards = os.environ.get("SIM_SWEEP_BOARDS", "").strip()
+        _default = ([float(b) for b in _env_boards.replace(" ", "").split(",") if b]
+                    if _env_boards else [1.042, 0.498])
+        return [float(b) for b in cmd.get("boards", _default)]
+
+    def start_measure(self, cmd):
+        """**팔을 안 움직이고** 실측 빈칸·서가 상자만 다시 잰다 — 스캔 캐시(2026-09-28 도윤님)용.
+
+        첫 권을 꽂으면 그 칸이 사라지므로 조작 노드는 꽂기 전에 잰 빈칸을 거절한다(stale). 관측(비전)은
+        스캔 한 번에 전부 들어와 있으니, 두 번째 권부터는 스윕을 생략하고 이것만 다시 재면 된다.
+        기하 계산이라 한 스텝이면 끝난다. 스캔과 같은 상태(scan_plan → scan_done)를 내보내 노드의 대기
+        루프가 그대로 쓰인다. 서가 prim 을 같이 실어 노드가 캐시 유효성(같은 서가인가)을 확인한다.
+        """
+        token = cmd.get("token") or uuid.uuid4().hex
+        job_id = cmd.get("job_id", "")
+        self.scene.refresh_base()
+        boards = self._sweep_boards(cmd)
+        self.job = Job(dict(cmd, token=token, job_id=job_id))
+        self.job.state = {"token": token, "job_id": job_id, "status": SIM_RUNNING, "phase": "measure"}
+        gaps = self._shelf_gaps_arm(boards)
+        self.say(f"[재측정] 팔 이동 없이 빈칸만 다시 잰다 — 서가 {self.scene.shelf_prim} · 판 {boards} · 빈칸 {len(gaps)}개")
+        self.publish(dict(self.job.state, phase="scan_plan", shelf_box=self._shelf_box_arm(),
+                          shelf_gaps=gaps, shelf_prim=str(self.scene.shelf_prim),
+                          boards=[{"board_z": b, "name": f"measure_{b:.3f}", "reachable": True} for b in boards]))
+        self.finish(SIM_SUCCEEDED, phase="scan_done", message="빈칸 재측정 완료 (팔 이동 없음)",
+                    placement_verified=False)
 
     def start_rotate_base(self, cmd):
         """차체를 **팔 베이스를 축으로** 목표 yaw(월드, 도) 로 돌린다 — 작업 전에 서가를 팔 +Y 에 두려고.
@@ -623,7 +652,7 @@ class ManipulationExecutor:
         kind = cmd.get("type")
         # rotate_base 도 포함 — 순서가 rotate → scan → place 라, 서가를 고르기 전에 rotate 가
         # "서가가 팔 +Y 에 없다" 로 거절했다 (2026-09-25 서가 B 첫 도착 판)
-        if kind in (COMMAND_PLACE, COMMAND_SCAN, COMMAND_SWEEP, COMMAND_ROTATE_BASE):
+        if kind in (COMMAND_PLACE, COMMAND_SCAN, COMMAND_SWEEP, COMMAND_ROTATE_BASE, COMMAND_MEASURE):
             self._select_shelf(cmd)
         if kind == COMMAND_PLACE:
             if self.job is not None and self.job.state["status"] == SIM_RUNNING:
@@ -646,6 +675,13 @@ class ManipulationExecutor:
                               "message": f"작업 {self.job.job_id} 실행 중"})
                 return
             self.start_sweep(cmd)
+        elif kind == COMMAND_MEASURE:
+            if self.job is not None and self.job.state["status"] == SIM_RUNNING:
+                self.publish({"token": cmd.get("token"), "job_id": cmd.get("job_id", ""),
+                              "status": SIM_FAILED, "phase": "plan", "error_code": 411,
+                              "message": f"작업 {self.job.job_id} 실행 중"})
+                return
+            self.start_measure(cmd)
         elif kind == COMMAND_ROTATE_BASE:
             if self.job is not None and self.job.state["status"] == SIM_RUNNING:
                 self.publish({"token": cmd.get("token"), "job_id": cmd.get("job_id", ""),

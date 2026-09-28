@@ -70,6 +70,10 @@ manipulation_node:
     # `scan_shelf` 에서 나온 숫자다. 스윕으로 같은 결과가 나오는지는 아직 모른다.
     # 아래 판이 안 풀리면 `[스윕] 판 … 정지점 0/N` 이 로그에 찍힌다.
     scan_command: scan_sweep
+    # 스캔 캐시 (2026-09-28 도윤님): 한 서가에서 두 번째 권부터 팔 스윕을 생략하고 첫 스캔의 관측을 쓴다.
+    # 실측 빈칸은 팔 없이 다시 잰다(measure_gaps — 첫 권을 꽂으면 그 칸이 사라지므로). 서가가 바뀌면 스윕.
+    # 로그: [스캔캐시] 저장 / 후보·사용 / 무효. 이 브랜치(work/scan_once_0928) 기본 켜짐 — 동결 브랜치는 꺼짐.
+    scan_cache: true
 
     slot_center_inset: 0.024    # 서가 전면 → 꽂힌 책 AABB 중심 추가 여유
     fixed_insertion_depth: 0.30 # 뒤가 열린 서가: 삽입량은 비전 depth가 아닌 고정값

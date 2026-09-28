@@ -33,10 +33,11 @@ from shelving_interfaces.msg import RobotStatus
 from std_msgs.msg import Bool, String
 import yaml
 
-from .book_placer import (cancel_command, choose_gap_any_board, COMMAND_ROTATE_BASE,
-                          decode, encode, error_name, internal_failure, MockSimExecutor,
-                          Outcome, PlaceTracker, publish_feedback_safely, SIM_CANCELLED,
-                          SIM_FAILED, SIM_SUCCEEDED, stale_gap_reason, steady_book)
+from .book_placer import (cancel_command, choose_gap_any_board, COMMAND_MEASURE,
+                          COMMAND_ROTATE_BASE, decode, encode, error_name, internal_failure,
+                          MockSimExecutor, Outcome, PlaceTracker, publish_feedback_safely,
+                          scan_cache_decision, SIM_CANCELLED, SIM_FAILED, SIM_SUCCEEDED,
+                          stale_gap_reason, steady_book)
 from .grasp_planner import (build_place_command, DEFAULT_LIMITS, GraspGoal, parse_profile,
                             parse_tray, PlaceGoal, resolve_book, select_tray_slot, SlotGoal,
                             snap_grasp_to_slot, validate_goal, validate_grasp)
@@ -79,6 +80,11 @@ class ManipulationNode(Node):
         self._slot_reject = None     # 맞춤이 거절한 사유 (결과 메시지로 올린다)
         # 스캔 명령: scan_sweep(수평 스윕, 기본) / scan_shelf(예전 자세 표)
         self.scan_command = str(p('scan_command', 'scan_sweep').value)
+        # 스캔 캐시 (2026-09-28): 한 서가에서 두 번째 권부터 팔 스윕을 생략하고 첫 스캔의 관측을 쓴다.
+        # 실측 빈칸은 팔 없이 다시 잰다(measure_gaps). 서가가 바뀌면 다시 스윕한다.
+        self.scan_cache = bool(p('scan_cache', False).value)
+        self._slot_cache = None
+        self._shelf_prim_seen = None
         # 작업 전 차체 정렬(회전·서가 중앙·거리). 시뮬 실행기(rotate_base)가 있어야 한다 — 코드 기본은 끔이라
         # 가짜 시뮬로 도는 테스트가 30 s 회전 대기에 걸리지 않고, 실제 실행은 manipulation.yaml 에서 켠다.
         self.align_base_before_work = bool(p('align_base_before_work', False).value)
@@ -208,6 +214,8 @@ class ManipulationNode(Node):
                 if state.get('phase') == 'scan_plan' and state.get('shelf_box'):
                     # 팔 기준 [x0, x1, y_front, y_back, z0, z1]
                     self._shelf_box = [float(v) for v in state['shelf_box']]
+                if state.get('phase') == 'scan_plan' and state.get('shelf_prim'):
+                    self._shelf_prim_seen = str(state['shelf_prim'])
                 self._wake.set()
             tracker = self._tracker
             # 다른 작업(이전 작업의 마지막 상태 반복 포함)의 상태는 token 이 달라 무시된다
@@ -344,6 +352,32 @@ class ManipulationNode(Node):
             self.get_logger().warning(f'검출 피드백 못 보냄 ({why}) — 누적 {self._feedback_skipped}회')
 
     def _scan_for_empty_slots(self, goal_handle, job_id, feedback):
+        """서가 스캔 → 빈칸 관측 목록. 캐시가 있으면 팔 스윕 대신 `measure_gaps`(팔 이동 없음)로 빈칸만 다시 잰다."""
+        with self._lock:
+            cache = dict(self._slot_cache) if self._slot_cache else None
+        how, why = scan_cache_decision(cache, self.scan_cache)
+        if how == 'use':
+            self.get_logger().info(f'[스캔캐시] 후보 — {why}. 팔 스윕 생략, 빈칸만 다시 잰다')
+            slots, code, message = self._run_scan(goal_handle, job_id, feedback, COMMAND_MEASURE)
+            if slots is None:
+                return None, code, message
+            how2, why2 = scan_cache_decision(cache, True, self._shelf_prim_seen)
+            if how2 == 'use':
+                self.get_logger().info(f'[스캔캐시] 사용 — {why2}')
+                return list(cache['slots']), 0, ''
+            self.get_logger().info(f'[스캔캐시] 무효 — {why2}. 스윕한다')
+            with self._lock:
+                self._slot_cache = None
+        slots, code, message = self._run_scan(goal_handle, job_id, feedback, self.scan_command)
+        if slots is not None and self.scan_cache:
+            with self._lock:
+                self._slot_cache = {'slots': list(slots), 'shelf_prim': self._shelf_prim_seen,
+                                    'at': time.monotonic()}
+            self.get_logger().info(
+                f'[스캔캐시] 저장 — 관측 {len(slots)}개 ({self._shelf_prim_seen or "서가 미상"})')
+        return slots, code, message
+
+    def _run_scan(self, goal_handle, job_id, feedback, command_type):
         token = uuid.uuid4().hex
         started = time.monotonic()
         with self._lock:
@@ -351,9 +385,11 @@ class ManipulationNode(Node):
             self._scan_state = {'token': token, 'status': 'RUNNING', 'phase': 'scan_request'}
         feedback('SCANNING_SHELF', 0)
         self._set_status('RUNNING', job_id, 0.02, 0, 'SCANNING_SHELF')
-        self.scan_active_pub.publish(Bool(data=True))      # 비전: 지금부터 빈칸을 봐라
-        self._send({'type': self.scan_command, 'token': token,
-                    'job_id': f'{job_id}:scan', 'dwell_s': self.scan_dwell_s})
+        if command_type != COMMAND_MEASURE:
+            self.scan_active_pub.publish(Bool(data=True))      # 비전: 지금부터 빈칸을 봐라
+        self._send({'type': command_type, 'token': token,
+                    'job_id': f'{job_id}:scan', 'dwell_s': self.scan_dwell_s,
+                    'shelf_id': getattr(self, '_shelf_id', '')})
 
         while time.monotonic() - started < self.scan_timeout_s:
             if goal_handle.is_cancel_requested:
@@ -621,6 +657,8 @@ class ManipulationNode(Node):
             slots, float(request.book_width), float(request.book_thickness))
         result.candidate_count = len(slots)
         if selected is None:
+            with self._lock:
+                self._slot_cache = None            # 캐시로 골랐다가 거절이면 다음엔 스윕한다
             result.error_code = 410
             result.message = (getattr(self, '_slot_reject', None)
                               or f'두 층 스캔에서 조작 가능 빈 슬롯 없음 (수신 {len(slots)}개)')
