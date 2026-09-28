@@ -83,8 +83,10 @@ def check_prims(stage, say=print, required=None, optional=None):
         if not any(stage.GetPrimAtPath(p).IsValid() for p in cands):
             missing.append(f"{name} ({' 또는 '.join(cands)})")
     for name, path in (optional or OPTIONAL_PRIMS).items():
-        if not stage.GetPrimAtPath(path).IsValid():
-            say(f"선택 Prim 없음: {name} ({path}) — 해당 기능은 건너뛴다")
+        # 필수 항목과 같은 방식 — 값이 튜플이면 **그중 하나**만 있으면 된다
+        cands = path if isinstance(path, (tuple, list)) else (path,)
+        if not any(stage.GetPrimAtPath(p).IsValid() for p in cands):
+            say(f"선택 Prim 없음: {name} ({' 또는 '.join(cands)}) — 해당 기능은 건너뛴다")
     if missing:
         raise RuntimeError("통합 USD 에 필요한 Prim 이 없다: " + ", ".join(missing))
     say(f"Prim 검사 통과 ({len(required or REQUIRED_PRIMS)}개)")
