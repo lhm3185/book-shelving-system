@@ -903,6 +903,17 @@ class ManipulationExecutor:
                                  "— 이 판의 406 판정은 믿지 말 것")
                     _bad = dev > float(os.environ.get("SIM_HAND_DRIFT_M", "0.03"))
                     _msg = f"운반 중 손 안에서 책 {dev * 100:.1f}cm 어긋남 [원점기준]"
+                # **키네마틱 파지에서는 406 을 판정하지 않는다 — 기록만.** 매 스텝 책을 손에 다시 써 넣으므로
+                # 손가락이 잡은 자리가 책 위에서 옮겨갈 수가 없다(미끄러짐이 정의상 없음). 그런데도 값이
+                # 찍히는 건 쓰기와 읽기 사이의 자세 잡음이 책 원점 지렛대(1.1~1.8 m)로 증폭된 것이다 —
+                # 2026-09-28 촬영 전 1판: 회전 0.2°(통과 판들과 같은 범위)에 "지렛대 회전분 6.6 mm" 로 406.
+                # 9/25 4/4 도 같은 잡음의 꼬리 안이었을 뿐이다. 마찰 파지(SIM_GRASP_KINEMATIC=0)에서는 그대로 판정.
+                from book_scene import GRASP_KINEMATIC as _KIN_JUDGE
+                if _bad and name != "lift" and _KIN_JUDGE:
+                    if not job.watch.get("kin_406_noted"):
+                        job.watch["kin_406_noted"] = True
+                        self.say(f"[어긋남] 키네마틱 파지라 406 으로 끝내지 않는다 (기록만) — {_msg}")
+                    _bad = False
                 if _bad and name != "lift":
                     arm.cancel()
                     self.finish(SIM_FAILED, error_code=406, message=_msg)
