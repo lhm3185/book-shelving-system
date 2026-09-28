@@ -521,11 +521,6 @@ try:
         state_topic=SCENARIO_STATE_TOPIC,
     )
 
-    scenario_runtime.add_reset_hook(
-        "required_action_graphs",
-        lambda: ensure_required_graphs(stage),
-    )
-
     # 먼저 Timeline을 재생해야 PhysX articulation handle을 만들 수 있다.
     scenario_runtime.start()
     simulation_app.update()
@@ -653,10 +648,18 @@ try:
             render=True,
             gui=not ARGS.headless,
             tray_runtime=tray_runtime,
+            timeline=timeline,
         )
         print(
             "[project] production manipulation executor enabled",
             flush=True,
+        )
+
+    # Manipulation 실행 상태와 파지 구속을 먼저 해제한다.
+    if manipulation_executor is not None:
+        scenario_runtime.add_reset_hook(
+            "manipulation_executor",
+            manipulation_executor.reset,
         )
 
     # FixedJoint를 먼저 제거한다.
@@ -671,6 +674,21 @@ try:
         reset_robot_articulation,
     )
 
+    # 로봇 articulation이 복원된 뒤에만 현재 관절값을
+    # 읽어 홈 이동을 계획한다.
+    if manipulation_executor is not None:
+        scenario_runtime.add_reset_hook(
+            "manipulation_executor_home",
+            manipulation_executor.resume_after_reset,
+        )
+
+    # Stop 중에는 base graph를 비활성화한다. 모든 물체와 articulation을
+    # 복원하고 ROS 쪽에 0속도가 전달된 뒤 마지막에 다시 활성화한다.
+    scenario_runtime.add_reset_hook(
+        "required_action_graphs",
+        lambda: ensure_required_graphs(stage),
+    )
+
     # 모든 초기 상태와 reset hook이 준비된 후 READY를 발행한다.
     scenario_runtime.update()
     tray_runtime.update()
@@ -681,14 +699,42 @@ try:
     )
 
     frame_count = 0
+
     while simulation_app.is_running() and not stop_requested:
+        # Pause 또는 Stop 상태에서는 GUI와 Timeline 이벤트만 처리한다.
+        # Manipulation, Tray, PhysX 제어는 실행하지 않는다.
+        if not timeline.is_playing():
+            base_graph = og.get_graph_by_path(
+                "/Graphs/Nav2BaseController"
+            )
+            if base_graph.is_valid() and not base_graph.is_disabled():
+                base_graph.set_disabled(True)
+                print(
+                    "[project] Nav2 base Action Graph suspended",
+                    flush=True,
+                )
+            simulation_app.update()
+            scenario_runtime.update()
+            continue
+
+        # Play 직후에는 일반 물리/조작 프레임보다 scenario reset을 먼저
+        # 처리해야 이전 실행의 속도나 조작 명령이 한 프레임도 실행되지 않는다.
+        scenario_runtime.update()
+
+        if not timeline.is_playing():
+            continue
+
         if manipulation_executor is None:
             simulation_app.update()
         else:
             manipulation_executor.spin()
-        scenario_runtime.update()
-        tray_runtime.update()
+
+        # spin() 도중 Stop이 눌렸다면 트레이도 갱신하지 않는다.
+        if timeline.is_playing():
+            tray_runtime.update()
+
         frame_count += 1
+
         if frame_count == 60:
             print(
                 "[project] timeline "

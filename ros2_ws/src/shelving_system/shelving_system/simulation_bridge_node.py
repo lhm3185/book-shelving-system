@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 import uuid
 from typing import Any
 
+from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import (
@@ -52,6 +54,38 @@ class SimulationBridgeNode(Node):
             "scenario_state_topic",
             "/scenario/state",
         )
+        self.declare_parameter(
+            "initial_pose_topic",
+            "/initialpose",
+        )
+        self.declare_parameter(
+            "initial_pose_frame",
+            "map",
+        )
+        self.declare_parameter(
+            "initial_pose_x",
+            -6.086313,
+        )
+        self.declare_parameter(
+            "initial_pose_y",
+            5.546779,
+        )
+        self.declare_parameter(
+            "initial_pose_yaw",
+            0.0,
+        )
+        self.declare_parameter(
+            "cmd_vel_topic",
+            "/cmd_vel",
+        )
+        self.declare_parameter(
+            "cmd_vel_nav_topic",
+            "/cmd_vel_nav",
+        )
+        self.declare_parameter(
+            "reset_stop_hold_sec",
+            1.0,
+        )
 
         raw_state_topic = str(
             self.get_parameter(
@@ -75,6 +109,39 @@ class SimulationBridgeNode(Node):
             ScenarioState,
             scenario_state_topic,
             state_qos,
+        )
+        self._initial_pose_publisher = self.create_publisher(
+            PoseWithCovarianceStamped,
+            str(
+                self.get_parameter(
+                    "initial_pose_topic"
+                ).value
+            ),
+            10,
+        )
+        self._cmd_vel_publisher = self.create_publisher(
+            Twist,
+            str(
+                self.get_parameter(
+                    "cmd_vel_topic"
+                ).value
+            ),
+            10,
+        )
+        self._cmd_vel_nav_publisher = self.create_publisher(
+            Twist,
+            str(
+                self.get_parameter(
+                    "cmd_vel_nav_topic"
+                ).value
+            ),
+            10,
+        )
+        self._last_localized_run_id = ""
+        self._zero_velocity_hold_until_ns = 0
+        self._reset_stop_timer = self.create_timer(
+            0.05,
+            self._maintain_reset_stop,
         )
 
         self._raw_state_subscription = (
@@ -190,6 +257,29 @@ class SimulationBridgeNode(Node):
         run_id = payload["run_id"]
         state_message = payload["message"]
 
+        if state_name in ("STOPPED", "RESETTING"):
+            self._publish_zero_velocity()
+        elif (
+            state_name == "READY"
+            and run_id
+            and run_id != self._last_localized_run_id
+        ):
+            # Isaac resets the articulation to the configured start pose.
+            # AMCL keeps its previous map->odom estimate across Timeline Stop,
+            # so reset it before downstream nodes receive the new READY run.
+            hold_sec = float(
+                self.get_parameter(
+                    "reset_stop_hold_sec"
+                ).value
+            )
+            self._zero_velocity_hold_until_ns = (
+                self.get_clock().now().nanoseconds
+                + int(max(0.0, hold_sec) * 1_000_000_000)
+            )
+            self._publish_zero_velocity()
+            self._publish_initial_pose(run_id)
+            self._last_localized_run_id = run_id
+
         ros_message = ScenarioState()
         ros_message.header.stamp = (
             self.get_clock().now().to_msg()
@@ -206,6 +296,65 @@ class SimulationBridgeNode(Node):
             f"state={state_name}, "
             f"run_id={run_id or '<none>'}, "
             f"message={state_message}"
+        )
+
+    def _publish_zero_velocity(self) -> None:
+        """Clear retained motion commands around a Timeline reset."""
+        stop = Twist()
+        self._cmd_vel_nav_publisher.publish(stop)
+        self._cmd_vel_publisher.publish(stop)
+
+    def _maintain_reset_stop(self) -> None:
+        """Hold zero velocity until old Nav2 commands have expired."""
+        if self._zero_velocity_hold_until_ns <= 0:
+            return
+
+        if (
+            self.get_clock().now().nanoseconds
+            >= self._zero_velocity_hold_until_ns
+        ):
+            self._publish_zero_velocity()
+            self._zero_velocity_hold_until_ns = 0
+            self.get_logger().info(
+                "Scenario reset velocity hold completed."
+            )
+            return
+
+        self._publish_zero_velocity()
+
+    def _publish_initial_pose(self, run_id: str) -> None:
+        """Reinitialize AMCL after Isaac teleports the robot home."""
+        x = float(
+            self.get_parameter("initial_pose_x").value
+        )
+        y = float(
+            self.get_parameter("initial_pose_y").value
+        )
+        yaw = float(
+            self.get_parameter("initial_pose_yaw").value
+        )
+
+        message = PoseWithCovarianceStamped()
+        message.header.stamp = self.get_clock().now().to_msg()
+        message.header.frame_id = str(
+            self.get_parameter("initial_pose_frame").value
+        )
+        message.pose.pose.position.x = x
+        message.pose.pose.position.y = y
+        message.pose.pose.orientation.z = math.sin(yaw / 2.0)
+        message.pose.pose.orientation.w = math.cos(yaw / 2.0)
+
+        # The reset pose is known from the Isaac scene configuration.  Keep a
+        # small non-zero covariance so AMCL accepts a well-conditioned cloud.
+        message.pose.covariance[0] = 0.01
+        message.pose.covariance[7] = 0.01
+        message.pose.covariance[35] = 0.01
+        self._initial_pose_publisher.publish(message)
+
+        self.get_logger().info(
+            "Scenario localization reset published: "
+            f"run_id={run_id}, x={x:.3f}, y={y:.3f}, "
+            f"yaw={yaw:.3f}"
         )
 
     def _handle_load_tray_goal(

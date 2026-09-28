@@ -60,7 +60,7 @@ from .grasp_planner import (build_place_command, DEFAULT_LIMITS, GraspGoal, pars
                             snap_grasp_to_slot, validate_goal, validate_grasp)
 
 # 진행 중 이 단계 이후에 실패하면 책이 이미 트레이를 떠났다고 본다
-LEFT_TRAY_PHASES = ('MOVING_TO_PRE_INSERT', 'INSERTING', 'RELEASING', 'RETREATING', 'VERIFYING')
+#LEFT_TRAY_PHASES = ('MOVING_TO_PRE_INSERT', 'INSERTING', 'RELEASING', 'RETREATING', 'VERIFYING')
 
 
 class ManipulationNode(Node):
@@ -175,7 +175,7 @@ class ManipulationNode(Node):
             profiles = yaml.safe_load(f)
         self.profile = parse_profile(profiles, self.profile_name)
         self.tray_slots, self.tray_assignments = parse_tray(profiles)
-        self.used_slots = set()
+#        self.used_slots = set()
 
         self._lock = threading.Lock()
         self._wake = threading.Event()
@@ -2057,15 +2057,15 @@ class ManipulationNode(Node):
                         ),
                     )
 
-                    if tray_slot.index in self.used_slots:
-                        check = type(check)(
-                            411,
-                            (
-                                "비전이 이미 사용한 "
-                                f"트레이 칸 {tray_slot.index}을 "
-                                "다시 선택했습니다."
-                            ),
-                        )
+                    # if tray_slot.index in self.used_slots:
+                    #     check = type(check)(
+                    #         411,
+                    #         (
+                    #             "비전이 이미 사용한 "
+                    #             f"트레이 칸 {tray_slot.index}을 "
+                    #             "다시 선택했습니다."
+                    #         ),
+                    #     )
 
             if not check.ok:
                 phase = (
@@ -2244,18 +2244,18 @@ class ManipulationNode(Node):
 
             # 책이 트레이를 떠난 단계까지 갔다면
             # 실패했더라도 같은 책을 다시 선택하지 않습니다.
-            if (
-                outcome.success
-                or any(
-                    phase_name
-                    in tracker.history
-                    for phase_name
-                    in LEFT_TRAY_PHASES
-                )
-            ):
-                self.used_slots.add(
-                    tray_slot.index
-                )
+            # if (
+            #     outcome.success
+            #     or any(
+            #         phase_name
+            #         in tracker.history
+            #         for phase_name
+            #         in LEFT_TRAY_PHASES
+            #     )
+            # ):
+            #     self.used_slots.add(
+            #         tray_slot.index
+            #     )
 
             final_state = (
                 "SUCCEEDED"

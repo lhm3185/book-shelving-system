@@ -57,9 +57,21 @@ class Job:
 class ManipulationExecutor:
     """작업 한 건을 받아 계획·실행·판정하고 상태를 발행한다 (한 번에 한 건)"""
 
-    def __init__(self, scene, node, say, command_topic="/manipulation/sim/command",
-                 state_topic="/manipulation/sim/state", gate=None, sensor_policy="gated",
-                 start_home="move", render=False, gui=False, tray_runtime=None):
+    def __init__(
+        self,
+        scene,
+        node,
+        say,
+        command_topic="/manipulation/sim/command",
+        state_topic="/manipulation/sim/state",
+        gate=None,
+        sensor_policy="gated",
+        start_home="move",
+        render=False,
+        gui=False,
+        tray_runtime=None,
+        timeline=None,
+    ):
         self.scene = scene
         self.arm = scene.arm
         self.robot = scene.robot
@@ -72,6 +84,7 @@ class ManipulationExecutor:
         self.gui = gui
         self.command_topic = command_topic
         self.tray_runtime = tray_runtime
+        self.timeline = timeline
 
 
         self.pub = node.create_publisher(String, state_topic, 10)
@@ -692,6 +705,69 @@ class ManipulationExecutor:
                 ),
             )
 
+    def reset(self):
+        """Stop 후 Play할 때 실행 상태와 구속을 초기화한다.
+
+        이 단계에서는 현재 관절값을 읽지 않는다. 로봇 articulation을
+        초기 위치로 복원한 뒤 resume_after_reset()이 홈 이동을 다시
+        계획한다.
+        """
+        if (
+            self.job is not None
+            and self.job.state.get("status") == SIM_RUNNING
+        ):
+            self.arm.cancel()
+            self.finish(
+                SIM_CANCELLED,
+                error_code=412,
+                message="Scenario reset requested.",
+            )
+        else:
+            self.arm.cancel()
+
+        # 운반 중이던 책의 키네마틱 고정과 충돌 상태를 복원한다.
+        self.scene.detach()
+
+        # 스캔 도중 트레이를 임시 고정한 상태도 해제한다.
+        self.scene.set_scan_tray_guard(False)
+
+        self.scene.job_active = False
+
+        self.inbox.clear()
+        self.job = None
+
+        self.ready = False
+        self.announced = False
+        self.last_pub = 0.0
+
+        self.publish({
+            "token": None,
+            "job_id": "",
+            "status": SIM_IDLE,
+            "phase": "reset",
+            "message": "Manipulation executor reset.",
+        })
+
+        self.say("시나리오 재실행을 위해 실행기를 초기화했습니다.")
+
+    def resume_after_reset(self):
+        """Articulation 복원 후 초기 홈 이동을 다시 등록한다."""
+        joint_positions = self.robot.get_joint_positions()
+
+        if joint_positions is None:
+            raise RuntimeError(
+                "robot joint positions are unavailable after reset"
+            )
+
+        self.q_prev = joint_positions[
+            self.scene.idx_arm
+        ].copy()
+
+        for primitive in self.scene.home_moves():
+            self.arm.enqueue(primitive)
+
+        self.say("로봇 복원 후 홈 이동을 다시 등록했습니다.")
+
     # ---------------------------------------------------------------- 루프
     def need_render(self):
         if self.gate is None:
@@ -704,6 +780,12 @@ class ManipulationExecutor:
         """한 시뮬 스텝. run_simulation.py 의 루프가 매 스텝 부른다"""
         import rclpy
 
+        if (
+            self.timeline is not None
+            and not self.timeline.is_playing()
+        ):
+            return
+
         scene, arm, world = self.scene, self.arm, self.world
         rclpy.spin_once(self.node, timeout_sec=0.0)
         while self.inbox:
@@ -712,6 +794,13 @@ class ManipulationExecutor:
         status = arm.update()
         r_now = self.need_render()
         world.step(render=r_now)
+        # world.step() 중 사용자가 Stop을 눌렀을 수 있다.
+        # 정지된 articulation의 관절값을 읽지 않는다.
+        if (
+            self.timeline is not None
+            and not self.timeline.is_playing()
+        ):
+            return
         self.render_steps += int(r_now)
         if self.job is not None:
             self.job.steps += 1

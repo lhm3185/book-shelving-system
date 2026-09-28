@@ -31,6 +31,7 @@ class NavigationNode(Node):
         )
         self.declare_parameter('nav2_server_timeout_sec', 10.0)
         self.declare_parameter('approach_radius', 0.25)
+        self.declare_parameter('shelf_retreat_max_distance', 0.75)
         self.declare_parameter('position_tolerance', 0.05)
         self.declare_parameter('yaw_tolerance', 0.08)
         self.declare_parameter('fine_alignment_linear_speed', 0.08)
@@ -66,6 +67,11 @@ class NavigationNode(Node):
             ),
             approach_radius=float(
                 self.get_parameter('approach_radius').value
+            ),
+            shelf_retreat_max_distance=float(
+                self.get_parameter(
+                    'shelf_retreat_max_distance'
+                ).value
             ),
             position_tolerance=float(
                 self.get_parameter('position_tolerance').value

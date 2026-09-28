@@ -10,7 +10,7 @@ from isaacsim.core.utils.rotations import (
     quat_to_rot_matrix,
     rot_matrix_to_quat,
 )
-from pxr import Gf, UsdPhysics
+from pxr import Gf, Sdf, UsdGeom, UsdPhysics
 from std_msgs.msg import String
 
 
@@ -286,7 +286,9 @@ class TrayRuntime:
             )
 
         if book_path in self._claimed_book_paths:
-            return
+            raise RuntimeError(
+                f"Book was already claimed in this scenario: {book_path}"
+            )
 
         self._claimed_book_paths.add(book_path)
 
@@ -422,6 +424,73 @@ class TrayRuntime:
             rigid_api.CreateVelocityAttr().Set(zero)
             rigid_api.CreateAngularVelocityAttr().Set(zero)
 
+    def _repair_pose_properties(self, path: str) -> None:
+        """Repair pose ops that another runtime wrapper left typeless.
+
+        Some manipulation paths recreate a top-level book xform property while
+        the simulation is running.  USD can then retain the property name but
+        lose its value type.  ``SingleXFormPrim.set_world_pose()`` treats that
+        name as a usable orient op and fails while resetting the scenario.
+        Restore only missing/typeless pose properties here; valid authored
+        properties and their values are left untouched.
+        """
+        prim = self._stage.GetPrimAtPath(path)
+        xformable = UsdGeom.Xformable(prim)
+        property_names = set(prim.GetPropertyNames())
+
+        specifications = (
+            (
+                "xformOp:translate",
+                UsdGeom.XformOp.TypeTranslate,
+                Sdf.ValueTypeNames.Double3,
+                Gf.Vec3d(0.0, 0.0, 0.0),
+            ),
+            (
+                "xformOp:orient",
+                UsdGeom.XformOp.TypeOrient,
+                Sdf.ValueTypeNames.Quatd,
+                Gf.Quatd(1.0, 0.0, 0.0, 0.0),
+            ),
+            (
+                "xformOp:scale",
+                UsdGeom.XformOp.TypeScale,
+                Sdf.ValueTypeNames.Double3,
+                Gf.Vec3d(1.0, 1.0, 1.0),
+            ),
+        )
+
+        for (
+            name,
+            op_type,
+            value_type,
+            default_value,
+        ) in specifications:
+            attribute = prim.GetAttribute(name)
+            if (
+                name in property_names
+                and attribute
+                and attribute.GetTypeName()
+            ):
+                continue
+
+            if name in property_names:
+                prim.RemoveProperty(name)
+                prim.CreateAttribute(
+                    name,
+                    value_type,
+                    custom=False,
+                ).Set(default_value)
+            else:
+                operation = xformable.AddXformOp(
+                    op_type,
+                    UsdGeom.XformOp.PrecisionDouble,
+                )
+                operation.Set(default_value)
+
+            self._node.get_logger().warning(
+                f"Repaired invalid tray pose property: {path}.{name}"
+            )
+
     def _restore_initial_state(self) -> None:
         self._set_group_kinematic(True)
         self._zero_velocities()
@@ -430,6 +499,7 @@ class TrayRuntime:
             self._initial_states.items()
         ):
             position, orientation, _ = state
+            self._repair_pose_properties(path)
             self._objects[path].set_world_pose(
                 position,
                 orientation,

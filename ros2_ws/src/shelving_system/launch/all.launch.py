@@ -65,6 +65,12 @@ def _launch_setup(context, *_args, **_kwargs):
                     "scenario_state_topic": (
                         "/scenario/state"
                     ),
+                    # Timeline Stop/Play restores the Isaac articulation.
+                    # Publish the matching pose so AMCL does not retain the
+                    # previous run's map->odom estimate.
+                    "initial_pose_x": -6.086313,
+                    "initial_pose_y": 5.546779,
+                    "initial_pose_yaw": 0.0,
                 }
             ],
         ),
@@ -82,7 +88,7 @@ def _launch_setup(context, *_args, **_kwargs):
 
                     # position_tolerance 0.05m를 고려하여
                     # 실제 약 0.30m 후퇴하도록 0.35m를 요청한다.
-                    "shelf_retreat_goal_distance_m": 0.35,
+                    "shelf_retreat_goal_distance_m": 0.65,
                 }
             ],
         ),
@@ -100,6 +106,10 @@ def _launch_setup(context, *_args, **_kwargs):
                 {
                     "use_sim_time": use_sim_time,
                     "auto_publish": False,
+                    "publish_on_scenario_restart": True,
+                    # 1초간 reset 0속도를 유지하고 AMCL을 다시 맞춘 뒤
+                    # 새 작업을 발행한다.
+                    "scenario_restart_publish_delay_sec": 2.0,
 
                     # 통합 시나리오에서는 동일한 shelf_01에
                     # 배치할 책 두 권을 발행한다.

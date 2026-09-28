@@ -128,6 +128,7 @@ class ScenarioRuntime:
         self._ready_when_playing = True
 
         self._timeline.play()
+
     def update(self) -> None:
         """메인 루프에서 프레임마다 호출한다."""
         if rclpy.ok():
@@ -212,19 +213,22 @@ class ScenarioRuntime:
             "reset started",
         )
 
-        # Timeline 상태 변경은 다음 프레임부터 반영된다.
-        self._timeline.pause()
-
     def _process_reset(self) -> None:
         if not self._reset_in_progress:
             return
 
-        # pause 요청이 아직 반영되지 않았다.
-        if self._timeline.is_playing():
+        # Articulation과 PhysX view는 Timeline이 재생 중일 때만
+        # 안전하게 복원할 수 있다. Play 이벤트를 받은 첫
+        # 프레임에 reset hook을 먼저 실행하여 일반 작업 루프가
+        # 돌기 전에 초기 상태를 복원한다.
+        if not self._timeline.is_playing():
             return
+
+        active_hook = "<none>"
 
         try:
             for name, callback in self._reset_hooks:
+                active_hook = name
                 self._node.get_logger().info(
                     f"Running scenario reset hook: {name}"
                 )
@@ -234,17 +238,20 @@ class ScenarioRuntime:
             self._reset_in_progress = False
             self._reset_required = True
 
+            # 불완전한 초기화 상태에서 물리가 계속 진행되지
+            # 않도록 실패 시에만 일시정지한다.
+            self._timeline.pause()
+
             self._publish_state(
                 self.FAILED,
-                f"reset failed: {type(error).__name__}: {error}",
+                "reset failed at "
+                f"'{active_hook}': {type(error).__name__}: {error}",
             )
             return
 
         self._reset_in_progress = False
         self._reset_required = False
         self._ready_when_playing = True
-
-        self._timeline.play()
 
     def _publish_ready_if_playing(self) -> None:
         if not self._ready_when_playing:

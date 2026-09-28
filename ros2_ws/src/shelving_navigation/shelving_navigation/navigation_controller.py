@@ -47,6 +47,7 @@ class NavigationController:
         max_nav2_retries: int,
         nav2_retry_delay_sec: float,
         approach_radius: float,
+        shelf_retreat_max_distance: float,
         position_tolerance: float,
         yaw_tolerance: float,
         fine_alignment_linear_speed: float,
@@ -66,6 +67,7 @@ class NavigationController:
             nav2_retry_delay_sec,
         )
         self._approach_radius = approach_radius
+        self._shelf_retreat_max_distance = shelf_retreat_max_distance
         self._position_tolerance = position_tolerance
         self._yaw_tolerance = yaw_tolerance
 
@@ -160,8 +162,13 @@ class NavigationController:
         self._route_mode = bool(request.waypoints)
 
         try:
-            nav2_client, nav2_goal = self._make_nav2_goal(request)
+            if request.target_type == "shelf_retreat":
+                return await self._execute_direct_shelf_retreat(
+                    goal_handle,
+                    request,
+                )
 
+            nav2_client, nav2_goal = self._make_nav2_goal(request)
             if not nav2_client.wait_for_server(
                 timeout_sec=self._nav2_server_timeout_sec
             ):
@@ -530,6 +537,129 @@ class NavigationController:
 
             with self._state_lock:
                 self._busy = False
+
+    async def _execute_direct_shelf_retreat(
+        self,
+        goal_handle,
+        request: NavigateToTarget.Goal,
+    ) -> NavigateToTarget.Result:
+        """Execute shelf retreat directly through cmd_vel without Nav2."""
+
+        if request.waypoints:
+            goal_handle.abort()
+
+            return self._make_result(
+                success=False,
+                final_pose=self._get_final_pose(),
+                error_code=self.ERROR_NAVIGATION_RESULT,
+                message=(
+                    "Shelf retreat does not accept waypoints."
+                ),
+            )
+
+        current_pose = self._lookup_robot_pose(
+            log_error=True,
+        )
+
+        if current_pose is None:
+            goal_handle.abort()
+
+            return self._make_result(
+                success=False,
+                final_pose=self._get_final_pose(),
+                error_code=self.ERROR_TRANSFORM,
+                message=(
+                    "Could not obtain the robot pose before "
+                    "direct shelf retreat."
+                ),
+            )
+
+        position_error, _ = self._compute_errors(
+            request.target_pose,
+            current_pose,
+        )
+
+        if (
+            position_error
+            > self._shelf_retreat_max_distance
+        ):
+            goal_handle.abort()
+
+            return self._make_result(
+                success=False,
+                final_pose=current_pose,
+                error_code=self.ERROR_NAVIGATION_RESULT,
+                message=(
+                    "Shelf-retreat target exceeds the direct "
+                    "control safety limit: "
+                    f"distance={position_error:.3f}m, "
+                    "limit="
+                    f"{self._shelf_retreat_max_distance:.3f}m"
+                ),
+            )
+
+        self._node.get_logger().info(
+            "Starting direct cmd_vel shelf retreat: "
+            f"distance={position_error:.3f}m, "
+            "Nav2 bypassed."
+        )
+
+        alignment_state, final_pose = (
+            await self._run_fine_alignment(
+                goal_handle,
+                request.target_pose,
+            )
+        )
+
+        if alignment_state == "CANCELED":
+            goal_handle.canceled()
+
+            return self._make_result(
+                success=False,
+                final_pose=final_pose,
+                error_code=self.ERROR_NAVIGATION_REJECTED,
+                message=(
+                    "Shelf retreat was canceled."
+                ),
+            )
+
+        if alignment_state == "TF_FAILED":
+            goal_handle.abort()
+
+            return self._make_result(
+                success=False,
+                final_pose=final_pose,
+                error_code=self.ERROR_TRANSFORM,
+                message=(
+                    "Could not obtain the robot pose during "
+                    "direct shelf retreat."
+                ),
+            )
+
+        if alignment_state != "SUCCEEDED":
+            goal_handle.abort()
+
+            return self._make_result(
+                success=False,
+                final_pose=final_pose,
+                error_code=self.ERROR_FINE_ALIGNMENT,
+                message=(
+                    "Direct shelf retreat did not finish "
+                    "within the allowed time."
+                ),
+            )
+
+        goal_handle.succeed()
+
+        return self._make_result(
+            success=True,
+            final_pose=final_pose,
+            tolerance_satisfied=True,
+            error_code=0,
+            message=(
+                "Direct shelf retreat completed."
+            ),
+        )
 
     def _make_nav2_goal(
         self,

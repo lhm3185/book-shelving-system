@@ -18,6 +18,58 @@ locations:
       z: 0.0
       w: 1.0
 
+    waypoints:
+      # 작업 책장에서 먼저 아래쪽 통로로 빠진다.
+      - position:
+          x: 2.559689
+          y: -5.645144
+          z: 0.0
+        orientation:
+          x: 0.0
+          y: 0.0
+          z: 1.000000
+          w: 0.000000
+
+      - position:
+          x: -0.344334
+          y: -5.552215
+          z: 0.0
+        orientation:
+          x: 0.0
+          y: 0.0
+          z: 1.000000
+          w: 0.000000
+
+      - position:
+          x: -4.200877
+          y: -4.576463
+          z: 0.0
+        orientation:
+          x: 0.0
+          y: 0.0
+          z: 0.917590
+          w: 0.397529
+
+      - position:
+          x: -5.478647
+          y: -0.952243
+          z: 0.0
+        orientation:
+          x: 0.0
+          y: 0.0
+          z: 0.707107
+          w: 0.707107
+
+      - position:
+          x: -5.362486
+          y: 3.090157
+          z: 0.0
+        orientation:
+          x: 0.0
+          y: 0.0
+          z: 0.710434
+          w: 0.703764
+
   return_station:
     position:
       # 반납기 앞에서 padded footprint와 0.16 m 이상 간격을 둔다.

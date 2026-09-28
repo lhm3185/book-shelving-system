@@ -229,6 +229,12 @@ class BookScene:
     ):
         self.app, self.say = app, say
         self._external_runtime = world is not None and robot is not None
+        # Stop can request a scenario reset before the first grasp.  Keep the
+        # attachment state valid from construction so detach() is safe at any
+        # point in the cycle, including initial navigation.
+        self._held_book = None
+        self._held_rel = None
+        self._held_coll = []
 
         self._using_existing_assets = (tray_path is not None or book_paths is not None)
         if self._using_existing_assets:
@@ -2352,7 +2358,7 @@ class BookScene:
         j.CreateExcludeFromArticulationAttr().Set(True)
 
     def detach(self):
-        book = self._held_book
+        book = getattr(self, "_held_book", None)
         self._held_book = None
         self._held_rel = None
         if book and GRASP_KINEMATIC:

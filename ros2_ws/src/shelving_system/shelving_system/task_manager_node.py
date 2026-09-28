@@ -14,6 +14,7 @@ from rclpy.node import Node
 from rclpy.time import Time
 from tf2_ros import Buffer, TransformException, TransformListener
 from rclpy.qos import (
+    DurabilityPolicy,
     HistoryPolicy,
     QoSProfile,
     ReliabilityPolicy,
@@ -24,7 +25,11 @@ from shelving_interfaces.action import (
     NavigateToTarget,
     PlaceBook,
 )
-from shelving_interfaces.msg import RobotStatus, TrayJob
+from shelving_interfaces.msg import (
+    RobotStatus,
+    ScenarioState,
+    TrayJob,
+)
 from shelving_system.job_planner import (
     InvalidTrayJobError,
     JobPlan,
@@ -70,6 +75,10 @@ class TaskManagerNode(Node):
 
         self.declare_parameter("tray_job_topic", "/return_machine/tray_job") 
         self.declare_parameter("status_topic", "/system/state")
+        self.declare_parameter(
+            "scenario_state_topic",
+            "/scenario/state",
+        )
 
         self.declare_parameter("navigation_action", "/navigate_to_target")
 
@@ -80,11 +89,11 @@ class TaskManagerNode(Node):
             5.0,
         )
 
-        # Nav2 위치 허용오차 5cm를 고려하여 35cm 목표를 보내고,
-        # 실제로는 약 30cm 이상 책장에서 후퇴하도록 한다.
+        # 위치 허용오차 5cm를 고려하여 65cm 목표를 보내고,
+        # 실제로는 약 60cm 책장에서 후퇴하도록 한다.
         self.declare_parameter(
             "shelf_retreat_goal_distance_m",
-            0.35,
+            0.65,
         )
         self.declare_parameter(
             "global_frame",
@@ -154,6 +163,25 @@ class TaskManagerNode(Node):
             )
         )
 
+        scenario_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self._scenario_state_subscription = (
+            self.create_subscription(
+                ScenarioState,
+                str(
+                    self.get_parameter(
+                        "scenario_state_topic"
+                    ).value
+                ),
+                self._handle_scenario_state,
+                scenario_qos,
+            )
+        )
+
         self._navigation_client = ActionClient(
             self,
             NavigateToTarget,
@@ -191,6 +219,9 @@ class TaskManagerNode(Node):
         self._accepted_job_ids: set[str] = set()
         self._active_navigation_target_type = ""
         self._active_navigation_target_id = ""
+        self._scenario_run_id = ""
+        self._scenario_reset_pending = False
+        self._action_generation = 0
 
         self._status_message = "Initializing task manager."
 
@@ -229,6 +260,105 @@ class TaskManagerNode(Node):
             "Manipulation action client configured for "
             f"'{manipulation_action}'."
         )
+
+    def _handle_scenario_state(
+        self,
+        message: ScenarioState,
+    ) -> None:
+        """Stop 중인 작업을 폐기하고 다음 Play를 준비한다."""
+        if message.state in (
+            ScenarioState.STOPPED,
+            ScenarioState.RESETTING,
+        ):
+            if not self._scenario_reset_pending:
+                self._reset_for_scenario_restart()
+            return
+
+        if message.state != ScenarioState.READY:
+            return
+
+        run_id = message.run_id.strip()
+
+        if run_id:
+            self._scenario_run_id = run_id
+
+        if not self._scenario_reset_pending:
+            return
+
+        self._scenario_reset_pending = False
+        self._status_message = (
+            "Scenario reset completed. Waiting for a tray job."
+        )
+        self._publish_status()
+        self.get_logger().info(
+            "Scenario READY received. Task manager is ready "
+            f"for a new cycle: run_id={run_id or '<empty>'}"
+        )
+
+    def _reset_for_scenario_restart(self) -> None:
+        """현재 action과 FSM을 무효화하고 IDLE로 복원한다."""
+        previous_state = self._fsm.current_state.name
+        previous_job_id = self._active_job_id
+
+        self._scenario_reset_pending = True
+        self._action_generation += 1
+
+        self._cancel_active_goal(
+            self._navigation_goal_handle,
+            "navigation",
+        )
+        self._cancel_active_goal(
+            self._load_tray_goal_handle,
+            "load_tray",
+        )
+        self._cancel_active_goal(
+            self._manipulation_goal_handle,
+            "manipulation",
+        )
+
+        self._navigation_goal_handle = None
+        self._load_tray_goal_handle = None
+        self._manipulation_goal_handle = None
+
+        self._fsm.reset()
+        self._active_job_id = ""
+        self._current_plan = None
+        self._current_task_index = 0
+        self._completed_book_ids.clear()
+        self._accepted_job_ids.clear()
+        self._active_navigation_target_type = ""
+        self._active_navigation_target_id = ""
+
+        self._status_message = (
+            "Scenario stopped. Waiting for reset to complete."
+        )
+        self._publish_status()
+
+        self.get_logger().info(
+            "Task manager reset for scenario restart: "
+            f"previous_state={previous_state}, "
+            f"previous_job_id={previous_job_id or '<none>'}, "
+            f"generation={self._action_generation}"
+        )
+
+    def _cancel_active_goal(
+        self,
+        goal_handle,
+        label: str,
+    ) -> None:
+        """현재 ROS action goal을 best-effort로 취소한다."""
+        if goal_handle is None:
+            return
+
+        try:
+            goal_handle.cancel_goal_async()
+            self.get_logger().info(
+                f"Scenario reset requested {label} goal cancellation."
+            )
+        except Exception as error:
+            self.get_logger().warning(
+                f"Failed to request {label} goal cancellation: {error}"
+            )
 
     def _handle_tray_job(
         self,
@@ -463,14 +593,13 @@ class TaskManagerNode(Node):
             ).value
         )
 
-        # 이 목표가 0.40m 접근 반경 밖이면 Start occupied 발생 시
-        # navigation_node가 정밀 정렬 후퇴로 전환할 수 없다.
-        if not 0.0 < retreat_distance < 0.40:
+        # 최대 직접 이동거리 검증은 navigation_controller가 담당한다.
+        if retreat_distance <= 0.0:
             self._fail_navigation(
                 error_code=self.ERROR_NAVIGATION_RESULT,
                 message=(
-                    "Shelf retreat distance must be between "
-                    f"0.0 and 0.40 m: {retreat_distance:.3f}"
+                    "Shelf retreat distance must be positive: "
+                    f"{retreat_distance:.3f}"
                 ),
             )
             return
@@ -590,14 +719,22 @@ class TaskManagerNode(Node):
             )
             return
 
+        home_pose = self._current_plan.home_pose
+        frame_id = str(home_pose["frame_id"])
+
+        waypoints = self._build_waypoints(
+            frame_id=frame_id,
+            waypoint_data=list(
+                home_pose.get("waypoints", [])
+            ),
+        )
+
         self._send_navigation_goal(
             target_type="home",
             target_id="home",
-            frame_id=str(
-                self._current_plan.home_pose["frame_id"]
-            ),
-            target_pose=self._current_plan.home_pose,
-            waypoints=[],
+            frame_id=frame_id,
+            target_pose=home_pose,
+            waypoints=waypoints,
             enable_fine_alignment=True,
         )
 
@@ -685,26 +822,40 @@ class TaskManagerNode(Node):
             f"y={goal.target_pose.pose.position.y:.2f}"
         )
 
+        generation = self._action_generation
+
         send_goal_future = (
             self._navigation_client.send_goal_async(
                 goal,
                 feedback_callback=(
-                    self._handle_navigation_feedback
+                    lambda feedback_message,
+                    generation=generation:
+                    self._handle_navigation_feedback(
+                        feedback_message,
+                        generation,
+                    )
                 ),
             )
         )
         send_goal_future.add_done_callback(
-            self._handle_navigation_goal_response
+            lambda future, generation=generation:
+            self._handle_navigation_goal_response(
+                future,
+                generation,
+            )
         )
 
     def _handle_navigation_goal_response(
         self,
         future,
+        generation: int,
     ) -> None:
         """Handle acceptance or rejection of a goal."""
         try:
             goal_handle = future.result()
         except Exception as error:
+            if generation != self._action_generation:
+                return
             self._fail_navigation(
                 error_code=self.ERROR_NAVIGATION_RESULT,
                 message=(
@@ -712,6 +863,11 @@ class TaskManagerNode(Node):
                     f"{error}"
                 ),
             )
+            return
+
+        if generation != self._action_generation:
+            if goal_handle is not None and goal_handle.accepted:
+                goal_handle.cancel_goal_async()
             return
 
         if goal_handle is None or not goal_handle.accepted:
@@ -732,14 +888,22 @@ class TaskManagerNode(Node):
 
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(
-            self._handle_navigation_result
+            lambda future, generation=generation:
+            self._handle_navigation_result(
+                future,
+                generation,
+            )
         )
 
     def _handle_navigation_feedback(
         self,
         feedback_message,
+        generation: int,
     ) -> None:
         """Handle navigation progress feedback."""
+        if generation != self._action_generation:
+            return
+
         feedback = feedback_message.feedback
 
         if feedback.total_waypoints > 0:
@@ -776,8 +940,12 @@ class TaskManagerNode(Node):
     def _handle_navigation_result(
         self,
         future,
+        generation: int,
     ) -> None:
         """Handle the completed navigation result."""
+        if generation != self._action_generation:
+            return
+
         try:
             wrapped_result = future.result()
             result = wrapped_result.result
@@ -913,25 +1081,39 @@ class TaskManagerNode(Node):
         goal.job_id = self._current_plan.job_id
         goal.tray_id = self._current_plan.tray_id
 
+        generation = self._action_generation
+
         send_goal_future = (
             self._load_tray_client.send_goal_async(
                 goal,
                 feedback_callback=(
-                    self._handle_load_tray_feedback
+                    lambda feedback_message,
+                    generation=generation:
+                    self._handle_load_tray_feedback(
+                        feedback_message,
+                        generation,
+                    )
                 ),
             )
         )
         send_goal_future.add_done_callback(
-            self._handle_load_tray_goal_response
+            lambda future, generation=generation:
+            self._handle_load_tray_goal_response(
+                future,
+                generation,
+            )
         )
 
     def _handle_load_tray_goal_response(
         self,
         future,
+        generation: int,
     ) -> None:
         try:
             goal_handle = future.result()
         except Exception as error:
+            if generation != self._action_generation:
+                return
             self._fail_tray_loading(
                 error_code=self.ERROR_TRAY_FAILED,
                 message=(
@@ -939,6 +1121,11 @@ class TaskManagerNode(Node):
                     f"{error}"
                 ),
             )
+            return
+
+        if generation != self._action_generation:
+            if goal_handle is not None and goal_handle.accepted:
+                goal_handle.cancel_goal_async()
             return
 
         if goal_handle is None or not goal_handle.accepted:
@@ -956,13 +1143,21 @@ class TaskManagerNode(Node):
 
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(
-            self._handle_load_tray_result
+            lambda future, generation=generation:
+            self._handle_load_tray_result(
+                future,
+                generation,
+            )
         )
 
     def _handle_load_tray_feedback(
         self,
         feedback_message,
+        generation: int,
     ) -> None:
+        if generation != self._action_generation:
+            return
+
         feedback = feedback_message.feedback
 
         self._status_message = (
@@ -981,7 +1176,11 @@ class TaskManagerNode(Node):
     def _handle_load_tray_result(
         self,
         future,
+        generation: int,
     ) -> None:
+        if generation != self._action_generation:
+            return
+
         try:
             wrapped_result = future.result()
             result = wrapped_result.result
@@ -1270,26 +1469,40 @@ class TaskManagerNode(Node):
             f"task_index={self._current_task_index}"
         )
 
+        generation = self._action_generation
+
         send_goal_future = (
             self._manipulation_client.send_goal_async(
                 goal,
                 feedback_callback=(
-                    self._handle_manipulation_feedback
+                    lambda feedback_message,
+                    generation=generation:
+                    self._handle_manipulation_feedback(
+                        feedback_message,
+                        generation,
+                    )
                 ),
             )
         )
         send_goal_future.add_done_callback(
-            self._handle_manipulation_goal_response
+            lambda future, generation=generation:
+            self._handle_manipulation_goal_response(
+                future,
+                generation,
+            )
         )
 
     def _handle_manipulation_goal_response(
         self,
         future,
+        generation: int,
     ) -> None:
         """Handle acceptance of a placement goal."""
         try:
             goal_handle = future.result()
         except Exception as error:
+            if generation != self._action_generation:
+                return
             self._fail_manipulation(
                 error_code=self.ERROR_MANIPULATION_RESULT,
                 message=(
@@ -1297,6 +1510,11 @@ class TaskManagerNode(Node):
                     f"{error}"
                 ),
             )
+            return
+
+        if generation != self._action_generation:
+            if goal_handle is not None and goal_handle.accepted:
+                goal_handle.cancel_goal_async()
             return
 
         if goal_handle is None or not goal_handle.accepted:
@@ -1319,14 +1537,22 @@ class TaskManagerNode(Node):
 
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(
-            self._handle_manipulation_result
+            lambda future, generation=generation:
+            self._handle_manipulation_result(
+                future,
+                generation,
+            )
         )
 
     def _handle_manipulation_feedback(
         self,
         feedback_message,
+        generation: int,
     ) -> None:
         """Handle book-placement phase feedback."""
+        if generation != self._action_generation:
+            return
+
         feedback = feedback_message.feedback
 
         self._status_message = (
@@ -1343,8 +1569,12 @@ class TaskManagerNode(Node):
     def _handle_manipulation_result(
         self,
         future,
+        generation: int,
     ) -> None:
         """Handle the completed book-placement result."""
+        if generation != self._action_generation:
+            return
+
         try:
             wrapped_result = future.result()
             result = wrapped_result.result
