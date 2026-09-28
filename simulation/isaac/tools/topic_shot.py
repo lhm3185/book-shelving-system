@@ -8,6 +8,7 @@
 
     python3 topic_shot.py --topic /perception/debug_image --out /tmp/shots/dbg
     python3 topic_shot.py --topic /perception/debug_image --count 5 --every 1.0
+    python3 topic_shot.py --topic /perception/debug_image --count 300 --every 3 --seconds 900   # 판 내내
 
 `--count` 를 2 이상 주면 연속으로 여러 장을 받는다 — **한 장으로는 흔들리는지
 모른다.** 검출이 판마다 튀는 것을 볼 때는 여러 장이 필요하다.
@@ -65,31 +66,41 @@ def main() -> int:
     rclpy.init()
     node = Node("topic_shot")
     got, last = [], [0.0]
+    width = 3 if a.count > 99 else 2
 
     def on_image(msg):
+        # **받는 즉시 쓴다.** 전에는 지정한 장수를 다 모은 뒤에야 썼다 — `--count 250` 으로 판 내내
+        # 걸어 두면 판이 끝날 때까지 한 장도 안 나왔고, 도중에 끊으면 전부 잃었다 (2026-09-29).
         now = time.time()
-        if len(got) < a.count and now - last[0] >= a.every:
-            last[0] = now
-            got.append(msg)
+        if len(got) >= a.count or now - last[0] < a.every:
+            return
+        last[0] = now
+        i = len(got)
+        path = f"{a.out}_{i:0{width}d}.png" if a.count > 1 else f"{a.out}.png"
+        try:
+            cv2.imwrite(path, to_array(msg))
+        except Exception as exc:      # noqa: BLE001 - 한 장이 깨져도 다음 장은 받는다
+            print(f"  **{path} 를 못 썼다** — {type(exc).__name__}: {exc}", flush=True)
+            return
+        got.append(path)
+        print(f"  {path}  {msg.width}x{msg.height} {msg.encoding} "
+              f"stamp={msg.header.stamp.sec}.{msg.header.stamp.nanosec // 10**6:03d} "
+              f"frame={msg.header.frame_id}", flush=True)
 
     node.create_subscription(Image, a.topic, on_image, 10)
-    print(f"{a.topic} 를 {a.seconds:.0f}초 기다린다 ({a.count}장) …")
+    print(f"{a.topic} 를 {a.seconds:.0f}초 기다린다 ({a.count}장, 받는 즉시 쓴다) …", flush=True)
     start = time.time()
-    while len(got) < a.count and time.time() - start < a.seconds:
-        rclpy.spin_once(node, timeout_sec=0.2)
+    try:
+        while len(got) < a.count and time.time() - start < a.seconds:
+            rclpy.spin_once(node, timeout_sec=0.2)
+    except KeyboardInterrupt:
+        print(f"끊겼다 — {len(got)}장은 이미 써 두었다")
 
     if not got:
         print(f"**{a.seconds:.0f}초 안에 한 장도 안 왔다.** "
               f"토픽 이름·도메인·발행자를 볼 것: ros2 topic info {a.topic}")
         return 2
-
-    for i, msg in enumerate(got):
-        path = f"{a.out}_{i:02d}.png" if a.count > 1 else f"{a.out}.png"
-        img = to_array(msg)
-        cv2.imwrite(path, img)
-        print(f"  {path}  {msg.width}x{msg.height} {msg.encoding} "
-              f"stamp={msg.header.stamp.sec}.{msg.header.stamp.nanosec // 10**6:03d} "
-              f"frame={msg.header.frame_id}")
+    print(f"{len(got)}장")
     return 0
 
 
