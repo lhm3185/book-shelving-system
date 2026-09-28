@@ -152,6 +152,7 @@ spawn ros2 run shelving_perception vision_manager --ros-args \
     -p model_path:="${MODEL_PATH:-$RES/book_tray_best.pt}" \
     -p shelf_model_path:="${SHELF_MODEL:-$RES/best.pt}" \
     -p confidence_threshold:="${VISION_CONF:-0.55}" \
+    -p book_roi_min:="${VISION_ROI_MIN:-[-0.69, -0.2, 0.0]}" \
     -p book_roi_max:="${VISION_ROI_MAX:-[-0.26, 0.42, 0.32]}" > "$LOG/vision.log" 2>&1
 # ^ 트레이 ROI y 상한 0.30 → 0.65 (비전팀 yaml 은 안 건드리고 여기서 덮는다). yaml 값은 앞 두 칸 기준이라
 #   세 권째(칸2 y +0.180 가장자리, 칸3 +0.364 밖)부터 "책 좌표 없음 411" 이 났다 (2026-09-25 네 권 판).
