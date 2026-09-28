@@ -6,3 +6,8 @@
 798f9ebb0398e58c1c68de24b6bafa05  ~/levels/Final_Level_Library/Final_Level_RnD.usd
 우선순위: ① 새 레벨 네 권 완주 → ② 교육장 꾸러미 → ③ 문서
 시작 09/29 01:02:21
+
+## 판 2 — 01:12 · ROI x 하한 -0.40
+배치 3회(3권째 placement_verified=True) · 실패 403 JOINT_SPEED_EXCEEDED (RETREATING, 최대 98%)
+유령 차단 성공: 3권째가 x -0.451(유령) → -0.358(진짜 책) 으로 바뀜, 흔들림 1 mm
+**새 발견**: d(reorient) 가 바닥선 아래로 142~329 mm 내려간다 (되돌림과 별개 구간)
