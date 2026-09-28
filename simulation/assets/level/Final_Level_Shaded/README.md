@@ -1,11 +1,12 @@
-# Final_Level_Shaded — 시연 레벨 (2026-09-29 동결)
+# Final_Level_Shaded — 시연 레벨 (2026-09-29 아침 · **트레이 네 권**)
 
-태그 `freeze-20260929-shaded` 가 재현하는 레벨이다. 도윤님이 블렌더 5.2.2 에서 바닥·벽·서가를
+태그 **`freeze-20260929-shaded-r2`** 가 재현하는 레벨이다. 도윤님이 블렌더 5.2.2 에서 바닥·벽·서가를
 셰이딩해 뽑은 것에 로봇 참조를 붙였다.
 
 ## 이 폴더에 있는 것
 ```
 Final_Level_Shaded_robot.usdc   15.9 MB   레벨 본체 + 로봇 참조. 이것을 SIM_LEVEL 로 준다
+                                md5 8fc1e9f50d05d7385ecfaeb181f0fcd4
 env_base_collider.usd            2.2 KB   바닥 콜라이더. 아래 [왜 따로 있나] 참고
 textures.md5                     9.1 KB   텍스처 92장의 md5 — 받은 것이 맞는지 대조한다
 ```
@@ -49,3 +50,20 @@ NVIDIA 에셋은 배포 조건 때문에 **공개 저장소에 올리지 않는�
 source cli_exchange/handoff_0929/demo_env.sh     # SIM_LEVEL 등 동결 설정
 bash scripts/demo/full_cycle.sh
 ```
+
+
+## 2026-09-29 아침 — 트레이를 네 권으로 바꿨다
+트레이의 `decorative_book_set_01_2k__book_hardcover_01_cover41_01` **한 권을 뺐다**
+(월드 x +5.7352 · 팔기준 y +0.077 · 두께 44.3 mm — 트레이에서 가장 두꺼운 책).
+
+**왜**: 다섯 권일 때 4권째 검출 신뢰도가 0.55~0.63 으로 문턱(0.55) 바로 위에 붙어 있어
+네 판 중 세 판이 `411 NOT_READY` 로 멈췄다. 이 책을 빼니 4권째가 **0.82~0.83** 으로 올라왔고
+두 판 연속 4/4 로 섰다 (`runs/0637_4books_1` · `runs/0648_4books_2`).
+혼자 남아서 안 보였던 게 아니라 **이 두꺼운 책이 옆 책을 가리고 있었던 것**으로 본다.
+
+**뺀 방법**: `Sdf.Layer` 에서 `nameChildren` 의 스펙을 지웠다. 이 prim 이 루트 레이어에만
+정의돼 있는 것을 `GetPrimStack()` 으로 먼저 확인했다(참조가 아니라 직접 정의).
+비활성(`active=false`)이 아니라 **실제로 지웠다** — 블렌더·Isaac 에서 열었을 때 헷갈리지 않게.
+
+다섯 권 레벨은 태그 `freeze-20260929-shaded-r1` 이고, 파일은 데스크탑
+`~/levels/Final_Level_Shaded/*.5books_0929.usdc` 에 남겨 뒀다 (저장소에는 없다).
