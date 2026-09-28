@@ -239,7 +239,10 @@ if args.record_dir:
     # 로봇 앞쪽 비스듬히 위에서 — 트레이(앞)와 팔이 같이 보이는 각도
     _eye = (_np.array(args.record_eye, float) if args.record_eye
             else _mid + _np.array([_rad * 0.9, -_rad * 1.0, _rad * 0.55]))
-    _shots = {"": (_eye, _tgt)}
+    # 자동 구도는 **시작할 때 로봇 자리**에 고정된다. 로봇이 곧 서가로 떠나므로
+    # 판 대부분에서 빈 바닥만 찍는다 (2026-09-29 녹화 판 실측). `SIM_REC_AUTO=0` 이면 뺀다 —
+    # 시점 하나가 렌더 프로덕트 하나라, 빼면 그만큼 시뮬이 덜 느려진다.
+    _shots = {} if os.environ.get("SIM_REC_AUTO", "1") == "0" else {"": (_eye, _tgt)}
     # **시점을 더 붙인다.** `SIM_REC_SHOTS="이름=ex,ey,ez@tx,ty,tz;…"`.
     # 자동 구도는 시작할 때 로봇 AABB 로 한 번 잡고 고정이라 로봇을 따라가지 않는다 —
     # 서가까지 주행하는 판을 한 화면에 담으려면 넓은 시점을 따로 줘야 한다 (2026-09-29).
@@ -281,6 +284,8 @@ if args.record_dir:
             _q[_k + 1] = (_m[_k, _i] + _m[_i, _k]) / _sq
         return _q / (_np.linalg.norm(_q) or 1.0)
 
+    if not _shots:
+        say("녹화: 시점이 하나도 없다 — SIM_REC_AUTO=0 인데 SIM_REC_SHOTS 가 비었다")
     _cams = []
     for _n, (_e, _t) in _shots.items():
         _path = f"/World/rec_cam_{_n or 'auto'}"
