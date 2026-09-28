@@ -115,6 +115,10 @@ else
     # (2026-09-25 네 권 예행 실측). 서가 책은 콜리전이 없어 **눈이 유일한 검사**다.
     [ -n "${REC_EYE:-}" ]  && REC_ARGS="$REC_ARGS --record-eye $REC_EYE"
     [ -n "${REC_LOOK:-}" ] && REC_ARGS="$REC_ARGS --record-look $REC_LOOK"
+    # **레벨에 놓인 카메라로 찍는다** — REC_CAMS="/World/cam_A,/World/cam_B" (쉼표 구분).
+    # 주면 REC_EYE/REC_LOOK 은 무시된다. **한 판에 한 대**를 권한다 (부하: 9/25 실측으로
+    # 카메라 1대에 판이 9분 13초 → 15분 17초). 여러 각도는 각도마다 판을 따로 돌린다.
+    [ -n "${REC_CAMS:-}" ] && REC_ARGS="$REC_ARGS --record-cam-prims $REC_CAMS"
 fi
 echo "[1/4] Isaac 시작 (약 3~4분) — 레벨 $(basename "$LEVEL")  $(date +%T)"
 spawn env SIM_USD="$LEVEL" SIM_FIX_BASE="${SIM_FIX_BASE:-0}" SIM_GRIP_ROT90="${SIM_GRIP_ROT90:-1}" SIM_GRASP_KINEMATIC="${SIM_GRASP_KINEMATIC:-1}" SIM_HOME_J7_DEG="${SIM_HOME_J7_DEG:-90}" SIM_HOME_SHIFT="${SIM_HOME_SHIFT:-0,0,0.10}" SIM_ROBOT_YAW="${SIM_ROBOT_YAW:-}" SIM_TRAY_TO="${SIM_TRAY_TO:-4.907,-5.782,0.3365}" \

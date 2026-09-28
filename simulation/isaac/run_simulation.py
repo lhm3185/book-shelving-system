@@ -46,6 +46,12 @@ ap.add_argument("--record-every", type=int, default=6, help="몇 스텝마다 �
 # 좌표를 추측하면 엉뚱한 곳(서가 벽)을 찍는다 — 기본은 **로봇 AABB 에 자동으로 맞춘다**
 ap.add_argument("--record-eye", type=float, nargs=3, default=None, help="녹화 카메라 위치 (기본: 자동)")
 ap.add_argument("--record-look", type=float, nargs=3, default=None, help="보는 점 (기본: 로봇 중심)")
+# **레벨에 놓인 카메라로 찍는다.** 눈/보는점을 넘기면 좌표를 추측하게 되는데, 도윤님이 레벨에
+# 직접 배치한 카메라를 쓰면 화각·초점거리·구도가 의도대로 나온다 (2026-09-28). 쉼표로 여러 개를
+# 줄 수 있지만 **한 판에 한 대**를 권한다 — 카메라 1대 녹화만으로 판이 9분 13초 → 15분 17초 로
+# 늘어난다(9/25 실측). 여러 각도가 필요하면 각도마다 판을 따로 돌린다.
+ap.add_argument("--record-cam-prims", default="",
+                help="녹화에 쓸 레벨 카메라 prim 경로 (쉼표 구분). 주면 --record-eye/look 은 무시한다")
 ap.add_argument("--camera", action="store_true", help="레벨에 카메라가 없을 때 손목 카메라를 만든다")
 ap.add_argument("--camera-prim", default="", help="레벨 로봇에 이미 있는 카메라 prim 경로")
 ap.add_argument("--camera-hz", type=float, default=10.0)
@@ -233,9 +239,14 @@ if args.record_dir:
     # 로봇 앞쪽 비스듬히 위에서 — 트레이(앞)와 팔이 같이 보이는 각도
     _eye = (_np.array(args.record_eye, float) if args.record_eye
             else _mid + _np.array([_rad * 0.9, -_rad * 1.0, _rad * 0.55]))
-    _shots = {"": (_eye, _tgt)}
-    say(f"녹화 구도: 로봇 중심 {_np.round(_mid,2).tolist()} 크기 {_rad:.2f} m "
-        f"→ 카메라 {_np.round(_eye,2).tolist()}")
+    # 레벨 카메라를 주면 그것만 쓴다 (새로 만들지 않는다) — 화각·초점거리가 그대로 살아난다
+    _lvl_cams = [c.strip() for c in args.record_cam_prims.split(",") if c.strip()]
+    _shots = {} if _lvl_cams else {"": (_eye, _tgt)}
+    if _lvl_cams:
+        say(f"녹화: 레벨 카메라 {len(_lvl_cams)}대를 쓴다 (구도 자동 계산 안 함)")
+    else:
+        say(f"녹화 구도: 로봇 중심 {_np.round(_mid,2).tolist()} 크기 {_rad:.2f} m "
+            f"→ 카메라 {_np.round(_eye,2).tolist()}")
     def _look_at(_e, _t):
         """눈 → 목표를 보는 카메라 쿼터니언 (w, x, y, z). USD 카메라는 −z 를 본다."""
         _f = _np.asarray(_t, float) - _np.asarray(_e, float)
@@ -262,6 +273,20 @@ if args.record_dir:
         return _q / (_np.linalg.norm(_q) or 1.0)
 
     _cams = []
+    for _p in _lvl_cams:
+        if not _st.GetPrimAtPath(_p).IsValid():
+            say(f"  [녹화] 카메라 prim 없음, 건너뛴다: {_p}")
+            continue
+        _n = _p.rstrip("/").split("/")[-1]
+        _dir = os.path.join(_out, _n)
+        os.makedirs(_dir, exist_ok=True)
+        _rp2 = _rep.create.render_product(_p, (1280, 720))
+        _an2 = _rep.AnnotatorRegistry.get_annotator("rgb")
+        _an2.attach(_rp2)
+        _cams.append({"name": _n, "dir": _dir, "ann": _an2})
+        say(f"  [{_n}] 레벨 카메라 {_p}  →  {_dir}")
+    if _lvl_cams and not _cams:
+        say("  [녹화] 쓸 수 있는 레벨 카메라가 하나도 없다 — 녹화를 끈다")
     for _n, (_e, _t) in _shots.items():
         _path = f"/World/rec_cam_{_n or 'auto'}"
         _c2 = _UsdGeom.Camera.Define(_st, _path)
