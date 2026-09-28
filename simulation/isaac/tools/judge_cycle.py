@@ -230,10 +230,13 @@ def report(run_dir, books=4, brief=False):
         out.append(f'  복귀  출발 ({facts["start"][0]:+.4f}, {facts["start"][1]:+.4f}) → 도착 '
                    f'({facts["arrive"][0]:+.3f}, {facts["arrive"][1]:+.3f})'
                    + ('' if facts['yaw'] is None else f' · yaw {facts["yaw"]:+.2f}°'))
-    sweeps = [s for s in facts['scans'] if s['seconds'] is not None and s['seconds'] >= 15.0]
+    # 팔 스윕과 빈칸 재측정은 **길이의 비**로 가른다 — 녹화 판은 시뮬이 3~4배 느려 절대값(15 s)으로는
+    # 재측정(21 s)까지 스윕으로 세었다 (2026-09-29 녹화 판: [135, 22, 25, 122, 21] s).
+    secs = [s['seconds'] for s in facts['scans'] if s['seconds'] is not None]
+    sweeps = [v for v in secs if v >= 0.5 * max(secs)] if secs else []
     if facts['scans']:
-        out.append(f'  스캔  {len(facts["scans"])}회 중 팔 스윕(15 s 이상) {len(sweeps)}회 — '
-                   f'{[s["seconds"] for s in facts["scans"]]} s')
+        out.append(f'  스캔  {len(facts["scans"])}회 중 팔 스윕(가장 긴 것의 절반 이상) {len(sweeps)}회 — '
+                   f'{secs} s')
     for s in facts['sags']:
         note = ''
         if s['flag']:
