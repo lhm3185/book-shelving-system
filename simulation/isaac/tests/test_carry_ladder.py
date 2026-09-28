@@ -63,3 +63,18 @@ def test_전부_실패하면_사유가_전부_남는다():
         carry_ladder(LIFT, TRANSFER, PRE, DOWN, HORIZ), lambda w: (None, 0.0, f"{len(w)}점 실패"))
     assert qs is None and i == 3
     assert "transfer@DOWN: 3점 실패" in err and "transfer@HORIZ: 3점 실패" in err and "transfer 없이: 2점 실패" in err
+
+
+def test_처짐은_양_끝보다_내려간_만큼이고_바닥선_여유는_부호로_말한다():
+    from arm_planning import sag_report
+    r = sag_report([0.672, 0.60, 0.479, 0.55, 0.672], hang_m=0.064, floor_z=0.563)
+    assert abs(r['sag_m'] - (0.672 - 0.479)) < 1e-9 and r['at'] == 2 and r['n'] == 5
+    assert abs(r['book_min'] - 0.415) < 1e-9                  # 2026-09-28 실측과 같은 값
+    assert r['clear_m'] < 0                                   # 바닥선 아래
+
+
+def test_내려앉지_않으면_처짐은_0_이다():
+    from arm_planning import sag_report
+    r = sag_report([0.60, 0.65, 0.70], hang_m=0.1, floor_z=None)
+    assert r['sag_m'] == 0.0 and r['clear_m'] is None and r['at'] == 0
+    assert sag_report([], 0.1) is None

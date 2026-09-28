@@ -118,6 +118,39 @@ def plan_first(ladder, planner):
     return None, 0.0, "경유점 후보 전부 실패 — " + " / ".join(errs), len(ladder), errs
 
 
+def sag_report(tip_zs, hang_m, floor_z=None):
+    """
+    경로 한 조각에서 **손끝이 얼마나 내려앉는가** 를 잰다 (보고용 — 경로를 바꾸지 않는다).
+
+    `tip_zs` 는 그 조각의 손끝 월드 z 목록(순서대로), `hang_m` 은 손끝 아래로 매달린 책 길이,
+    `floor_z` 는 닿으면 안 되는 높이(트레이에 남은 책 윗면 + 여유). 돌려주는 값:
+
+        sag_m        양 끝 중 낮은 쪽보다 얼마나 더 내려갔는가 (0 이면 안 내려앉았다)
+        tip_min      손끝 최저 z
+        book_min     책 바닥 최저 z = tip_min - hang_m (손이 아래를 볼 때 기준이라 **보수적**이다)
+        at           최저점이 몇 번째 점인가
+        clear_m      book_min - floor_z (음수면 바닥선 아래). floor_z 가 없으면 None
+
+    왜: 관절공간 보간은 양 끝 위치가 같아도 사이 위치를 안 지킨다. 2026-09-28 에 되돌림의 손목 회전이
+    200 mm 내려앉아 책이 트레이 책 속을 118 mm 지났는데, 최종 자세만 보는 검사는 여러 판 동안 통과시켰다.
+    같은 병이 다른 조각에도 있는지 **재서 말한다.**
+    """
+    zs = [float(z) for z in tip_zs]
+    if not zs:
+        return None
+    at = min(range(len(zs)), key=lambda i: zs[i])
+    tip_min = zs[at]
+    book_min = tip_min - float(hang_m)
+    return {
+        'sag_m': max(0.0, min(zs[0], zs[-1]) - tip_min),
+        'tip_min': tip_min,
+        'book_min': book_min,
+        'at': at,
+        'n': len(zs),
+        'clear_m': None if floor_z is None else book_min - float(floor_z),
+    }
+
+
 def tucked_joint_moves(q_now, q_goal, q_stow, turn_threshold=0.5):
     """큰 1번 관절(몸통) 회전을 **팔을 접은 채** 하도록 관절 경유점을 만든다.
 

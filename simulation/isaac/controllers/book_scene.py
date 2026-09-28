@@ -26,7 +26,7 @@ import yaml
 # 저장소 코드를 그대로 쓴다 (~/arm 복사 없음): 같은 폴더의 팔 모듈들
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from arm_geometry import R_from_quat, quat_angle, quat_from_R, slerp  # noqa: E402
-from arm_planning import carry_ladder, plan_first, tucked_joint_moves  # noqa: E402
+from arm_planning import carry_ladder, plan_first, sag_report, tucked_joint_moves  # noqa: E402
 from tray_delivery import (  # noqa: E402
     deliver_from_to, drift_mm, TRAY_FROM_FALLBACK, TRAY_TO_XY)
 from arm_primitives import ArmController, MoveJoint, Primitive, SetGripper, Sequence, Status, Wait  # noqa: E402
@@ -2243,6 +2243,22 @@ class BookScene:
                 self.say(f"[스윙] d(reorient) 직교 실패 → 관절공간으로 — {err}")
             qs.extend(part[1:])
             n_d = len(part) - 1
+            # **d 도 내려앉는지 잰다 — 재서 말하기만 한다** (2026-09-29). 되돌림의 손목 회전과 같은 병
+            # (관절공간 보간은 사이 위치를 안 지킨다)이 여기에도 있을 수 있다. 이 분기는 아래 판의 검증된
+            # 경로라 **한 점도 바꾸지 않는다.** 바닥선 아래면 경고만 남기고, 고칠지는 그 숫자를 보고 정한다.
+            try:
+                _zs_d = [float(self.lula.compute_forward_kinematics(
+                    BOT.ee_frame, np.asarray(_q, float))[0][2]) for _q in part]
+                _tops_d = [float(self.aabb(_b)[5]) for _b in self.books
+                           if float(self.aabb(_b)[2]) < float(self.tray_floor_z) + 0.10]
+                _floor_d = (max(_tops_d) if _tops_d else float(self.tray_floor_z)) + SWING_TURN_CLEAR_M
+                _sag = sag_report(_zs_d, float(getattr(self, "L", 0.2265)) - TIP_DOWN, _floor_d)
+                self.say(f"[스윙] d(reorient) 처짐 {_sag['sag_m'] * 1000:.0f} mm · 손끝 최저 {_sag['tip_min']:.3f} "
+                         f"· 책 바닥 최저 {_sag['book_min']:.3f} (바닥선 {_floor_d:.3f}, 여유 "
+                         f"{_sag['clear_m'] * 1000:+.0f} mm) · 점 {_sag['at']}/{_sag['n']} [{how.split('(')[0]}] "
+                         f"— 보고 전용{' · **바닥선 아래**' if _sag['clear_m'] < 0 else ''}")
+            except Exception as _exc:      # noqa: BLE001 - 계측이 계획을 죽이면 안 된다
+                self.say(f"[스윙] d(reorient) 처짐 계측 실패 — {_exc}")
         else:
             # **되돌림 — 손목을 먼저 돌리고 HORIZ 로 올라간다. c 가 안 풀릴 때만.**
             #
