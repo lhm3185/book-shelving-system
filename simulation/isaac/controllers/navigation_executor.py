@@ -58,6 +58,12 @@ RETURN_CORRECTION = os.environ.get("SIM_RETURN_CORRECTION", "0") != "0"
 MAX_YAW_FIX = math.radians(30)   # 이보다 큰 자세 차이는 '처짐' 이 아니라 측정 오류로 본다
 #: 도착해서 방향을 맞추는 데 쓰는 시간 (초). 트레이가 튕기지 않게 부드럽게 돈다
 TURN_S = float(os.environ.get("SIM_TURN_S", "3.0"))
+# **제자리 회전은 반납기를 긁는다.** 홈 자리는 반납기 앞면에서 431 mm 인데 카트가 제자리에서
+# 돌면 대각 반지름(약 622 mm, Ridgeback 0.96 x 0.79)이 그것을 190 mm 넘는다 — 도윤님이 육안으로
+# 두 번 지적하셨다 (2026-09-28). 그래서 **목표점 못 미친 자리에서 돌고, 자세를 유지한 채 직진해
+# 들어간다.** 0.50 m 물러나면 반납기까지 775 mm 라 153 mm 여유가 생긴다 (0.35 는 50 mm 뿐).
+# 들어간다.** 최종 좌표·각도는 그대로다. 0 으로 두면 예전처럼 목표점에서 돈다.
+TURN_STANDOFF_M = float(os.environ.get("SIM_TURN_STANDOFF_M", "0.50"))
 DIAG = os.environ.get("SIM_DIAG_M406") == "1"   # 계측만 켠다 — 동작은 바뀌지 않는다
 REALIGN_EVERY = 12           # 이 스텝마다 남은 차이를 다시 잰다 → 60/12 = 5회
 REALIGN_DONE_M = 0.001       # 이 안쪽이면 맞은 것으로 본다
@@ -207,6 +213,21 @@ class NavigationExecutor:
             # 서가 앞면 법선이 ±Y 라, 팔 +Y(=루트 yaw+90°)가 서가를 보려면 루트 yaw=0° 다
             # (2026-09-22 실측: 레벨 시작 yaw 90°, 팔 +Y 는 -180° 를 보고 있었다).
             self.goal_yaw = cmd.get("yaw_deg")
+            # **돌 자리를 목표점 앞에 하나 끼운다** (TURN_STANDOFF_M). 오는 방향으로 그만큼
+            # 물러난 자리에서 돌고, 자세를 유지한 채 마지막 다리를 직진한다. 최종 자리는 같다.
+            self._turn_before_last = False
+            if self.goal_yaw is not None and TURN_STANDOFF_M > 1e-3:
+                _p0, _ = self.root.get_world_pose()
+                _vx, _vy = route[0][0] - float(_p0[0]), route[0][1] - float(_p0[1])
+                _d = math.hypot(_vx, _vy)
+                # 오는 거리가 물러날 거리의 두 배는 되어야 의미가 있다 (이미 근처면 그냥 돈다)
+                if _d > 2.0 * TURN_STANDOFF_M:
+                    _u = TURN_STANDOFF_M / _d
+                    route = [[route[0][0] - _vx * _u, route[0][1] - _vy * _u], route[0]]
+                    self._turn_before_last = True
+                    self.say(f"[주행] 회전 자리를 목표 앞 {TURN_STANDOFF_M:.2f} m 로 뺀다 "
+                             f"({route[0][0]:+.3f}, {route[0][1]:+.3f}) — 제자리 회전이 "
+                             f"반납기를 긁지 않게 (SIM_TURN_STANDOFF_M)")
         elif kind == "patrol":
             route = [[float(x), float(y)] for x, y in cmd.get("route", [])]
         else:
@@ -407,12 +428,18 @@ class NavigationExecutor:
             pos, _ = self.root.get_world_pose()
             self._write_root(pos, _yaw_quat(self._turn_from + d * u), "도착 회전")
             if u >= 1.0:
-                self.goal_yaw = None
-                self.status = "settling"
-                self.settle = SETTLE_STEPS
                 _p, _q = self.root.get_world_pose()
                 self.say(f"[주행] 회전 끝 — **실측** yaw {math.degrees(_yaw(_q)):+.2f}° "
                          f"(목표 {math.degrees(self._turn_to):+.2f}°)")
+                if self.route:
+                    # 회전 자리에서 돈 것이다 — 자세는 그대로 두고 남은 다리를 마저 간다.
+                    # goal_yaw 를 지우지 않으면 마지막 점에서 또 돌려고 한다.
+                    self.goal_yaw = None
+                    self.status = "running"
+                    return
+                self.goal_yaw = None
+                self.status = "settling"
+                self.settle = SETTLE_STEPS
             return
 
         if self.status == "settling":
@@ -466,6 +493,20 @@ class NavigationExecutor:
             self._write_root(pos, quat, "경유점 정렬")
             self.route.pop(0)
             done = self.legs - len(self.route)
+            if (len(self.route) == 1 and getattr(self, "_turn_before_last", False)
+                    and getattr(self, "goal_yaw", None) is not None):
+                # **여기서 돈다.** 마지막 다리는 돌지 않고 직진만 한다.
+                self.status = "turning"
+                self._turn_from = _yaw(quat)
+                self._turn_to = math.radians(float(self.goal_yaw))
+                self._turn_n = max(1, int(TURN_S / max(1e-4, float(
+                    self.scene.world.get_physics_dt()))))
+                self._turn_t = 0
+                self._turn_before_last = False
+                self.say(f"[주행] 회전 자리 도달 ({pos[0]:+.3f}, {pos[1]:+.3f}) — "
+                         f"{math.degrees(self._turn_from):+.1f}° → {self.goal_yaw:+.1f}° 로 돌고 "
+                         f"자세를 유지한 채 마지막 다리를 간다 ({TURN_S:.1f}초)")
+                return
             if not self.route:
                 # **바로 '도착' 이라고 하지 않는다.** 루트를 방금 옮겼을 뿐이라
                 # 관절로 매달린 몸통(=팔 베이스)은 아직 따라오지 않았다. 지금 읽으면
