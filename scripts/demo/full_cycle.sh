@@ -160,9 +160,18 @@ spawn ros2 run shelving_perception vision_manager --ros-args \
 # ^ 트레이 ROI y 상한 0.30 → 0.65 (비전팀 yaml 은 안 건드리고 여기서 덮는다). yaml 값은 앞 두 칸 기준이라
 #   세 권째(칸2 y +0.180 가장자리, 칸3 +0.364 밖)부터 "책 좌표 없음 411" 이 났다 (2026-09-25 네 권 판).
 #   칸4(+0.548)까지 덮는다. 서가 책(y 0.52~0.59)은 x 상한 -0.26 이 거른다 (서가 책 x -0.02~+0.46).
+# **녹화 판은 제한 시간을 올린다.** 문턱을 올려 통과시키는 것이 아니라, 녹화가 시뮬을 늦추는
+# 만큼을 보정하는 것이다 — 판정 대상(자세·겹침)은 그대로다. 9/25 실측: 카메라 1대 15스텝이면
+# 권당 175초(녹화 없으면 117초)로 300초 안에 들지만, 촘촘히 찍으면(REC_EVERY=4 는 프레임 3.75배)
+# 그 여유를 넘긴다. 녹화 없는 판은 300초 그대로 두어 수치가 섞이지 않게 한다.
+REC_TIMEOUT_ARG=""
+if [ -n "$REC_ARGS" ]; then
+    REC_TIMEOUT_ARG="-p goal_timeout_s:=${REC_GOAL_TIMEOUT_S:-600}"
+    echo "      (녹화 판 — goal_timeout_s ${REC_GOAL_TIMEOUT_S:-600}s. 녹화 부하 보정이지 판정 완화가 아니다)"
+fi
 spawn ros2 run shelving_manipulation manipulation_node --ros-args \
     --params-file "$REPO/ros2_ws/src/shelving_manipulation/config/manipulation.yaml" -p executor:=sim \
-    ${MAN_EXTRA:-} > "$LOG/manipulation.log" 2>&1
+    $REC_TIMEOUT_ARG ${MAN_EXTRA:-} > "$LOG/manipulation.log" 2>&1
 spawn ros2 run shelving_navigation nav_manager --ros-args \
     --params-file "$REPO/ros2_ws/src/shelving_navigation/config/navigation.yaml" \
     -p waypoints_file:="$REPO/cli_exchange/config/waypoints_measured.yaml" > "$LOG/nav_manager.log" 2>&1

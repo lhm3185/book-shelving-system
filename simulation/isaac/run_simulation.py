@@ -302,7 +302,13 @@ if args.record_dir:
         _an2.attach(_rp2)
         _cams.append({"name": _n or "auto", "dir": _dir, "ann": _an2})
         say(f"  [{_n or 'auto'}] 눈 {_np.round(_e, 2).tolist()} → {_np.round(_t, 2).tolist()}  →  {_dir}")
-    rec = {"n": 0, "saved": 0, "cams": _cams, "img": _Image, "np": _np}
+    # **프레임마다 시각을 남긴다.** 시뮬 스텝과 벽시계를 같이 적어 두면 나중에 영상 속도를
+    # 맞출 수 있다 — 녹화가 시뮬을 늦추므로 "몇 fps 로 뽑아야 실시간인가" 를 프레임 수만으로는
+    # 알 수 없다. 여러 각도를 판마다 따로 찍을 때 길이를 맞추는 데도 쓴다 (2026-09-28).
+    _csv = open(os.path.join(_out, "frames.csv"), "w", buffering=1)
+    _csv.write("frame,sim_step,wall_s\n")
+    rec = {"n": 0, "saved": 0, "cams": _cams, "img": _Image, "np": _np,
+           "out": _out, "csv": _csv}
     say(f"녹화 시작 → {_out} ({args.record_every} 스텝마다 1장, 1280x720)")
 
 t0 = time.time()
@@ -328,12 +334,19 @@ while app.is_running():
                     os.path.join(_cam["dir"], f"f{rec['saved']:06d}.png"))
                 _any = True
             if _any:
+                rec["csv"].write(f"{rec['saved']},{rec['n']},{time.time() - t0:.3f}\n")
                 rec["saved"] += 1
     if args.max_seconds and time.time() - t0 > args.max_seconds:
         say("max-seconds 도달 — 종료")
         break
 
 if rec is not None:
-    say(f"녹화 종료 — {rec['saved']}장 저장 ({rec['out']})")
+    try:
+        rec["csv"].close()
+    except Exception:      # noqa: BLE001 - 닫기 실패가 종료를 막으면 안 된다
+        pass
+    _fps = rec["saved"] / max(1e-6, time.time() - t0)
+    say(f"녹화 종료 — {rec['saved']}장 저장 ({rec['out']}) · "
+        f"실시간 재생 fps 는 약 {_fps:.1f} (frames.csv 에 프레임별 시각)")
 ros_bridge.shutdown(node)
 app.close()
