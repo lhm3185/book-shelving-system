@@ -138,6 +138,10 @@ class SimulationBridgeNode(Node):
             10,
         )
         self._last_localized_run_id = ""
+        self._pending_initial_pose_run_id = ""
+        self._initial_pose_was_published = False
+        self._initial_pose_attempts = 0
+        self._initial_pose_max_attempts = 20
         self._zero_velocity_hold_until_ns = 0
         self._reset_stop_timer = self.create_timer(
             0.05,
@@ -151,6 +155,18 @@ class SimulationBridgeNode(Node):
                 self._on_raw_state,
                 state_qos,
             )
+        )
+
+        self._amcl_pose_subscription = self.create_subscription(
+            PoseWithCovarianceStamped,
+            "/amcl_pose",
+            self._on_amcl_pose,
+            10,
+        )
+
+        self._initial_pose_retry_timer = self.create_timer(
+            0.5,
+            self._retry_initial_pose,
         )
 
         self.get_logger().info(
@@ -258,6 +274,9 @@ class SimulationBridgeNode(Node):
         state_message = payload["message"]
 
         if state_name in ("STOPPED", "RESETTING"):
+            self._pending_initial_pose_run_id = ""
+            self._initial_pose_was_published = False
+            self._initial_pose_attempts = 0
             self._publish_zero_velocity()
         elif (
             state_name == "READY"
@@ -277,8 +296,13 @@ class SimulationBridgeNode(Node):
                 + int(max(0.0, hold_sec) * 1_000_000_000)
             )
             self._publish_zero_velocity()
-            self._publish_initial_pose(run_id)
+
+            self._pending_initial_pose_run_id = run_id
+            self._initial_pose_was_published = False
+            self._initial_pose_attempts = 0
             self._last_localized_run_id = run_id
+
+            self._retry_initial_pose()
 
         ros_message = ScenarioState()
         ros_message.header.stamp = (
@@ -321,6 +345,60 @@ class SimulationBridgeNode(Node):
             return
 
         self._publish_zero_velocity()
+
+    def _retry_initial_pose(self) -> None:
+        """Publish the initial pose until AMCL confirms localization."""
+        run_id = self._pending_initial_pose_run_id
+
+        if not run_id:
+            return
+
+        if self._initial_pose_attempts >= self._initial_pose_max_attempts:
+            self.get_logger().error(
+                "AMCL did not confirm the initial pose after "
+                f"{self._initial_pose_attempts} attempts: "
+                f"run_id={run_id}"
+            )
+
+            self._pending_initial_pose_run_id = ""
+            self._initial_pose_was_published = False
+            self._initial_pose_attempts = 0
+
+            # 같은 READY 상태를 다시 받으면 재시도할 수 있게 한다.
+            self._last_localized_run_id = ""
+            return
+
+        # DDS discovery가 끝나기 전에는 시도 횟수를 소모하지 않는다.
+        if self._initial_pose_publisher.get_subscription_count() == 0:
+            return
+
+        self._initial_pose_attempts += 1
+        self._publish_initial_pose(run_id)
+        self._initial_pose_was_published = True
+
+
+    def _on_amcl_pose(
+        self,
+        _message: PoseWithCovarianceStamped,
+    ) -> None:
+        """Stop initial-pose retries after AMCL publishes a pose."""
+        if (
+            not self._pending_initial_pose_run_id
+            or not self._initial_pose_was_published
+        ):
+            return
+
+        run_id = self._pending_initial_pose_run_id
+        attempts = self._initial_pose_attempts
+
+        self._pending_initial_pose_run_id = ""
+        self._initial_pose_was_published = False
+        self._initial_pose_attempts = 0
+
+        self.get_logger().info(
+            "AMCL localization confirmed: "
+            f"run_id={run_id}, attempts={attempts}"
+        )
 
     def _publish_initial_pose(self, run_id: str) -> None:
         """Reinitialize AMCL after Isaac teleports the robot home."""
