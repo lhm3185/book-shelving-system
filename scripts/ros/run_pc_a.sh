@@ -256,7 +256,7 @@ robot_tf_is_ready() {
     local output
 
     output="$(
-        timeout 5 ros2 run tf2_ros tf2_echo map base_link 2>&1 \
+        timeout 15 ros2 run tf2_ros tf2_echo map base_link 2>&1 \
             || true
     )"
 
