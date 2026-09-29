@@ -6,7 +6,7 @@
 #   2. Start Isaac Sim with the production manipulation backend.
 #   3. Wait until PC B navigation/perception/manipulation are ready.
 #   4. Start simulation_bridge, task_manager, and return_machine.
-#   5. Publish the first return-machine job automatically.
+#   5. Wait until the complete system is READY for an operator command.
 
 set -Eeo pipefail
 
@@ -259,35 +259,15 @@ pc_b_is_ready() {
         && topic_has_message /scan sensor_msgs/msg/LaserScan
 }
 
-
-service_exists() {
-    local service_name="$1"
-
-    ros2 service list 2>/dev/null | grep -Fxq "$service_name"
-}
-
-
-scenario_is_ready() {
+system_is_ready() {
     timeout 3 ros2 topic echo \
-        /scenario/state \
-        shelving_interfaces/msg/ScenarioState \
+        /system/status \
+        shelving_interfaces/msg/SystemStatus \
         --once \
         --qos-reliability reliable \
         --qos-durability transient_local \
         2>/dev/null \
         | grep -Eq '^[[:space:]]*state: 3[[:space:]]*$'
-}
-
-
-robot_tf_is_ready() {
-    local output
-
-    output="$(
-        timeout 15 ros2 run tf2_ros tf2_echo map base_link 2>&1 \
-            || true
-    )"
-
-    grep -q '^At time ' <<<"$output"
 }
 
 
@@ -382,39 +362,11 @@ ROS_LAUNCH_PID=$!
 write_process_state "$ROS_LAUNCH_STATE" "$ROS_LAUNCH_PID"
 
 wait_until \
-    "반납기 작업 서비스가 준비되기를 기다립니다." \
+    "전체 시스템 READY를 기다립니다." \
     "$STARTUP_TIMEOUT_SEC" \
-    service_exists \
-    /return_machine/publish_job
+    system_is_ready
 
-wait_until \
-    "Isaac 시나리오 READY를 기다립니다." \
-    "$STARTUP_TIMEOUT_SEC" \
-    scenario_is_ready
+message "전체 시스템 준비 완료. 관제 명령을 기다립니다."
+message "수동 작업 시작: ros2 service call /system/start_cycle std_srvs/srv/Trigger '{}'"
 
-wait_until \
-    "AMCL 초기 위치가 적용되기를 기다립니다." \
-    "$STARTUP_TIMEOUT_SEC" \
-    topic_has_message \
-    /amcl_pose \
-    geometry_msgs/msg/PoseWithCovarianceStamped
-
-wait_until \
-    "map -> base_link TF 연결을 기다립니다." \
-    "$STARTUP_TIMEOUT_SEC" \
-    robot_tf_is_ready
-
-wait_until \
-    "트레이 적재 action이 준비되기를 기다립니다." \
-    "$STARTUP_TIMEOUT_SEC" \
-    action_exists \
-    /load_tray
-
-message "전체 시스템 준비 완료. 첫 반납 작업을 자동 발행합니다."
-ros2 service call \
-    /return_machine/publish_job \
-    std_srvs/srv/Trigger \
-    "{}"
-
-message "작업을 발행했습니다. 종료하려면 Ctrl+C를 누르십시오."
 wait "$ROS_LAUNCH_PID"
