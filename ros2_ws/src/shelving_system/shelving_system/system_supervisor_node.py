@@ -272,11 +272,13 @@ class SystemSupervisorNode(Node):
 
     def _robot_tf_is_ready(self) -> bool:
         try:
-            return self._tf_buffer.can_transform(
-                "map",
-                "base_link",
-                Time(),
-                timeout=Duration(seconds=0.05),
+            return bool(
+                self._tf_buffer.can_transform(
+                    "map",
+                    "base_link",
+                    Time(),
+                    timeout=Duration(seconds=0.05),
+                )
             )
         except Exception:
             return False
