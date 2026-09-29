@@ -15,6 +15,7 @@ RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}/book-shelving-system-${CURRENT_USER_ID}"
 
 declare -A PROCESS_GROUPS=()
 declare -A PROCESS_IDS=()
+PROCESS_GROUP_LIST="(없음)"
 
 PATTERNS=(
     "$REPO_ROOT/scripts/run.sh"
@@ -218,9 +219,13 @@ if ((${#PROCESS_GROUPS[@]} == 0 && ${#PROCESS_IDS[@]} == 0)); then
     exit 0
 fi
 
+if ((${#PROCESS_GROUPS[@]} > 0)); then
+    PROCESS_GROUP_LIST="${!PROCESS_GROUPS[*]}"
+fi
+
 printf \
     '[stop] 발견한 프로세스 그룹: %s\n' \
-    "${!PROCESS_GROUPS[*]:-(없음)}"
+    "$PROCESS_GROUP_LIST"
 
 send_signal INT
 
