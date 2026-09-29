@@ -120,9 +120,13 @@ NVIDIA 공식 문서(License FAQ)에서 확인한 것:
 
 ## 4. 현장 관문 — 순서
 
-**2026-09-29 갱신**: 새 레벨이 집 데스크탑에서 섰다. **쓰는 태그는 `freeze-20260929-shaded-r1` (5c77c0b)** — 새 셸에서
-`source cli_exchange/handoff_0929/demo_env.sh` → `bash scripts/demo/full_cycle.sh` 두 줄로 4/4 가 선 커밋이다.
-r1 없는 `freeze-20260929-shaded` 는 시작하자마자 죽으니 쓰지 않는다. 현장에서는 `demo_env.sh` 맨 위 세 줄만 고친다.
+**2026-09-29 갱신**: **쓰는 태그는 `freeze-20260929-shaded-r2` (86ebe79)** — 트레이 네 권 레벨. 집 데스크탑에서 새 셸로
+`source …/demo_env.sh` → `bash scripts/demo/full_cycle.sh` 두 줄에 두 판 연속 4/4. r1 은 다섯 권 레벨의 태그,
+r 없는 태그는 시작하자마자 죽으니 쓰지 않는다. 아침 판이 읽은 것 전부와 그 위치는 `cli_exchange/handoff_0929/SITE_MANIFEST.md`.
+
+**교육장 도착 확인 (09:04)**: GPU PC 10.10.0.2 연결됨 · Isaac 5.1.0 · 디스플레이 `:1` · GPU 비어 있음 · **인터넷 됨** ·
+에셋 캐시 12 GB · 디스크 760 GB · 비전 파이썬 패키지는 집 데스크탑과 사실상 같음. 꾸러미는 `~/b1_demo_bundle` 에 복사했고
+md5 232/232. **`~/b1_arm` 에는 옛 브랜치(night/0922)와 커밋 안 된 수정 둘이 있다 — 건드리지 않고 새 폴더에 받는다.**
 로봇 에셋은 하나씩 옮기지 못한다 — `ridgeback_franka.usd` 가 다시 13개, `rsd455.usd` 가 5개를 참조한다(2026-09-29 실측).
 Collect 본이 없으면 인터넷이 필수다.
 
