@@ -14,9 +14,7 @@ REPO_ROOT="$(
 )"
 
 ROS_WORKSPACE="$REPO_ROOT/ros2_ws"
-NETWORK_ENV="$REPO_ROOT/config/ros_network.env"
 ISAAC_RUNNER="$REPO_ROOT/scripts/isaac/run_standalone.sh"
-DDS_PROFILE="${FASTRTPS_DEFAULT_PROFILES_FILE:-$HOME/.ros/fastdds_whitelist.xml}"
 
 MODE="${1:-navigation-test}"
 
@@ -288,18 +286,6 @@ if [[ ! -f "$ROS_WORKSPACE/install/setup.bash" ]]; then
     exit 1
 fi
 
-if [[ ! -f "$NETWORK_ENV" ]]; then
-    print_error \
-        "공통 ROS 네트워크 설정이 없습니다: $NETWORK_ENV"
-    exit 1
-fi
-
-
-if [[ ! -f "$DDS_PROFILE" ]]; then
-    print_error \
-        "Fast DDS 유선 인터페이스 설정이 없습니다: $DDS_PROFILE"
-    exit 1
-fi
 
 if [[ ! -x "$ISAAC_RUNNER" ]]; then
     print_error \
@@ -315,14 +301,6 @@ fi
 source /opt/ros/jazzy/setup.bash
 source "$ROS_WORKSPACE/install/setup.bash"
 
-set -a
-source "$NETWORK_ENV"
-set +a
-
-export FASTRTPS_DEFAULT_PROFILES_FILE="$DDS_PROFILE"
-unset ROS_STATIC_PEERS
-unset ROS_LOCALHOST_ONLY
-
 # Perception의 YOLO/PyTorch는 프로젝트 가상환경에 설치되어 있다. ROS 노드는
 # 시스템 Python으로 실행되므로 해당 site-packages만 명시적으로 노출한다.
 PERCEPTION_SITE_PACKAGES="$REPO_ROOT/.venv/lib/python3.12/site-packages"
@@ -335,6 +313,9 @@ if [[ "$MODE" == "full" ]]; then
     fi
     export PYTHONPATH="$PERCEPTION_SITE_PACKAGES${PYTHONPATH:+:$PYTHONPATH}"
 fi
+
+export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-130}"
+export RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}"
 
 
 trap cleanup EXIT
@@ -511,15 +492,17 @@ wait_until \
     scenario_is_ready
 
 
-wait_until \
-    "System /system/start_cycle service" \
-    "$ROS_READY_TIMEOUT_SEC" \
-    service_exists \
-    "/system/start_cycle"
-
-
 print_message "모든 구성요소가 준비됐습니다."
-print_message "웹 관제의 작업 시작 명령을 기다립니다."
+print_message "반납기 테스트 작업을 발행합니다."
+
+
+ros2 service call \
+    /return_machine/publish_job \
+    std_srvs/srv/Trigger \
+    "{}"
+
+
+print_message "테스트 작업을 발행했습니다."
 print_message "종료하려면 Ctrl+C를 누르십시오."
 
 
