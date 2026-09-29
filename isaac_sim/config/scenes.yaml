@@ -9,7 +9,7 @@ scenes:
       prim_path: /World/ridgeback_franka
 
       simulation_pose:
-        position: [-5.591048, -3.852260, 0.0]
+        position: [-6.666722, -3.408510, 0.0]
         yaw: 0.0
 
     ros:

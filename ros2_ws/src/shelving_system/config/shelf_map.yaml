@@ -9,8 +9,8 @@ calibration_required: true
 locations:
   home:
     position:
-      x: -5.591048
-      y: -3.852260
+      x: -6.666722
+      y: -3.40851
       z: 0.0
     orientation:
       x: 0.0

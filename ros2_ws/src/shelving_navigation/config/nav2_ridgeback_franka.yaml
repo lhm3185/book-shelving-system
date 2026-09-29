@@ -31,8 +31,8 @@ amcl:
     set_initial_pose: true
     always_reset_initial_pose: false
     initial_pose:
-      x: -5.591048
-      y: -3.852260
+      x: -6.666722
+      y: -3.408510
       z: 0.0
       yaw: 0.0
     tf_broadcast: true
