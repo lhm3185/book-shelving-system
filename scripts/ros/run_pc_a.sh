@@ -40,6 +40,32 @@ error() {
     printf '\n[ERROR] %s\n' "$1" >&2
 }
 
+load_graphical_session_environment() {
+    local gnome_shell_pid=""
+    local environment_entry=""
+
+    gnome_shell_pid="$(
+        pgrep -o -u "$(id -u)" -x gnome-shell || true
+    )"
+
+    if [[ -z "$gnome_shell_pid" ]]; then
+        error "PC A에서 실행 중인 GNOME 그래픽 세션을 찾을 수 없습니다."
+        return 1
+    fi
+
+    while IFS= read -r -d '' environment_entry; do
+        case "$environment_entry" in
+            DISPLAY=*|XAUTHORITY=*|WAYLAND_DISPLAY=*|XDG_RUNTIME_DIR=*|DBUS_SESSION_BUS_ADDRESS=*)
+                export "$environment_entry"
+                ;;
+        esac
+    done < "/proc/$gnome_shell_pid/environ"
+
+    if [[ -z "${DISPLAY:-}" || -z "${XAUTHORITY:-}" ]]; then
+        error "그래픽 세션의 DISPLAY 또는 XAUTHORITY를 가져오지 못했습니다."
+        return 1
+    fi
+}
 
 process_group_is_running() {
     local process_group_id="$1"
@@ -316,6 +342,12 @@ if pgrep -f -- "$REPO_ROOT/isaac_sim/run_simulation.py" >/dev/null; then
     error "이미 실행 중인 이 저장소의 Isaac Sim이 있습니다."
     exit 1
 fi
+
+if [[ -z "${DISPLAY:-}" || -z "${XAUTHORITY:-}" ]]; then
+    load_graphical_session_environment
+fi
+
+message "Isaac Sim GUI를 DISPLAY=$DISPLAY 에 표시합니다."
 
 message "Isaac Sim을 시작합니다."
 setsid "$ISAAC_RUNNER" --enable-manipulation &
