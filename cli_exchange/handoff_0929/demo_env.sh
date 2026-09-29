@@ -16,7 +16,10 @@
 #
 # 교육장에서는 아래 두 줄만 바꾸면 된다 (Collect 꾸러미를 푼 자리).
 BUNDLE="${BUNDLE:-$HOME/b1_demo_bundle}"
-export SIM_LEVEL="${SIM_LEVEL:-$BUNDLE/level_shaded/Final_Level_Shaded_robot.usdc}"
+# 기본 레벨 = 조명 올린 네 권 레벨 (2026-09-29 도윤님 결정. RectLight intensity 8000→8500, scale z 0.1→0.2)
+#   만드는 법: cli_exchange/handoff_0929/tools/make_light_variant.py (md5 e63aeca1…)
+#   옛 기본값으로 돌리려면: SIM_LEVEL=$BUNDLE/level_shaded/Final_Level_Shaded_robot.usdc
+export SIM_LEVEL="${SIM_LEVEL:-$BUNDLE/level_shaded/Final_Level_Shaded_robot.light1.usdc}"
 
 # ── 유령 검출 차단 (2026-09-29 실측) ─────────────────────────────────
 #   비전이 트레이 주변의 고정 물체(추정: 빈 칸 칸막이·테두리)를 책으로 본다.
