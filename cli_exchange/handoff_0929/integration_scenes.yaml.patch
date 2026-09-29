@@ -1,0 +1,11 @@
+--- a/isaac_sim/config/scenes.yaml
++++ b/isaac_sim/config/scenes.yaml
+@@ -25,7 +25,7 @@ scenes:
+ 
+     manipulation:
+       camera_prim_path: /World/ridgeback_franka/panda_hand/rsd455/RSD455/Camera_OmniVision_OV9782_Color
+-      shelf_prim_path: /World/bookshelves/shelf_brown__book_shelf_01
++      shelf_prim_path: /World/bookshelves_main/shelf_brown__book_shelf_11
+       shelf_row_z: 0.498
+       sweep_boards_world:
+         - 1.042
