@@ -64,11 +64,11 @@ class SimulationBridgeNode(Node):
         )
         self.declare_parameter(
             "initial_pose_x",
-            -6.086313,
+            -5.591048,
         )
         self.declare_parameter(
             "initial_pose_y",
-            5.546779,
+            -3.852260,
         )
         self.declare_parameter(
             "initial_pose_yaw",

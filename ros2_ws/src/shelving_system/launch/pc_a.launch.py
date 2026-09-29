@@ -42,8 +42,8 @@ def generate_launch_description():
                     "scenario_state_topic": "/scenario/state",
 
                     # 현재 integration/new_level의 로봇 초기 위치다.
-                    "initial_pose_x": -6.086313,
-                    "initial_pose_y": 5.546779,
+                    "initial_pose_x": -5.591048,
+                    "initial_pose_y": -3.852260,
                     "initial_pose_yaw": 0.0,
                 }
             ],
