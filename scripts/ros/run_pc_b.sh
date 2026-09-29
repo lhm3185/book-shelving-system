@@ -13,6 +13,114 @@ REPO_ROOT="$(
 ROS_WORKSPACE="$REPO_ROOT/ros2_ws"
 NETWORK_ENV="$REPO_ROOT/config/ros_network.env"
 PERCEPTION_SITE_PACKAGES="$REPO_ROOT/.venv/lib/python3.12/site-packages"
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}/book-shelving-system-$(id -u)"
+LAUNCHER_STATE="$RUNTIME_DIR/pc_b_launcher.pid"
+ROS_LAUNCH_STATE="$RUNTIME_DIR/pc_b_ros.pgid"
+
+ROS_LAUNCH_PID=""
+CLEANUP_STARTED=0
+
+
+process_group_is_running() {
+    local process_group_id="$1"
+
+    [[ -n "$process_group_id" ]] \
+        && kill -0 -- "-$process_group_id" 2>/dev/null
+}
+
+
+signal_process_group() {
+    local signal_name="$1"
+    local process_group_id="$2"
+
+    if process_group_is_running "$process_group_id"; then
+        kill "-$signal_name" -- "-$process_group_id" 2>/dev/null || true
+    fi
+}
+
+
+write_process_state() {
+    local state_file="$1"
+    local process_id="$2"
+    local process_start_time
+    local temporary_file
+
+    process_start_time="$(awk '{print $22}' "/proc/$process_id/stat")"
+    temporary_file="$state_file.$$"
+
+    mkdir -p "$RUNTIME_DIR"
+    chmod 700 "$RUNTIME_DIR"
+    printf '%s %s\n' "$process_id" "$process_start_time" \
+        > "$temporary_file"
+    mv -f "$temporary_file" "$state_file"
+}
+
+
+remove_process_state() {
+    local state_file="$1"
+    local expected_process_id="$2"
+    local recorded_process_id=""
+    local ignored_start_time=""
+
+    if [[ -r "$state_file" ]]; then
+        read -r recorded_process_id ignored_start_time < "$state_file" || true
+    fi
+
+    if [[ "$recorded_process_id" == "$expected_process_id" ]]; then
+        rm -f -- "$state_file"
+    fi
+}
+
+
+wait_for_ros_launch() {
+    local retry_count="$1"
+    local index
+
+    for ((index = 0; index < retry_count; index++)); do
+        if ! process_group_is_running "$ROS_LAUNCH_PID"; then
+            return 0
+        fi
+
+        sleep 0.5
+    done
+
+    return 1
+}
+
+
+cleanup() {
+    local exit_code=$?
+
+    if ((CLEANUP_STARTED)); then
+        return
+    fi
+
+    CLEANUP_STARTED=1
+    trap - EXIT
+    trap '' INT TERM
+
+    printf '\nPC B 구성요소를 종료합니다.\n'
+    signal_process_group INT "$ROS_LAUNCH_PID"
+
+    if ! wait_for_ros_launch 20; then
+        signal_process_group TERM "$ROS_LAUNCH_PID"
+    fi
+
+    if ! wait_for_ros_launch 10; then
+        signal_process_group KILL "$ROS_LAUNCH_PID"
+        wait_for_ros_launch 4 || true
+    fi
+
+    if [[ -n "$ROS_LAUNCH_PID" ]]; then
+        wait "$ROS_LAUNCH_PID" 2>/dev/null || true
+    fi
+
+    remove_process_state "$ROS_LAUNCH_STATE" "$ROS_LAUNCH_PID"
+    remove_process_state "$LAUNCHER_STATE" "$$"
+    rmdir "$RUNTIME_DIR" 2>/dev/null || true
+
+    exit "$exit_code"
+}
 
 
 if [[ ! -f /opt/ros/jazzy/setup.bash ]]; then
@@ -49,9 +157,18 @@ export PYTHONPATH="$PERCEPTION_SITE_PACKAGES${PYTHONPATH:+:$PYTHONPATH}"
 unset FASTRTPS_DEFAULT_PROFILES_FILE
 unset ROS_STATIC_PEERS
 
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+
+write_process_state "$LAUNCHER_STATE" "$$"
+
 printf 'PC B를 시작합니다. ROS_DOMAIN_ID=%s\n' "$ROS_DOMAIN_ID"
 
-exec ros2 launch \
+setsid ros2 launch \
     shelving_system \
     pc_b.launch.py \
-    use_sim_time:=true
+    use_sim_time:=true &
+ROS_LAUNCH_PID=$!
+write_process_state "$ROS_LAUNCH_STATE" "$ROS_LAUNCH_PID"
+
+wait "$ROS_LAUNCH_PID"

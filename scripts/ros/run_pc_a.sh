@@ -20,6 +20,10 @@ NETWORK_ENV="$REPO_ROOT/config/ros_network.env"
 ISAAC_RUNNER="$REPO_ROOT/scripts/isaac/run_standalone.sh"
 
 STARTUP_TIMEOUT_SEC="${STARTUP_TIMEOUT_SEC:-240}"
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}/book-shelving-system-$(id -u)"
+LAUNCHER_STATE="$RUNTIME_DIR/pc_a_launcher.pid"
+ISAAC_STATE="$RUNTIME_DIR/pc_a_isaac.pgid"
+ROS_LAUNCH_STATE="$RUNTIME_DIR/pc_a_ros.pgid"
 
 ISAAC_PID=""
 ROS_LAUNCH_PID=""
@@ -54,6 +58,57 @@ signal_process_group() {
 }
 
 
+write_process_state() {
+    local state_file="$1"
+    local process_id="$2"
+    local process_start_time
+    local temporary_file
+
+    process_start_time="$(awk '{print $22}' "/proc/$process_id/stat")"
+    temporary_file="$state_file.$$"
+
+    mkdir -p "$RUNTIME_DIR"
+    chmod 700 "$RUNTIME_DIR"
+    printf '%s %s\n' "$process_id" "$process_start_time" \
+        > "$temporary_file"
+    mv -f "$temporary_file" "$state_file"
+}
+
+
+remove_process_state() {
+    local state_file="$1"
+    local expected_process_id="$2"
+    local recorded_process_id=""
+    local ignored_start_time=""
+
+    if [[ -r "$state_file" ]]; then
+        read -r recorded_process_id ignored_start_time < "$state_file" || true
+    fi
+
+    if [[ "$recorded_process_id" == "$expected_process_id" ]]; then
+        rm -f -- "$state_file"
+    fi
+}
+
+
+wait_for_managed_processes() {
+    local retry_count="$1"
+    local index
+
+    for ((index = 0; index < retry_count; index++)); do
+        if ! process_group_is_running "$ROS_LAUNCH_PID" \
+            && ! process_group_is_running "$ISAAC_PID"
+        then
+            return 0
+        fi
+
+        sleep 0.5
+    done
+
+    return 1
+}
+
+
 cleanup() {
     local exit_code=$?
 
@@ -70,10 +125,16 @@ cleanup() {
     signal_process_group INT "$ROS_LAUNCH_PID"
     signal_process_group INT "$ISAAC_PID"
 
-    sleep 2
+    if ! wait_for_managed_processes 20; then
+        signal_process_group TERM "$ROS_LAUNCH_PID"
+        signal_process_group TERM "$ISAAC_PID"
+    fi
 
-    signal_process_group TERM "$ROS_LAUNCH_PID"
-    signal_process_group TERM "$ISAAC_PID"
+    if ! wait_for_managed_processes 10; then
+        signal_process_group KILL "$ROS_LAUNCH_PID"
+        signal_process_group KILL "$ISAAC_PID"
+        wait_for_managed_processes 4 || true
+    fi
 
     if [[ -n "$ROS_LAUNCH_PID" ]]; then
         wait "$ROS_LAUNCH_PID" 2>/dev/null || true
@@ -82,6 +143,11 @@ cleanup() {
     if [[ -n "$ISAAC_PID" ]]; then
         wait "$ISAAC_PID" 2>/dev/null || true
     fi
+
+    remove_process_state "$ROS_LAUNCH_STATE" "$ROS_LAUNCH_PID"
+    remove_process_state "$ISAAC_STATE" "$ISAAC_PID"
+    remove_process_state "$LAUNCHER_STATE" "$$"
+    rmdir "$RUNTIME_DIR" 2>/dev/null || true
 
     exit "$exit_code"
 }
@@ -235,6 +301,8 @@ unset ROS_STATIC_PEERS
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
+write_process_state "$LAUNCHER_STATE" "$$"
+
 message "PC A를 시작합니다. ROS_DOMAIN_ID=$ROS_DOMAIN_ID"
 
 if pgrep -f -- "$REPO_ROOT/isaac_sim/run_simulation.py" >/dev/null; then
@@ -245,6 +313,7 @@ fi
 message "Isaac Sim을 시작합니다."
 setsid "$ISAAC_RUNNER" --enable-manipulation &
 ISAAC_PID=$!
+write_process_state "$ISAAC_STATE" "$ISAAC_PID"
 
 wait_until \
     "Isaac Sim /clock을 기다립니다." \
@@ -271,6 +340,7 @@ setsid ros2 launch \
     pc_a.launch.py \
     use_sim_time:=true &
 ROS_LAUNCH_PID=$!
+write_process_state "$ROS_LAUNCH_STATE" "$ROS_LAUNCH_PID"
 
 wait_until \
     "반납기 작업 서비스가 준비되기를 기다립니다." \
