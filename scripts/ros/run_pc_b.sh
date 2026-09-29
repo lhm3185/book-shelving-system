@@ -13,6 +13,7 @@ REPO_ROOT="$(
 ROS_WORKSPACE="$REPO_ROOT/ros2_ws"
 NETWORK_ENV="$REPO_ROOT/config/ros_network.env"
 PERCEPTION_SITE_PACKAGES="$REPO_ROOT/.venv/lib/python3.12/site-packages"
+DDS_PROFILE="${FASTRTPS_DEFAULT_PROFILES_FILE:-$HOME/.ros/fastdds_whitelist.xml}"
 RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}/book-shelving-system-$(id -u)"
 LAUNCHER_STATE="$RUNTIME_DIR/pc_b_launcher.pid"
 ROS_LAUNCH_STATE="$RUNTIME_DIR/pc_b_ros.pgid"
@@ -138,6 +139,11 @@ if [[ ! -f "$NETWORK_ENV" ]]; then
     exit 1
 fi
 
+if [[ ! -f "$DDS_PROFILE" ]]; then
+    echo "Fast DDS 유선 인터페이스 설정이 없습니다: $DDS_PROFILE" >&2
+    exit 1
+fi
+
 if [[ ! -d "$PERCEPTION_SITE_PACKAGES/ultralytics" ]]; then
     echo "PC B perception Python 환경이 없습니다." >&2
     echo "확인 경로: $PERCEPTION_SITE_PACKAGES" >&2
@@ -154,7 +160,7 @@ set +a
 
 export PYTHONPATH="$PERCEPTION_SITE_PACKAGES${PYTHONPATH:+:$PYTHONPATH}"
 
-unset FASTRTPS_DEFAULT_PROFILES_FILE
+export FASTRTPS_DEFAULT_PROFILES_FILE="$DDS_PROFILE"
 unset ROS_STATIC_PEERS
 
 trap cleanup EXIT

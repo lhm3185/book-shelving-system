@@ -18,6 +18,7 @@ REPO_ROOT="$(
 ROS_WORKSPACE="$REPO_ROOT/ros2_ws"
 NETWORK_ENV="$REPO_ROOT/config/ros_network.env"
 ISAAC_RUNNER="$REPO_ROOT/scripts/isaac/run_standalone.sh"
+DDS_PROFILE="${FASTRTPS_DEFAULT_PROFILES_FILE:-$HOME/.ros/fastdds_whitelist.xml}"
 
 STARTUP_TIMEOUT_SEC="${STARTUP_TIMEOUT_SEC:-240}"
 RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}/book-shelving-system-$(id -u)"
@@ -279,6 +280,11 @@ if [[ ! -f "$NETWORK_ENV" ]]; then
     exit 1
 fi
 
+if [[ ! -f "$DDS_PROFILE" ]]; then
+    error "Fast DDS 유선 인터페이스 설정이 없습니다: $DDS_PROFILE"
+    exit 1
+fi
+
 if [[ ! -x "$ISAAC_RUNNER" ]]; then
     error "Isaac 실행 스크립트가 없거나 실행할 수 없습니다: $ISAAC_RUNNER"
     exit 1
@@ -293,9 +299,10 @@ set -a
 source "$NETWORK_ENV"
 set +a
 
-# Ignore machine-local Fast DDS profiles that can restrict discovery to one
-# interface. Both runtime computers use the shared subnet defaults above.
-unset FASTRTPS_DEFAULT_PROFILES_FILE
+# Use the direct 10.10.0.x Ethernet link only. This keeps the published topic
+# rates unchanged while preventing large sensor streams from being duplicated
+# over both Ethernet and Wi-Fi.
+export FASTRTPS_DEFAULT_PROFILES_FILE="$DDS_PROFILE"
 unset ROS_STATIC_PEERS
 
 trap cleanup EXIT
