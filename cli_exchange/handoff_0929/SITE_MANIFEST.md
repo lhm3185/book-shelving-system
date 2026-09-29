@@ -4,7 +4,7 @@
 
 | 무엇 | 어디에 | 확인값 |
 |---|---|---|
-| 코드 | 저장소 `work/demo_0928` | 판이 돈 HEAD **`86ebe79`** · 태그 `freeze-20260929-shaded-r2` |
+| 코드 | 저장소 `feature/grasp_advanced` (옛 이름 `work/demo_0928`) | 판이 돈 HEAD **`86ebe79`** · 태그 `freeze-20260929-shaded-r2` |
 | `demo_env.sh` | 저장소 `cli_exchange/handoff_0929/` | 꾸러미 원본과 **`diff` 결과 같음** |
 | 레벨 usdc (네 권) | 저장소 `simulation/assets/level/Final_Level_Shaded/` | md5 **`8fc1e9f50d05d7385ecfaeb181f0fcd4`** (판이 돈 파일과 같음) |
 | 바닥 콜라이더 | 저장소 같은 폴더 `env_base_collider.usd` | 2,213 B |
@@ -18,7 +18,7 @@
 ## git — 남은 것이 없다
 ```
 git status --short                         →  (아래 커밋 뒤) 비어 있음
-git log origin/work/demo_0928..HEAD        →  비어 있음
+git log origin/feature/grasp_advanced..HEAD   →  비어 있음      (옛 이름 work/demo_0928 — BRANCHES_0929.md)
 git stash list                             →  2건 (2026-09-23 `04441f6` 시절, 오늘 작업과 무관)
 다른 브랜치                                 →  전부 origin 을 따라가거나 뒤처져 있음. 앞선 것 없음
 ```
