@@ -176,6 +176,14 @@ over "World"
         }}
     }}
 
+    over "env_Base"
+    {{
+        over "Cube_002"
+        {{
+            uniform token physics:approximation = "none"
+        }}
+    }}
+
     def PhysicsScene "PhysicsScene"
     {{
         vector3f physics:gravityDirection = (0, 0, -1)
