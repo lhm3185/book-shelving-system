@@ -67,6 +67,18 @@ TRAY_DELIVERY_S = float(os.environ.get("SIM_TRAY_DELIVERY_S", "2.5"))
 #: 레벨의 책은 트레이 바닥에서 살짝 떠 있다. 시뮬이 시작되면 떨어져 칸에 앉는데,
 #: 그 전에 트레이가 출발하면 **책만 제자리에 남는다** (2026-09-22 실측).
 TRAY_SETTLE_S = float(os.environ.get("SIM_TRAY_SETTLE_S", "2.0"))
+#: **시작 문.** 이 파일이 생길 때까지 이송을 시작하지 않는다 (`SIM_START_GATE`).
+#: Isaac 이 뜨자마자 트레이가 미끄러져 와서 카메라를 놓을 틈이 없다는 지적 (2026-09-30 도윤님).
+#: 팔의 홈 이동은 `run_simulation` 의 주 루프가 잡아 주는데, **이송만은 물리 콜백에서
+#: 돌기 때문에** 장면을 세우는 동안 이미 출발해 버린다. 그래서 여기서도 잡는다.
+START_GATE = os.environ.get("SIM_START_GATE", "").strip()
+if START_GATE in ("1", "true", "on", "yes"):
+    START_GATE = "/tmp/b1_go"
+
+
+def start_gate_open():
+    """시작 문이 열렸는가. 문을 안 쓰면 언제나 열려 있다."""
+    return (not START_GATE) or os.path.exists(START_GATE)
 
 def _xyz(name, default):
     """환경변수 "x,y,z" → 배열. 비어 있으면 기본값."""
@@ -507,6 +519,14 @@ class BookScene:
                 _frm, _to, _src = deliver_from_to(_now_p)
                 self._deliver = {"from": _frm, "to": _to,
                                  "q": np.asarray(_now_q, float), "t": 0, "n": 1}
+                # **여기서 바로 키네마틱으로 잠근다.** 예전에는 `start_delivery()`(정착 뒤)에서
+                # 잠갔는데, 그 사이의 정착 스텝 동안 트레이가 떨어진다. 트레이를 분류기
+                # **안쪽**으로 옮기자(2026-09-30 도윤님, x 5.818 → 7.063) 그 안에는 받칠 바닥이
+                # 없어 22 cm 를 떨어졌고, `start_delivery()` 가 그 떨어진 자리를 출발점으로
+                # 다시 잡아 버렸다. 레벨에 놓인 자리가 정답이니 처음부터 붙잡아 둔다.
+                UsdPhysics.RigidBodyAPI.Apply(
+                    self.stage.GetPrimAtPath(self.tray)).CreateKinematicEnabledAttr().Set(True)
+                self._tray_pinned = True
                 if not self.use_level_tray:
                     _k.SetActive(False)   # 복제 트레이를 쓸 때만 레벨 쪽을 숨긴다
                 say(f"트레이 이송 {np.round(_frm, 6).tolist()} → "
@@ -3203,12 +3223,15 @@ class BookScene:
         # 출발점은 **레벨에 있는 지금 자리**로 잡는다. 상수와 다르면 레벨을 따른다
         _p_now, _q_now = SingleXFormPrim(self.tray).get_world_pose()
         _gap = float(np.linalg.norm(np.asarray(_p_now, float) - d["from"]))
-        if _gap > 0.005:
+        if _gap > 0.005 and not getattr(self, "_tray_pinned", False):
+            # 붙잡아 둔 판에서는 이 보정을 하지 않는다. 붙잡기 전이라면 여기서 벌어진 차이는
+            # "레벨이 바뀌었다" 는 뜻이지만, 붙잡은 뒤의 차이는 **떨어진 것**이라 따라가면 안 된다.
             self.say(f"[이송] 레벨 트레이가 상수와 {_gap*100:.1f} cm 다르다 — "
                      f"**레벨을 따른다** {np.round(_p_now, 4).tolist()}")
             d["to"] = d["to"] + (np.asarray(_p_now, float) - d["from"])
             d["from"] = np.asarray(_p_now, float)
-        d["q"] = np.asarray(_q_now, float)
+        if not getattr(self, "_tray_pinned", False):
+            d["q"] = np.asarray(_q_now, float)
         # **이송 동안만 키네마틱으로 바꾼다** (컨베이어와 같다).
         # 동적 강체에 속도를 줘 봤더니 반납기 위 마찰이 매 스텝 상쇄해서 82.5 cm 중
         # 6.4 cm 만 갔다 (2026-09-22 실측). 키네마틱은 물리가 밀지 못하고, 목표 자세와의
@@ -3334,6 +3357,16 @@ class BookScene:
         """
         d = self._deliver
         if not d or d["n"] <= 1:
+            return
+        # **시작 문이 닫혀 있으면 한 걸음도 가지 않는다.** 안착 대기 카운트도 줄이지 않는다 —
+        # 문이 열린 뒤에 대기가 시작돼야 책이 내려앉을 시간을 제대로 갖는다.
+        if not start_gate_open():
+            if not getattr(self, "_gate_said", False):
+                self._gate_said = True
+                self.say(f"[이송] 시작 문이 닫혀 있다 — 트레이는 제자리다 (touch {START_GATE})")
+            # **책은 건드리지 않는다.** 트레이가 키네마틱으로 제자리에 있으니 책은 그 칸에
+            # 그대로 얹혀 있다. 동적 강체를 매 스텝 `set_world_pose` 로 옮기면 접촉이
+            # 끊겨 문이 열리는 순간 튄다 — 붙잡는 것은 트레이 하나면 된다.
             return
         # **먼저 기다린다.** 책이 트레이 바닥에 내려앉을 시간을 준다
         if d.get("wait", 0) > 0:

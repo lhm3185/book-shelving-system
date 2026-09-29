@@ -1095,7 +1095,7 @@ def compute(db):
             custom token inputs:renderProductPath
             prepend token inputs:renderProductPath.connect = </Graphs/LidarSensorGraph/LidarRenderProduct.outputs:renderProductPath>
             custom bool inputs:resetSimulationTimeOnStop = 0
-            custom bool inputs:showDebugView = 1
+            custom bool inputs:showDebugView = 0
             custom string inputs:topicName = "/lidar/points_raw"
             custom token inputs:type = "point_cloud" (
                 allowedTokens = ["laser_scan", "point_cloud"]

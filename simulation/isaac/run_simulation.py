@@ -302,11 +302,191 @@ if args.record_dir:
         _an2.attach(_rp2)
         _cams.append({"name": _n or "auto", "dir": _dir, "ann": _an2})
         say(f"  [{_n or 'auto'}] 눈 {_np.round(_e, 2).tolist()} → {_np.round(_t, 2).tolist()}  →  {_dir}")
-    rec = {"n": 0, "saved": 0, "cams": _cams, "img": _Image, "np": _np}
+    # --- **레벨에 놓인 카메라를 그대로 쓴다** (`SIM_REC_CAMS`)
+    #
+    # 도윤님이 GUI 에서 카메라를 놓아 두면 그 시점들을 각각 렌더한다. 자리를 코드가 정하지
+    # 않으므로 눈으로 보고 잡은 구도가 그대로 나온다 (2026-09-30).
+    #
+    #   SIM_REC_CAMS=auto              레벨의 카메라를 **전부** 찾는다 (로봇에 달린 것과
+    #                                  우리가 만든 rec_cam_* 은 뺀다)
+    #   SIM_REC_CAMS=/World/cam_a;…    그 prim 들만. `이름=/World/cam_a` 로 이름을 줘도 된다
+    _cam_spec = os.environ.get("SIM_REC_CAMS", "").strip()
+    # 해상도. **render product 하나가 매 프레임 그려지므로 대수와 화소가 곧 부하다**
+    # (1280x720 3대에 판이 2.5배 느려졌다 — 2026-09-29 실측).
+    try:
+        _rw, _rh = (int(v) for v in os.environ.get("SIM_REC_RES", "1280x720").lower().split("x"))
+    except ValueError:
+        _rw, _rh = 1280, 720
+    if _cam_spec:
+        _found = []
+        if _cam_spec.lower() == "auto":
+            _skip = (world_loader.BOT.root, "/World/rec_cam_")
+            for _p in _st.Traverse():
+                if not _p.IsA(_UsdGeom.Camera):
+                    continue
+                _sp = str(_p.GetPath())
+                if any(_sp.startswith(_k) for _k in _skip):
+                    continue
+                _found.append((_p.GetName(), _sp))
+        else:
+            for _one in _cam_spec.split(";"):
+                _one = _one.strip()
+                if not _one:
+                    continue
+                _nm, _pp = _one.split("=", 1) if "=" in _one else (None, _one)
+                _pp = _pp.strip()
+                if not _st.GetPrimAtPath(_pp).IsValid():
+                    say(f"  [레벨카메라] 없다 — 건너뛴다: {_pp}")
+                    continue
+                _found.append(((_nm or _pp.rsplit("/", 1)[-1]).strip(), _pp))
+        if not _found:
+            say(f"  [레벨카메라] 쓸 카메라를 못 찾았다 (SIM_REC_CAMS={_cam_spec})")
+        for _nm, _pp in _found:
+            _dirc = os.path.join(_out, _nm)
+            os.makedirs(_dirc, exist_ok=True)
+            _rpc = _rep.create.render_product(_pp, (_rw, _rh))
+            _anc = _rep.AnnotatorRegistry.get_annotator("rgb")
+            _anc.attach(_rpc)
+            _cams.append({"name": _nm, "dir": _dirc, "ann": _anc})
+            say(f"  [레벨카메라] {_nm}  ←  {_pp}   {_rw}x{_rh}  →  {_dirc}")
+
+    # --- **뷰포트를 그대로 녹화한다** (`SIM_REC_VIEWPORT=1`)
+    #
+    # 카메라 키를 찍는 대신, 사람이 화면에서 돌리는 그 시점을 그대로 받는다.
+    # 키는 시뮬 시간에 박히는데 판마다 길이가 ±1.5 % 달라서(416~428 s 실측) 키 잡은 판과
+    # 촬영 판이 다르면 뒤로 갈수록 어긋난다. 한 판에 끝내려면 이쪽이 확실하다 (2026-09-30 도윤님).
+    if os.environ.get("SIM_REC_VIEWPORT", "0") != "0":
+        _vp_path = os.environ.get("SIM_REC_VIEWPORT_PRIM", "/OmniverseKit_Persp")
+        if _st.GetPrimAtPath(_vp_path).IsValid():
+            _dirv = os.path.join(_out, "viewport")
+            os.makedirs(_dirv, exist_ok=True)
+            _rpv = _rep.create.render_product(_vp_path, (1280, 720))
+            _anv = _rep.AnnotatorRegistry.get_annotator("rgb")
+            _anv.attach(_rpv)
+            _cams.append({"name": "viewport", "dir": _dirv, "ann": _anv})
+            say(f"  [viewport] 화면에 보이는 그대로 받는다 ({_vp_path})  →  {_dirv}")
+        else:
+            say(f"  [viewport] 뷰포트 카메라를 못 찾았다 ({_vp_path}) — 이 시점은 건너뛴다")
+    # **파일 쓰기는 딴 실 loop 밖에서 한다.** 예전에는 시뮬 루프 안에서 1280x720 PNG 를
+    # 그대로 압축했는데, 그것만으로 판이 **12.9배** 느려졌다 (2026-09-30 실측: 카메라 셋,
+    # 서가 도착이 0분 29초 → 6분 14초). 그때 GPU 사용률은 **0 %** 였다 — 렌더가 아니라
+    # 압축이 병목이었다. 큐에 넣고 일꾼 실이 쓰면 시뮬은 기다리지 않는다.
+    # 형식도 골라 둔다: jpg 는 png 보다 몇 배 빠르고, 편집 소스로는 충분하다.
+    import queue as _queue, threading as _threading
+    _fmt = os.environ.get("SIM_REC_FORMAT", "jpg").lower()
+    _q = _queue.Queue(maxsize=int(os.environ.get("SIM_REC_QUEUE", "256")))
+    _drops = [0]
+
+    def _writer():
+        while True:
+            _item = _q.get()
+            if _item is None:
+                _q.task_done()
+                return
+            _path, _arr = _item
+            try:
+                if _fmt in ("jpg", "jpeg"):
+                    _Image.fromarray(_arr).save(_path, "JPEG", quality=92)
+                else:
+                    _Image.fromarray(_arr).save(_path)
+            except Exception:      # noqa: BLE001 — 한 장 못 써도 판은 계속 간다
+                pass
+            _q.task_done()
+
+    _nw = int(os.environ.get("SIM_REC_WORKERS", "4"))
+    _threads = [_threading.Thread(target=_writer, daemon=True) for _ in range(_nw)]
+    for _th in _threads:
+        _th.start()
+    say(f"녹화 저장: {_fmt} · 일꾼 {_nw} 실 · 큐 {_q.maxsize} (시뮬 루프는 기다리지 않는다)")
+    rec = {"n": 0, "saved": 0, "cams": _cams, "img": _Image, "np": _np,
+           "out": _out,       # 종료 줄에서 쓴다 (예전에는 이 키가 없어 종료 때 KeyError 였다)
+           "q": _q, "fmt": ("jpg" if _fmt in ("jpg", "jpeg") else "png"),
+           "drops": _drops, "threads": _threads}
     say(f"녹화 시작 → {_out} ({args.record_every} 스텝마다 1장, 1280x720)")
+
+# --- 시작 문: 카메라를 놓고 **원할 때** 시작한다 (`SIM_START_GATE`)
+#
+# 왜 필요한가: Isaac 이 뜨자마자 트레이가 미끄러져 오고 팔이 홈으로 간다. 그 사이에
+# 카메라를 놓을 수가 없다 (2026-09-30 도윤님). 여기서 멈추면 **물리는 한 걸음도 안 간다** —
+# `app.update()` 만 부르므로 화면은 살아 있고 뷰포트·카메라는 마음대로 움직일 수 있다.
+# 트레이 이송과 홈 이동은 둘 다 이 아래 루프에서 돌기 때문에 여기서 잡으면 둘 다 멈춘다.
+#
+#   SIM_START_GATE=1            → /tmp/b1_go 를 기다린다
+#   SIM_START_GATE=/경로/파일    → 그 파일을 기다린다
+#   준비되면 다른 터미널에서:  touch /tmp/b1_go
+_gate_file = os.environ.get("SIM_START_GATE", "").strip()
+if _gate_file:
+    if _gate_file in ("1", "true", "on", "yes"):
+        _gate_file = "/tmp/b1_go"
+    if os.path.exists(_gate_file):
+        os.remove(_gate_file)          # 지난 판의 신호가 남아 있으면 바로 지나가 버린다
+    say(f"[시작 문] 기다린다 — 카메라를 놓고 준비되면 다른 터미널에서:  touch {_gate_file}")
+    _last = time.time()
+    while app.is_running() and not os.path.exists(_gate_file):
+        app.update()
+        if time.time() - _last > 30.0:
+            say(f"[시작 문] 아직 기다리는 중 ({_gate_file})")
+            _last = time.time()
+    # **파일을 지우지 않는다.** `book_scene` 의 이송도 같은 파일을 보고 있어서, 여기서
+    # 지우면 트레이 쪽 문이 다시 닫혀 버린다 (2026-09-30 실측: 팔만 움직이고 트레이는 제자리).
+    # 판이 끝나면 다음 판 시작할 때 지운다.
+    say("[시작 문] 열렸다 — 시작한다")
+
+
+def _gate_hold():
+    """문이 닫혀 있으면 **물리를 한 걸음도 안 돌리고** 화면만 살려 둔다.
+
+    `world.step()` 을 안 부르므로 트레이·팔·주행이 전부 그 자리에 선다. `app.update()` 는
+    부르니 뷰포트는 살아 있어서 카메라를 옮기고 키를 잡을 수 있다 (2026-09-30 도윤님).
+
+        touch /tmp/b1_go   → 돈다
+        rm    /tmp/b1_go   → 그 자리에서 멈춘다 (다시 touch 하면 이어서 간다)
+
+    **주의**: 작업(파지·삽입)이 도는 중에 멈추면 ROS 쪽 제한 시간은 벽시계로 흐른다.
+    오래 세워 두면 `404`·`411` 이 난다. 카메라 잡는 것은 작업 사이나 시작 전에 할 것.
+    """
+    if not _gate_file:
+        return
+    if os.path.exists(_gate_file):
+        _gate_hold.said = False
+        return
+    if not getattr(_gate_hold, "said", False):
+        _gate_hold.said = True
+        say(f"[시작 문] 멈춘다 — 다시 돌리려면:  touch {_gate_file}")
+    while app.is_running() and not os.path.exists(_gate_file):
+        app.update()
+    say("[시작 문] 다시 돈다")
+    _gate_hold.said = False
+
+
+# --- 카메라 키프레임 재생 (`SIM_TIMELINE=1`)
+#
+# 레벨에 찍어 둔 카메라 키(USD time-sample)를 **시뮬 시간에 맞춰** 돌린다.
+# 2026-09-30 실측으로 알게 된 것 셋:
+#   ① `world.step(render=False)` 로는 타임라인이 아예 안 흐른다 (0.033 s 에서 멈춘다).
+#   ② `render=True` 면 저절로 흐르는데 **실시간 기준**이라, 시뮬이 느려지면 카메라만 앞서 간다.
+#   ③ 매 스텝 `set_current_time()` 을 주면 그 값을 정확히 따른다 (키도 그 시각으로 평가된다).
+# 그래서 ③ 으로 시뮬 시간을 그대로 먹인다. 촬영 판에서만 켠다 — 기본은 꺼짐이라 동작 불변.
+#
+# **주의**: 타임라인은 스테이지의 `endTimeCode` 에서 처음으로 되돌아간다(루프). 12분 판을
+# 찍으려면 레벨의 end time code 를 그만큼 길게 잡아야 한다 (tps 24 기준 12분 = 17280).
+_drive_timeline = os.environ.get("SIM_TIMELINE", "0") != "0"
+_tl = None
+if _drive_timeline:
+    import omni.timeline
+    _tl = omni.timeline.get_timeline_interface()
+    say("[타임라인] 카메라 키를 시뮬 시간에 맞춰 돌린다 [SIM_TIMELINE=1] "
+        "— 스테이지 end time code 를 넘으면 처음으로 돌아간다")
 
 t0 = time.time()
 while app.is_running():
+    _gate_hold()
+    if _tl is not None:
+        try:
+            _tl.set_current_time(float(world.current_time))
+        except Exception:      # noqa: BLE001 — 카메라가 안 움직여도 판은 계속 돈다
+            _tl = None
+            say("[타임라인] 시각을 못 준다 — 카메라 키 재생을 끈다")
     # **주행이 먼저다.** 자세만 갱신하고 world.step() 은 부르지 않는다 —
     # 스텝을 부르는 쪽은 하나여야 한다 (로봇팔 실행기, 없으면 아래 else)
     if nav is not None:
@@ -323,9 +503,15 @@ while app.is_running():
                 _d = _cam["ann"].get_data()
                 if _d is None or not getattr(_d, "size", 0):
                     continue
-                _a = rec["np"].asarray(_d)[:, :, :3].astype("uint8")
-                rec["img"].fromarray(_a).save(
-                    os.path.join(_cam["dir"], f"f{rec['saved']:06d}.png"))
+                _a = rec["np"].asarray(_d)[:, :, :3].astype("uint8").copy()
+                _fp = os.path.join(_cam["dir"], f"f{rec['saved']:06d}.{rec['fmt']}")
+                try:
+                    rec["q"].put_nowait((_fp, _a))
+                except Exception:      # noqa: BLE001 — 큐가 차면 그 장은 버린다
+                    rec["drops"][0] += 1
+                    if rec["drops"][0] in (1, 100, 1000):
+                        say(f"녹화: 쓰기가 못 따라와 {rec['drops'][0]}장 버렸다 "
+                            f"— REC_EVERY 를 올리거나 카메라를 줄일 것")
                 _any = True
             if _any:
                 rec["saved"] += 1
@@ -334,6 +520,9 @@ while app.is_running():
         break
 
 if rec is not None:
-    say(f"녹화 종료 — {rec['saved']}장 저장 ({rec['out']})")
+    for _ in rec["threads"]:
+        rec["q"].put(None)
+    rec["q"].join()
+    say(f"녹화 종료 — {rec['saved']}장 저장 (버림 {rec['drops'][0]}장) ({rec['out']})")
 ros_bridge.shutdown(node)
 app.close()

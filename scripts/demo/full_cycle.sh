@@ -58,7 +58,11 @@ if ! [ -f "${BOOKS%%,*}" ]; then
 fi
 # 트레이 출발/도착 — 이 레벨의 실측값. 출발은 레벨의 트레이 자리, 도착은 데크 위
 # 같은 z. 예전 기본값(4.907,-5.782)은 다른 레벨 것이라 이 레벨에서 트레이가 카트를 민다.
-export SIM_TRAY_FROM="${SIM_TRAY_FROM:-5.817607391996635,-5.659500598907469,0.333765}"
+# **출발 자리에 기본값을 박지 않는다.** 비워 두면 `tray_delivery.py` 가 **레벨의 트레이 원점**을
+# 읽는다. 여기에 상수를 두면 레벨을 고칠 때 그대로 썩는다 — 2026-09-23 밤의 410·409 가
+# 그렇게 났고, 2026-09-30 에 도윤님이 트레이를 분류기 안쪽(x 5.818 → 7.063)으로 옮기시자
+# 또 같은 자리에서 걸렸다. A/B 비교가 필요할 때만 셸에서 SIM_TRAY_FROM 을 주면 이긴다.
+if [ -n "${SIM_TRAY_FROM:-}" ]; then export SIM_TRAY_FROM; fi
 export SIM_TRAY_TO="${SIM_TRAY_TO:-4.993110179901123,-5.659414291381836,0.333765}"
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-129}"
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
