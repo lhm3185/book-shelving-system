@@ -2,7 +2,7 @@
 # PC B onboard runtime:
 # navigation + perception + manipulation
 
-set -euo pipefail
+set -eo pipefail
 
 REPO_ROOT="$(
     cd "$(dirname "${BASH_SOURCE[0]}")/../.."

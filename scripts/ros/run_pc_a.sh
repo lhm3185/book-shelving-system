@@ -2,7 +2,7 @@
 # PC A ROS runtime:
 # simulation bridge + task manager + return machine
 
-set -euo pipefail
+set -eo pipefail
 
 REPO_ROOT="$(
     cd "$(dirname "${BASH_SOURCE[0]}")/../.."
