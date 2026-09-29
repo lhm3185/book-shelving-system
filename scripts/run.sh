@@ -252,6 +252,18 @@ scenario_is_ready() {
             '^[[:space:]]*state: 3[[:space:]]*$'
 }
 
+system_is_ready() {
+    timeout 3 \
+        ros2 topic echo \
+        /system/status \
+        shelving_interfaces/msg/SystemStatus \
+        --once \
+        --qos-reliability reliable \
+        --qos-durability transient_local \
+        2>/dev/null \
+        | grep -Eq \
+            '^[[:space:]]*state: 3[[:space:]]*$'
+}
 
 action_exists() {
     local action_name="$1"
@@ -525,6 +537,12 @@ wait_until \
     "Isaac scenario READY" \
     "$ROS_READY_TIMEOUT_SEC" \
     scenario_is_ready
+
+
+wait_until \
+    "전체 시스템 READY" \
+    "$ROS_READY_TIMEOUT_SEC" \
+    system_is_ready
 
 
 print_message "모든 구성요소가 준비됐습니다."
