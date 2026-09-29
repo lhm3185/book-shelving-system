@@ -67,7 +67,10 @@ export DISPLAY="${DISPLAY:-:1}"
 export XAUTHORITY="${XAUTHORITY:-/run/user/1000/gdm/Xauthority}"
 LOG="${LOG:-$REPO/logs}"; mkdir -p "$LOG"
 SPEED="${SPEED:-0.5}"; JOB_DELAY="${JOB_DELAY:-25.0}"   # 소수점 필수 — 25 는 INTEGER 로 읽혀 노드가 죽는다
-case "$(hostname)" in IsaacSim15|BryanKUBT) ;; *) echo "!!! 시연 PC 가 아님: $(hostname) — 중단"; exit 99;; esac
+# 호스트 가드 — 엉뚱한 PC(남의 작업 PC)에서 도는 것을 막는다. **지우지 말고 더한다.**
+#   IsaacSim15  교육장 GPU PC (9/23 까지 쓰던 것)      BryanKUBT  집 데스크탑
+#   IsaacSim16  교육장 GPU PC (2026-09-29, 10.10.0.2 — 도윤님이 앉은 자리. 같은 기종 RTX 5080 Laptop)
+case "$(hostname)" in IsaacSim15|IsaacSim16|BryanKUBT) ;; *) echo "!!! 시연 PC 가 아님: $(hostname) — 중단"; exit 99;; esac
 spawn() { setsid nohup "$@" < /dev/null & }
 set +u; source /opt/ros/jazzy/setup.bash; source "$REPO/ros2_ws/install/setup.bash"; set -u
 
