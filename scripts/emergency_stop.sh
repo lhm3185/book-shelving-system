@@ -54,8 +54,8 @@ register_process_id() {
     local process_id="$1"
     local process_group
 
-    [[ "$process_id" =~ ^[0-9]+$ ]] || return
-    process_id_is_running "$process_id" || return
+    [[ "$process_id" =~ ^[0-9]+$ ]] || return 0
+    process_id_is_running "$process_id" || return 0
 
     process_group="$(
         ps -o pgid= -p "$process_id" 2>/dev/null \
@@ -81,14 +81,14 @@ register_state_file() {
     local expected_start_time
     local actual_start_time
 
-    read -r process_id expected_start_time < "$state_file" || return
+    read -r process_id expected_start_time < "$state_file" || return 0
 
-    [[ "$process_id" =~ ^[0-9]+$ ]] || return
-    [[ "$expected_start_time" =~ ^[0-9]+$ ]] || return
-    [[ -r "/proc/$process_id/stat" ]] || return
+    [[ "$process_id" =~ ^[0-9]+$ ]] || return 0
+    [[ "$expected_start_time" =~ ^[0-9]+$ ]] || return 0
+    [[ -r "/proc/$process_id/stat" ]] || return 0
 
     actual_start_time="$(awk '{print $22}' "/proc/$process_id/stat")"
-    [[ "$actual_start_time" == "$expected_start_time" ]] || return
+    [[ "$actual_start_time" == "$expected_start_time" ]] || return 0
 
     register_process_id "$process_id"
 }
@@ -97,7 +97,7 @@ register_state_file() {
 collect_registered_processes() {
     local state_file
 
-    [[ -d "$RUNTIME_DIR" ]] || return
+    [[ -d "$RUNTIME_DIR" ]] || return 0
 
     shopt -s nullglob
     for state_file in "$RUNTIME_DIR"/*.pid "$RUNTIME_DIR"/*.pgid; do
@@ -197,7 +197,7 @@ wait_for_exit() {
 clear_runtime_state() {
     local state_file
 
-    [[ -d "$RUNTIME_DIR" ]] || return
+    [[ -d "$RUNTIME_DIR" ]] || return 0
 
     shopt -s nullglob
     for state_file in "$RUNTIME_DIR"/*.pid "$RUNTIME_DIR"/*.pgid; do
