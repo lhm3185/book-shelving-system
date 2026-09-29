@@ -186,6 +186,18 @@ scenario_is_ready() {
 }
 
 
+robot_tf_is_ready() {
+    local output
+
+    output="$(
+        timeout 5 ros2 run tf2_ros tf2_echo map base_link 2>&1 \
+            || true
+    )"
+
+    grep -q '^At time ' <<<"$output"
+}
+
+
 if [[ ! -f /opt/ros/jazzy/setup.bash ]]; then
     error "ROS 2 Jazzy를 찾을 수 없습니다."
     exit 1
@@ -277,6 +289,11 @@ wait_until \
     topic_has_message \
     /amcl_pose \
     geometry_msgs/msg/PoseWithCovarianceStamped
+
+wait_until \
+    "map -> base_link TF 연결을 기다립니다." \
+    "$STARTUP_TIMEOUT_SEC" \
+    robot_tf_is_ready
 
 wait_until \
     "트레이 적재 action이 준비되기를 기다립니다." \
