@@ -95,7 +95,7 @@ cleanup() {
 
     # EXIT 재진입을 막고 추가 Ctrl+C는 종료 작업 중 무시한다.
     trap - EXIT
-    trap '' INT TERM
+    trap '' HUP INT TERM
 
     print_message "전체 구성요소 종료 시작"
 
@@ -319,7 +319,7 @@ export RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}"
 
 
 trap cleanup EXIT
-trap 'exit 130' INT TERM
+trap 'exit 130' HUP INT TERM
 
 
 print_message "실행 모드: $MODE"

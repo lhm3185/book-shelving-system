@@ -145,7 +145,7 @@ cleanup() {
 
     CLEANUP_STARTED=1
     trap - EXIT
-    trap '' INT TERM
+    trap '' HUP INT TERM
 
     message "PC A 구성요소를 종료합니다."
 
@@ -251,11 +251,18 @@ lifecycle_is_active() {
 
 
 pc_b_is_ready() {
-    action_exists "/navigate_to_target" \
+    lifecycle_is_active /map_server \
+        && lifecycle_is_active /amcl \
+        && lifecycle_is_active /controller_server \
+        && lifecycle_is_active /planner_server \
+        && lifecycle_is_active /behavior_server \
+        && lifecycle_is_active /velocity_smoother \
+        && lifecycle_is_active /collision_monitor \
+        && lifecycle_is_active /bt_navigator \
+        && action_exists "/navigate_to_target" \
         && action_exists "/detect_grasp_point" \
         && action_exists "/detect_target_slot" \
         && action_exists "/place_book" \
-        && lifecycle_is_active /bt_navigator \
         && topic_has_message /scan sensor_msgs/msg/LaserScan
 }
 
@@ -312,7 +319,7 @@ export FASTRTPS_DEFAULT_PROFILES_FILE="$DDS_PROFILE"
 unset ROS_STATIC_PEERS
 
 trap cleanup EXIT
-trap 'exit 130' INT TERM
+trap 'exit 130' HUP INT TERM
 
 write_process_state "$LAUNCHER_STATE" "$$"
 

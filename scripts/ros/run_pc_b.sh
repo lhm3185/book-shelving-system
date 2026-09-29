@@ -98,7 +98,7 @@ cleanup() {
 
     CLEANUP_STARTED=1
     trap - EXIT
-    trap '' INT TERM
+    trap '' HUP INT TERM
 
     printf '\nPC B 구성요소를 종료합니다.\n'
     signal_process_group INT "$ROS_LAUNCH_PID"
@@ -164,11 +164,21 @@ export FASTRTPS_DEFAULT_PROFILES_FILE="$DDS_PROFILE"
 unset ROS_STATIC_PEERS
 
 trap cleanup EXIT
-trap 'exit 130' INT TERM
+trap 'exit 130' HUP INT TERM
 
 write_process_state "$LAUNCHER_STATE" "$$"
 
 printf 'PC B를 시작합니다. ROS_DOMAIN_ID=%s\n' "$ROS_DOMAIN_ID"
+
+if pgrep \
+    -u "$(id -u)" \
+    -f -- "ros2 launch shelving_system pc_b.launch.py" \
+    >/dev/null
+then
+    echo "이미 실행 중인 PC B ROS launch가 있습니다." >&2
+    echo "먼저 ./scripts/emergency_stop.sh 를 실행하십시오." >&2
+    exit 1
+fi
 
 setsid ros2 launch \
     shelving_system \
