@@ -57,3 +57,17 @@ vi ~/b1_demo_bundle/demo_env.sh      # 맨 위 박스의 세 줄만 (BUNDLE · F
 source ~/b1_demo_bundle/demo_env.sh && bash scripts/demo/full_cycle.sh
 ```
 인터넷이 없으면 `SIM_LEVEL` 을 `$BUNDLE/level_collect/Final_Level_Shaded_robot.usdc` 로 바꾼다.
+
+## 2026-09-29 13:50 갱신 — 기본 레벨 light1, USB 반영
+
+| 곳 | `demo_env.sh` 의 기본 레벨 | 확인 |
+|---|---|---|
+| 10.10.0.2 `~/b1_demo_bundle` | `level_shaded/Final_Level_Shaded_robot.light1.usdc` | 새 셸에서 읽어 md5 e63aeca1… |
+| 10.10.0.1 `~/b1_demo_bundle` | 같다 (도메인만 77) | 같다 |
+| USB `b1_demo_bundle` | 같다 | `MD5SUMS` 235/235, 목록에 없는 파일 0 |
+| 저장소 `cli_exchange/handoff_0929/demo_env.sh` | 같다 | — |
+
+- 세 곳 모두 바꾸기 전 설정을 `demo_env.sh.bak_before_light1_0929` 로 남겼다(md5 3d4ee149… = USB 의 원래 것).
+- USB 에는 `level_collect/Final_Level_Shaded_robot.light1.usdc`(md5 8200d771…)도 넣었다 — 인터넷이 없을 때 쓰는 쪽이다. **돌려 보지 않았다.**
+- 커밋 fb3c70c 의 제목에 "USB" 가 있으나 그때는 USB 가 빠져 있어 반영하지 못했다. 실제 반영은 이 시각이다.
+- USB 의 통합 담당자용 폴더 `b1_integration_level_0929` 는 손대지 않았다(체크섬 95/95).
