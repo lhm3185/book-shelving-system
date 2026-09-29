@@ -56,6 +56,15 @@ class SystemSupervisorNode(Node):
             "system_status_topic",
             "/system/status",
         )
+        self.declare_parameter(
+            "require_perception",
+            True,
+        )
+        self._require_perception = bool(
+            self.get_parameter(
+                "require_perception"
+            ).value
+        )
 
         status_qos = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
@@ -313,8 +322,11 @@ class SystemSupervisorNode(Node):
             self._manipulation_client.server_is_ready()
         )
         perception_ready = (
-            self._grasp_client.server_is_ready()
-            and self._slot_client.server_is_ready()
+            not self._require_perception
+            or (
+                self._grasp_client.server_is_ready()
+                and self._slot_client.server_is_ready()
+            )
         )
 
         scan_ready = self._is_fresh(

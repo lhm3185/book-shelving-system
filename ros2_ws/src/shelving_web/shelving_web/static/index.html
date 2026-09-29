@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  >
+  <meta
+    name="description"
+    content="Book Shelving System ROS 2 operator dashboard"
+  >
+
+  <title>Book Shelving Control</title>
+
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">BS</span>
+
+        <div>
+          <p class="eyebrow">ROS 2 OPERATOR CONSOLE</p>
+          <h1>Book Shelving Control</h1>
+        </div>
+      </div>
+
+      <div class="topbar-status">
+        <div
+          id="connectionIndicator"
+          class="connection-indicator is-offline"
+          aria-hidden="true"
+        ></div>
+
+        <div>
+          <strong id="connectionText">ROS 연결 대기</strong>
+          <span id="lastUpdate">수신 데이터 없음</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="map-panel" aria-labelledby="mapTitle">
+        <header class="panel-header">
+          <div>
+            <p class="eyebrow">LIVE POSITION</p>
+            <h2 id="mapTitle">로봇 위치</h2>
+          </div>
+
+          <div class="map-coordinates" aria-live="polite">
+            <span>
+              X
+              <strong id="mapPoseX">--</strong>
+            </span>
+
+            <span>
+              Y
+              <strong id="mapPoseY">--</strong>
+            </span>
+
+            <span>
+              YAW
+              <strong id="mapPoseYaw">--</strong>
+            </span>
+          </div>
+        </header>
+
+        <div id="mapStage" class="map-stage">
+          <img
+            id="mapImage"
+            src="/map.png"
+            alt="Nav2 도서관 지도"
+            draggable="false"
+          >
+
+          <canvas
+            id="mapCanvas"
+            aria-label="Nav2 지도 위 로봇 현재 위치"
+          ></canvas>
+
+          <div id="mapLoading" class="map-loading">
+            지도와 로봇 위치를 기다리는 중입니다.
+          </div>
+        </div>
+
+        <footer class="map-footer">
+          <div class="legend">
+            <span>
+              <i class="legend-dot robot-dot"></i>
+              현재 로봇 위치
+            </span>
+
+            <span>
+              <i class="legend-dot heading-dot"></i>
+              로봇 진행 방향
+            </span>
+          </div>
+
+          <span id="mapFrame">frame: --</span>
+        </footer>
+      </section>
+
+      <aside class="sidebar" aria-label="시스템 제어 및 상태">
+        <section class="control-card primary-card">
+          <div class="card-heading">
+            <div>
+              <p class="eyebrow">SYSTEM STATE</p>
+              <h2>운영 상태</h2>
+            </div>
+
+            <span
+              id="stateBadge"
+              class="state-badge state-unknown"
+            >
+              UNKNOWN
+            </span>
+          </div>
+
+          <p id="statusMessage" class="status-message">
+            시스템 상태를 기다리고 있습니다.
+          </p>
+
+          <dl class="compact-details">
+            <div>
+              <dt>Run ID</dt>
+              <dd id="runId">--</dd>
+            </div>
+
+            <div>
+              <dt>Error</dt>
+              <dd id="errorCode">0</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section class="control-card command-card">
+          <div class="card-heading">
+            <div>
+              <p class="eyebrow">OPERATOR COMMAND</p>
+              <h2>작업 명령</h2>
+            </div>
+          </div>
+
+          <p class="card-description">
+            전체 시스템이 READY일 때 새로운 도서 배치
+            사이클을 시작합니다.
+          </p>
+
+          <button
+            id="startButton"
+            class="start-button"
+            type="button"
+            disabled
+          >
+            <span class="button-label">사이클 시작</span>
+            <span class="button-state">READY 필요</span>
+          </button>
+
+          <p
+            id="commandResult"
+            class="command-result"
+            aria-live="polite"
+          ></p>
+        </section>
+
+        <section class="control-card">
+          <div class="card-heading">
+            <div>
+              <p class="eyebrow">READINESS</p>
+              <h2>구성요소 준비 상태</h2>
+            </div>
+          </div>
+
+          <ul class="readiness-list">
+            <li>
+              <span>Isaac Simulation</span>
+              <span
+                id="readySimulation"
+                class="readiness-value is-waiting"
+              >
+                WAIT
+              </span>
+            </li>
+
+            <li>
+              <span>PC A</span>
+              <span
+                id="readyPcA"
+                class="readiness-value is-waiting"
+              >
+                WAIT
+              </span>
+            </li>
+
+            <li>
+              <span>PC B</span>
+              <span
+                id="readyPcB"
+                class="readiness-value is-waiting"
+              >
+                WAIT
+              </span>
+            </li>
+
+            <li>
+              <span>Navigation</span>
+              <span
+                id="readyNavigation"
+                class="readiness-value is-waiting"
+              >
+                WAIT
+              </span>
+            </li>
+
+            <li>
+              <span>Manipulation</span>
+              <span
+                id="readyManipulation"
+                class="readiness-value is-waiting"
+              >
+                WAIT
+              </span>
+            </li>
+
+            <li>
+              <span>Perception</span>
+              <span
+                id="readyPerception"
+                class="readiness-value is-waiting"
+              >
+                WAIT
+              </span>
+            </li>
+          </ul>
+        </section>
+
+        <section class="control-card">
+          <div class="card-heading">
+            <div>
+              <p class="eyebrow">ACTIVE JOB</p>
+              <h2>현재 작업</h2>
+            </div>
+
+            <strong id="progressText">0%</strong>
+          </div>
+
+          <div
+            class="progress-track"
+            role="progressbar"
+            aria-label="현재 작업 진행률"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+          >
+            <div id="progressBar" class="progress-bar"></div>
+          </div>
+
+          <dl class="compact-details job-details">
+            <div>
+              <dt>Phase</dt>
+              <dd id="phaseValue">--</dd>
+            </div>
+
+            <div>
+              <dt>Job ID</dt>
+              <dd id="jobId">--</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section class="control-card pose-card">
+          <div class="card-heading">
+            <div>
+              <p class="eyebrow">LOCALIZATION</p>
+              <h2>현재 좌표</h2>
+            </div>
+          </div>
+
+          <div class="pose-grid">
+            <div>
+              <span>X</span>
+              <strong id="poseX">--</strong>
+              <small>m</small>
+            </div>
+
+            <div>
+              <span>Y</span>
+              <strong id="poseY">--</strong>
+              <small>m</small>
+            </div>
+
+            <div>
+              <span>Yaw</span>
+              <strong id="poseYaw">--</strong>
+              <small>deg</small>
+            </div>
+          </div>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <div
+    id="notification"
+    class="notification"
+    role="status"
+    aria-live="polite"
+  ></div>
+</body>
+</html>

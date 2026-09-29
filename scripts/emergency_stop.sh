@@ -21,9 +21,11 @@ PATTERNS=(
     "$REPO_ROOT/scripts/run.sh"
     "$REPO_ROOT/scripts/ros/run_pc_a.sh"
     "$REPO_ROOT/scripts/ros/run_pc_b.sh"
+    "$REPO_ROOT/scripts/ros/run_pc_c.sh"
     "ros2 launch shelving_system all.launch.py"
     "ros2 launch shelving_system pc_a.launch.py"
     "ros2 launch shelving_system pc_b.launch.py"
+    "ros2 launch shelving_web pc_c.launch.py"
     "$REPO_ROOT/isaac_sim/run_simulation.py"
     "$REPO_ROOT/ros2_ws/install/"
     "/opt/ros/jazzy/lib/nav2_"
@@ -33,6 +35,7 @@ PATTERNS=(
     "simulation_bridge_node"
     "task_manager_node"
     "return_machine_node"
+    "web_gateway_node"
     "ros2cli.daemon.daemonize"
 )
 

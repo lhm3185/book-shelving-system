@@ -192,20 +192,22 @@ def _launch_setup(context, *_args, **_kwargs):
                 emulate_tty=True,
                 parameters=[manipulation_config, {"use_sim_time": use_sim_time}],
             ),
-            # full 단일-PC 실행에서도 동일한 관제 인터페이스를 제공한다.
-            Node(
-                package="shelving_system",
-                executable="system_supervisor_node",
-                name="system_supervisor_node",
-                output="screen",
-                emulate_tty=True,
-                parameters=[
-                    {
-                        "use_sim_time": False,
-                    }
-                ],
-            ),
         ])
+
+    # full과 navigation-test 모두 동일한 웹 관제 인터페이스를 제공한다.
+    nodes.append(Node(
+        package="shelving_system",
+        executable="system_supervisor_node",
+        name="system_supervisor_node",
+        output="screen",
+        emulate_tty=True,
+        parameters=[
+            {
+                "use_sim_time": False,
+                "require_perception": mode == "full",
+            }
+        ],
+    ))
 
     return nodes
 

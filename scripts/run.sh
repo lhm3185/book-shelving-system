@@ -492,17 +492,15 @@ wait_until \
     scenario_is_ready
 
 
+wait_until \
+    "System /system/start_cycle service" \
+    "$ROS_READY_TIMEOUT_SEC" \
+    service_exists \
+    "/system/start_cycle"
+
+
 print_message "모든 구성요소가 준비됐습니다."
-print_message "반납기 테스트 작업을 발행합니다."
-
-
-ros2 service call \
-    /return_machine/publish_job \
-    std_srvs/srv/Trigger \
-    "{}"
-
-
-print_message "테스트 작업을 발행했습니다."
+print_message "웹 관제의 작업 시작 명령을 기다립니다."
 print_message "종료하려면 Ctrl+C를 누르십시오."
 
 
