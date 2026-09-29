@@ -36,6 +36,34 @@ print_error() {
     printf '\n[ERROR] %s\n' "$1" >&2
 }
 
+load_graphical_session_environment() {
+    local gnome_shell_pid=""
+    local environment_entry=""
+
+    gnome_shell_pid="$(
+        pgrep -o -u "$(id -u)" -x gnome-shell || true
+    )"
+
+    if [[ -z "$gnome_shell_pid" ]]; then
+        print_error \
+            "실행 중인 GNOME 그래픽 세션을 찾을 수 없습니다."
+        return 1
+    fi
+
+    while IFS= read -r -d '' environment_entry; do
+        case "$environment_entry" in
+            DISPLAY=*|XAUTHORITY=*|WAYLAND_DISPLAY=*|XDG_RUNTIME_DIR=*|DBUS_SESSION_BUS_ADDRESS=*)
+                export "$environment_entry"
+                ;;
+        esac
+    done < "/proc/$gnome_shell_pid/environ"
+
+    if [[ -z "${DISPLAY:-}" || -z "${XAUTHORITY:-}" ]]; then
+        print_error \
+            "그래픽 세션의 DISPLAY 또는 XAUTHORITY를 가져오지 못했습니다."
+        return 1
+    fi
+}
 
 CLEANUP_STARTED=0
 
@@ -335,6 +363,13 @@ if pgrep -f -- "$REPO_ROOT/isaac_sim/run_simulation.py" >/dev/null; then
     pgrep -af -- "$REPO_ROOT/isaac_sim/run_simulation.py"
     exit 1
 fi
+
+if [[ -z "${DISPLAY:-}" || -z "${XAUTHORITY:-}" ]]; then
+    load_graphical_session_environment
+fi
+
+print_message \
+    "Isaac Sim GUI를 DISPLAY=$DISPLAY 에 표시합니다."
 print_message "Isaac Sim 실행"
 
 ISAAC_ARGUMENTS=()
