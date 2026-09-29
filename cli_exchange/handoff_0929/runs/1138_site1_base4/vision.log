@@ -1,0 +1,229 @@
+[37;1m2026-09-29 11:38:59.161 [31;1m[[37;1mXMLProfileManager[31;1m Error] [37mCould not extract any profile[34;1m -> Function [36mextractProfiles[m
+[INFO] [1790649539.247264629] [vision_manager]: Subscribed to rgb=/rgb, depth=/depth, camera_info=/camera_info, target_frame=arm_base_link, trigger=/perception/detect_request, action=/detect_target_slot
+[INFO] [1790649628.943009535] [vision_manager]: ROI 밖 책: (0.020, 0.574, 0.394) @arm_base_link
+[INFO] [1790649628.944509891] [vision_manager]: ROI 밖 책: (0.062, 0.574, 0.394) @arm_base_link
+[INFO] [1790649628.945745839] [vision_manager]: ROI 밖 책: (-0.625, 0.536, 0.832) @arm_base_link
+[INFO] [1790649628.946158444] [vision_manager]: ROI 밖 책: (-0.013, 0.578, 0.394) @arm_base_link
+[INFO] [1790649628.946473863] [vision_manager]: ROI 밖 책: (-0.043, 0.531, 0.394) @arm_base_link
+[INFO] [1790649628.946653923] [vision_manager]: ROI 밖 책 5권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790649629.344857241] [vision_manager]: Empty center pixel=(276, 259), shelf_front_z=1.528m; Depth L/C/R=0.432/6.085/2.624m; center-left=5.653m, center-right=3.461m; contrast=PASS
+[INFO] [1790649629.345586019] [vision_manager]: Empty shelf target: xyz=(-0.562, 1.650, 0.917)
+[INFO] [1790649629.399949774] [vision_manager]: ROI 밖 책: (-0.057, 0.530, 0.395) @arm_base_link
+[INFO] [1790649629.401629055] [vision_manager]: ROI 밖 책: (0.316, 0.564, 0.362) @arm_base_link
+[INFO] [1790649629.402195478] [vision_manager]: ROI 밖 책: (0.064, 0.577, 0.394) @arm_base_link
+[INFO] [1790649629.402540381] [vision_manager]: ROI 밖 책: (0.017, 0.556, 0.396) @arm_base_link
+[INFO] [1790649629.402771627] [vision_manager]: ROI 밖 책 4권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790649630.361124915] [vision_manager]: ROI 밖 책: (0.332, 0.552, 0.372) @arm_base_link
+[INFO] [1790649630.361530128] [vision_manager]: ROI 밖 책: (0.368, 0.537, 0.396) @arm_base_link
+[INFO] [1790649630.361868664] [vision_manager]: ROI 밖 책: (0.486, 0.576, 0.392) @arm_base_link
+[INFO] [1790649630.362198759] [vision_manager]: ROI 밖 책: (0.408, 0.535, 0.395) @arm_base_link
+[INFO] [1790649630.362517878] [vision_manager]: ROI 밖 책: (0.187, 0.557, 0.397) @arm_base_link
+[INFO] [1790649630.362832999] [vision_manager]: ROI 밖 책: (0.461, 0.543, 0.394) @arm_base_link
+[INFO] [1790649630.363151525] [vision_manager]: ROI 밖 책: (0.132, 0.540, 0.393) @arm_base_link
+[INFO] [1790649630.363464763] [vision_manager]: ROI 밖 책: (0.094, 0.535, 0.395) @arm_base_link
+[INFO] [1790649630.363687161] [vision_manager]: ROI 밖 책 8권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790649632.114607889] [vision_manager]: ROI 밖 책: (0.334, 0.540, 0.385) @arm_base_link
+[INFO] [1790649632.115017504] [vision_manager]: ROI 밖 책: (0.497, 0.571, 0.394) @arm_base_link
+[INFO] [1790649632.115362317] [vision_manager]: ROI 밖 책: (0.374, 0.534, 0.396) @arm_base_link
+[INFO] [1790649632.115693017] [vision_manager]: ROI 밖 책: (0.475, 0.537, 0.393) @arm_base_link
+[INFO] [1790649632.116019995] [vision_manager]: ROI 밖 책: (0.438, 0.571, 0.395) @arm_base_link
+[INFO] [1790649632.116338743] [vision_manager]: ROI 밖 책: (0.464, 0.574, 0.394) @arm_base_link
+[INFO] [1790649632.116651528] [vision_manager]: ROI 밖 책: (0.413, 0.529, 0.395) @arm_base_link
+[INFO] [1790649632.116964661] [vision_manager]: ROI 밖 책: (-0.017, 0.570, 0.392) @arm_base_link
+[INFO] [1790649632.117189416] [vision_manager]: ROI 밖 책 8권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790649634.098505560] [vision_manager]: ROI 밖 책: (0.430, 0.584, 0.394) @arm_base_link
+[INFO] [1790649634.099238448] [vision_manager]: ROI 밖 책: (0.582, 0.601, 0.394) @arm_base_link
+[INFO] [1790649634.099852830] [vision_manager]: ROI 밖 책: (0.510, 0.615, 0.393) @arm_base_link
+[INFO] [1790649634.100429339] [vision_manager]: ROI 밖 책: (-0.032, 0.578, 0.392) @arm_base_link
+[INFO] [1790649634.101588577] [vision_manager]: ROI 밖 책: (0.210, 0.536, 0.827) @arm_base_link
+[INFO] [1790649634.101951913] [vision_manager]: ROI 밖 책: (0.554, 0.616, 0.394) @arm_base_link
+[INFO] [1790649634.102278843] [vision_manager]: ROI 밖 책: (0.384, 0.537, 0.396) @arm_base_link
+[INFO] [1790649634.102598477] [vision_manager]: ROI 밖 책: (0.051, 0.578, 0.394) @arm_base_link
+[INFO] [1790649634.106261546] [vision_manager]: ROI 밖 책: (0.555, 0.536, 0.393) @arm_base_link
+[INFO] [1790649634.106932178] [vision_manager]: ROI 밖 책: (0.010, 0.576, 0.394) @arm_base_link
+[INFO] [1790649634.108275000] [vision_manager]: ROI 밖 책: (0.484, 0.567, 0.393) @arm_base_link
+[INFO] [1790649634.108473308] [vision_manager]: ROI 밖 책 11권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790649634.135724982] [vision_manager]: Empty center pixel=(286, 550), shelf_front_z=0.618m; Depth L/C/R=0.677/1.387/0.558m; center-left=0.709m, center-right=0.829m; contrast=PASS
+[INFO] [1790649634.141126451] [vision_manager]: Empty shelf target: xyz=(0.283, 0.625, 0.344)
+[INFO] [1790649638.278543735] [vision_manager]: ROI 밖 책: (-1.031, 0.184, -0.341) @arm_base_link
+[INFO] [1790649638.279060518] [vision_manager]: ROI 밖 책: (0.128, 0.509, 0.339) @arm_base_link
+[INFO] [1790649638.279497077] [vision_manager]: ROI 밖 책: (0.079, 0.506, 0.341) @arm_base_link
+[INFO] [1790649638.279725188] [vision_manager]: ROI 밖 책 3권 제외 (남은 2권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790649638.344198664] [vision_manager]: Book picked(best): xyz=(-0.366, -0.019, 0.216), center=(307, 593), conf=0.88, depth=patch, yaw=0.000 rad (후보 2권)
+[INFO] [1790649638.344397334] [vision_manager]: Empty center pixel=(157, 340), shelf_front_z=0.839m; Depth L/C/R=0.911/1.051/0.766m; center-left=0.140m, center-right=0.285m; contrast=PASS
+[INFO] [1790649638.344963397] [vision_manager]: Empty shelf target: xyz=(-0.781, 0.503, 0.170)
+[INFO] [1790649638.345328929] [vision_manager]: Resent remembered empty shelf position after book detection
+[INFO] [1790649640.283786022] [vision_manager]: ROI 밖 책: (-0.711, 0.091, -0.001) @arm_base_link
+[INFO] [1790649640.284176639] [vision_manager]: ROI 밖 책: (0.130, 0.511, 0.340) @arm_base_link
+[INFO] [1790649640.284525984] [vision_manager]: ROI 밖 책: (0.172, 0.512, 0.342) @arm_base_link
+[INFO] [1790649640.286346611] [vision_manager]: ROI 밖 책: (0.188, 0.512, 0.364) @arm_base_link
+[INFO] [1790649640.287755907] [vision_manager]: ROI 밖 책 4권 제외 (남은 2권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790649640.314003125] [vision_manager]: Book picked(best): xyz=(-0.361, -0.019, 0.214), center=(177, 593), conf=0.88, depth=patch, yaw=0.000 rad (후보 2권)
+[INFO] [1790649640.314281188] [vision_manager]: Empty center pixel=(97, 358), shelf_front_z=0.861m; Depth L/C/R=0.913/1.016/0.808m; center-left=0.102m, center-right=0.208m; contrast=PASS
+[INFO] [1790649640.314773366] [vision_manager]: Empty shelf target: xyz=(-0.781, 0.486, 0.117)
+[INFO] [1790649640.315145340] [vision_manager]: Resent remembered empty shelf position after book detection
+[INFO] [1790649642.033133824] [vision_manager]: ROI 밖 책: (0.566, 0.186, -0.341) @arm_base_link
+[INFO] [1790649642.033546614] [vision_manager]: ROI 밖 책: (-0.429, 0.033, 0.156) @arm_base_link
+[INFO] [1790649642.033901803] [vision_manager]: ROI 밖 책: (0.177, 0.512, 0.339) @arm_base_link
+[INFO] [1790649642.034139718] [vision_manager]: ROI 밖 책 3권 제외 (남은 1권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790649642.057340722] [vision_manager]: Book picked(best): xyz=(-0.306, -0.026, 0.198), center=(88, 603), conf=0.92, depth=patch, yaw=0.000 rad (후보 1권)
+[INFO] [1790649642.057589179] [vision_manager]: Empty center pixel=(433, 275), shelf_front_z=0.734m; Depth L/C/R=0.720/2.016/0.747m; center-left=1.296m, center-right=1.269m; contrast=PASS
+[INFO] [1790649642.058207088] [vision_manager]: Empty shelf target: xyz=(0.259, 0.523, 0.357)
+[INFO] [1790649642.058668351] [vision_manager]: Resent remembered empty shelf position after book detection
+[INFO] [1790649643.959152815] [vision_manager]: ROI 밖 책: (0.595, 0.180, -0.341) @arm_base_link
+[INFO] [1790649643.960365544] [vision_manager]: ROI 밖 책 1권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790649644.032697148] [vision_manager]: Empty center pixel=(359, 274), shelf_front_z=0.713m; Depth L/C/R=0.690/2.043/0.735m; center-left=1.353m, center-right=1.308m; contrast=PASS
+[INFO] [1790649644.033319093] [vision_manager]: Empty shelf target: xyz=(0.262, 0.506, 0.370)
+[INFO] [1790649646.174994099] [vision_manager]: ROI 밖 책: (0.674, 0.183, -0.342) @arm_base_link
+[INFO] [1790649646.175385930] [vision_manager]: ROI 밖 책: (-0.319, 0.522, 0.349) @arm_base_link
+[INFO] [1790649646.175689010] [vision_manager]: ROI 밖 책: (0.489, 0.516, 0.358) @arm_base_link
+[INFO] [1790649646.175878215] [vision_manager]: ROI 밖 책 3권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790649646.211011287] [vision_manager]: Empty center pixel=(294, 273), shelf_front_z=0.748m; Depth L/C/R=0.783/2.052/0.713m; center-left=1.270m, center-right=1.339m; contrast=PASS
+[INFO] [1790649646.211730212] [vision_manager]: Empty shelf target: xyz=(0.288, 0.538, 0.352)
+[INFO] [1790649661.054681726] [vision_manager]: ROI 밖 책: (-0.123, -0.670, -0.341) @arm_base_link
+[INFO] [1790649661.055304960] [vision_manager]: ROI 밖 책: (-0.232, 0.504, 0.205) @arm_base_link
+[INFO] [1790649661.055638047] [vision_manager]: ROI 밖 책: (0.485, 0.249, -0.341) @arm_base_link
+[INFO] [1790649661.056081173] [vision_manager]: ROI 밖 책 3권 제외 (남은 4권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790649661.061594694] [vision_manager]: Book picked(best): xyz=(-0.362, -0.003, 0.212), center=(261, 311), conf=0.87, depth=patch, yaw=0.000 rad (후보 4권)
+[INFO] [1790649661.556855518] [vision_manager]: ROI 밖 책: (-0.123, -0.673, -0.341) @arm_base_link
+[INFO] [1790649661.557482388] [vision_manager]: ROI 밖 책: (-0.232, 0.504, 0.205) @arm_base_link
+[INFO] [1790649661.557821174] [vision_manager]: ROI 밖 책: (-0.451, 0.154, 0.211) @arm_base_link
+[INFO] [1790649661.558150175] [vision_manager]: ROI 밖 책: (0.485, 0.255, -0.341) @arm_base_link
+[INFO] [1790649661.558496300] [vision_manager]: ROI 밖 책 4권 제외 (남은 3권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790649661.583572317] [vision_manager]: Book picked(best): xyz=(-0.360, -0.003, 0.212), center=(261, 312), conf=0.87, depth=patch, yaw=0.000 rad (후보 3권)
+[INFO] [1790649814.272205389] [vision_manager]: ROI 밖 책: (-0.104, -0.698, -0.341) @arm_base_link
+[INFO] [1790649814.272619159] [vision_manager]: ROI 밖 책 1권 제외 (남은 1권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790649814.277835534] [vision_manager]: Book picked(best): xyz=(-0.348, -0.104, 0.212), center=(189, 321), conf=0.69, depth=patch, yaw=0.000 rad (후보 1권)
+[INFO] [1790649814.742202793] [vision_manager]: ROI 밖 책: (-0.107, -0.698, -0.341) @arm_base_link
+[INFO] [1790649814.742609385] [vision_manager]: ROI 밖 책 1권 제외 (남은 1권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790649814.752846227] [vision_manager]: Book picked(best): xyz=(-0.344, -0.105, 0.212), center=(188, 324), conf=0.69, depth=patch, yaw=0.000 rad (후보 1권)
+[INFO] [1790649996.796476195] [vision_manager]: ROI 밖 책: (-0.627, 0.507, 0.833) @arm_base_link
+[INFO] [1790649996.796751188] [vision_manager]: ROI 밖 책 1권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790649996.825348973] [vision_manager]: Empty center pixel=(263, 198), shelf_front_z=2.394m; Depth L/C/R=2.393/4.410/2.396m; center-left=2.017m, center-right=2.014m; contrast=PASS
+[INFO] [1790649996.825963865] [vision_manager]: Empty shelf target: xyz=(-0.780, 2.612, 1.385)
+[INFO] [1790649998.904545665] [vision_manager]: ROI 밖 책: (0.024, 0.547, 0.395) @arm_base_link
+[INFO] [1790649998.904952138] [vision_manager]: ROI 밖 책: (0.237, 0.553, 0.420) @arm_base_link
+[INFO] [1790649998.905284328] [vision_manager]: ROI 밖 책: (0.311, 0.549, 0.395) @arm_base_link
+[INFO] [1790649998.905600580] [vision_manager]: ROI 밖 책: (0.099, 0.533, 0.395) @arm_base_link
+[INFO] [1790649998.905820990] [vision_manager]: ROI 밖 책 4권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650000.685471457] [vision_manager]: ROI 밖 책: (0.459, 0.547, 0.394) @arm_base_link
+[INFO] [1790650000.685860802] [vision_manager]: ROI 밖 책: (0.500, 0.560, 0.394) @arm_base_link
+[INFO] [1790650000.686194944] [vision_manager]: ROI 밖 책: (0.094, 0.531, 0.396) @arm_base_link
+[INFO] [1790650000.686513829] [vision_manager]: ROI 밖 책: (0.429, 0.537, 0.395) @arm_base_link
+[INFO] [1790650000.686824002] [vision_manager]: ROI 밖 책: (0.041, 0.542, 0.393) @arm_base_link
+[INFO] [1790650000.687131583] [vision_manager]: ROI 밖 책: (0.305, 0.538, 0.396) @arm_base_link
+[INFO] [1790650000.687440301] [vision_manager]: ROI 밖 책: (0.522, 0.559, 0.396) @arm_base_link
+[INFO] [1790650000.687742483] [vision_manager]: ROI 밖 책: (0.449, 0.540, 0.394) @arm_base_link
+[INFO] [1790650000.688046715] [vision_manager]: ROI 밖 책: (0.259, 0.523, 0.396) @arm_base_link
+[INFO] [1790650000.688351303] [vision_manager]: ROI 밖 책: (0.353, 0.546, 0.397) @arm_base_link
+[INFO] [1790650000.688648253] [vision_manager]: ROI 밖 책: (0.018, 0.543, 0.396) @arm_base_link
+[INFO] [1790650000.688948061] [vision_manager]: ROI 밖 책: (0.059, 0.544, 0.393) @arm_base_link
+[INFO] [1790650000.689255717] [vision_manager]: ROI 밖 책: (0.176, 0.522, 0.396) @arm_base_link
+[INFO] [1790650000.689558896] [vision_manager]: ROI 밖 책: (0.392, 0.556, 0.395) @arm_base_link
+[INFO] [1790650000.689779597] [vision_manager]: ROI 밖 책 14권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650002.487304571] [vision_manager]: ROI 밖 책: (0.428, 0.538, 0.394) @arm_base_link
+[INFO] [1790650002.487692117] [vision_manager]: ROI 밖 책: (0.269, 0.541, 0.394) @arm_base_link
+[INFO] [1790650002.488022903] [vision_manager]: ROI 밖 책: (0.492, 0.548, 0.394) @arm_base_link
+[INFO] [1790650002.488342623] [vision_manager]: ROI 밖 책: (0.300, 0.525, 0.395) @arm_base_link
+[INFO] [1790650002.488650755] [vision_manager]: ROI 밖 책: (0.376, 0.528, 0.395) @arm_base_link
+[INFO] [1790650002.488958703] [vision_manager]: ROI 밖 책: (0.463, 0.544, 0.393) @arm_base_link
+[INFO] [1790650002.489263722] [vision_manager]: ROI 밖 책: (-0.017, 0.550, 0.392) @arm_base_link
+[INFO] [1790650002.489563056] [vision_manager]: ROI 밖 책: (0.487, 0.534, 0.394) @arm_base_link
+[INFO] [1790650002.489860556] [vision_manager]: ROI 밖 책: (0.011, 0.560, 0.395) @arm_base_link
+[INFO] [1790650002.490165501] [vision_manager]: ROI 밖 책: (0.441, 0.530, 0.395) @arm_base_link
+[INFO] [1790650002.490467263] [vision_manager]: ROI 밖 책: (0.053, 0.555, 0.392) @arm_base_link
+[INFO] [1790650002.490764892] [vision_manager]: ROI 밖 책: (0.336, 0.523, 0.396) @arm_base_link
+[INFO] [1790650002.491064965] [vision_manager]: ROI 밖 책: (0.179, 0.584, 0.397) @arm_base_link
+[INFO] [1790650002.491285821] [vision_manager]: ROI 밖 책 13권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650002.525606494] [vision_manager]: Empty center pixel=(300, 296), shelf_front_z=0.539m; Depth L/C/R=0.548/2.480/0.530m; center-left=1.933m, center-right=1.950m; contrast=PASS
+[INFO] [1790650002.526403398] [vision_manager]: Empty shelf target: xyz=(0.140, 0.632, 0.840)
+[INFO] [1790650004.483198147] [vision_manager]: ROI 밖 책: (0.246, 0.519, 0.394) @arm_base_link
+[INFO] [1790650004.483600532] [vision_manager]: ROI 밖 책: (0.268, 0.522, 0.392) @arm_base_link
+[INFO] [1790650004.483933030] [vision_manager]: ROI 밖 책: (0.382, 0.528, 0.396) @arm_base_link
+[INFO] [1790650004.484248654] [vision_manager]: ROI 밖 책: (0.581, 0.575, 0.393) @arm_base_link
+[INFO] [1790650004.484556185] [vision_manager]: ROI 밖 책: (0.497, 0.553, 0.392) @arm_base_link
+[INFO] [1790650004.484876856] [vision_manager]: ROI 밖 책: (0.484, 0.540, 0.393) @arm_base_link
+[INFO] [1790650004.485184137] [vision_manager]: ROI 밖 책: (0.051, 0.549, 0.394) @arm_base_link
+[INFO] [1790650004.485482505] [vision_manager]: ROI 밖 책: (0.484, 0.522, 0.393) @arm_base_link
+[INFO] [1790650004.485786190] [vision_manager]: ROI 밖 책: (0.611, 0.568, 0.411) @arm_base_link
+[INFO] [1790650004.486090352] [vision_manager]: ROI 밖 책: (0.428, 0.543, 0.393) @arm_base_link
+[INFO] [1790650004.486394138] [vision_manager]: ROI 밖 책: (0.460, 0.528, 0.393) @arm_base_link
+[INFO] [1790650004.486617307] [vision_manager]: ROI 밖 책 11권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650004.520942598] [vision_manager]: Empty center pixel=(182, 290), shelf_front_z=0.452m; Depth L/C/R=0.492/4.634/0.412m; center-left=4.142m, center-right=4.221m; contrast=PASS
+[INFO] [1790650004.525685920] [vision_manager]: Empty shelf target: xyz=(0.153, 0.547, 0.856)
+[INFO] [1790650008.616290175] [vision_manager]: ROI 밖 책: (-1.022, 0.179, -0.340) @arm_base_link
+[INFO] [1790650008.616758586] [vision_manager]: ROI 밖 책: (0.167, 0.484, 0.333) @arm_base_link
+[INFO] [1790650008.617107854] [vision_manager]: ROI 밖 책: (0.122, 0.479, 0.338) @arm_base_link
+[INFO] [1790650008.617432361] [vision_manager]: ROI 밖 책: (0.301, 0.478, 0.323) @arm_base_link
+[INFO] [1790650008.617747175] [vision_manager]: ROI 밖 책: (0.077, 0.477, 0.343) @arm_base_link
+[INFO] [1790650008.617972311] [vision_manager]: ROI 밖 책 5권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650008.656514692] [vision_manager]: Empty center pixel=(155, 331), shelf_front_z=0.839m; Depth L/C/R=0.932/1.073/0.747m; center-left=0.141m, center-right=0.326m; contrast=PASS
+[INFO] [1790650008.657269675] [vision_manager]: Empty shelf target: xyz=(-0.787, 0.519, 0.188)
+[INFO] [1790650010.671138804] [vision_manager]: ROI 밖 책: (0.367, 0.477, 0.328) @arm_base_link
+[INFO] [1790650010.671537856] [vision_manager]: ROI 밖 책: (0.168, 0.483, 0.343) @arm_base_link
+[INFO] [1790650010.671877670] [vision_manager]: ROI 밖 책: (0.326, 0.477, 0.330) @arm_base_link
+[INFO] [1790650010.672215120] [vision_manager]: ROI 밖 책: (0.277, 0.481, 0.316) @arm_base_link
+[INFO] [1790650010.672536727] [vision_manager]: ROI 밖 책: (0.304, 0.477, 0.322) @arm_base_link
+[INFO] [1790650010.672852404] [vision_manager]: ROI 밖 책: (-0.715, 0.091, -0.001) @arm_base_link
+[INFO] [1790650010.673168709] [vision_manager]: ROI 밖 책: (0.129, 0.483, 0.337) @arm_base_link
+[INFO] [1790650010.673484868] [vision_manager]: ROI 밖 책: (0.698, 0.262, -0.341) @arm_base_link
+[INFO] [1790650010.673791260] [vision_manager]: ROI 밖 책: (0.464, 0.475, 0.345) @arm_base_link
+[INFO] [1790650010.674020845] [vision_manager]: ROI 밖 책 9권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650010.744886828] [vision_manager]: Empty center pixel=(354, 279), shelf_front_z=0.704m; Depth L/C/R=0.707/1.999/0.700m; center-left=1.291m, center-right=1.298m; contrast=PASS
+[INFO] [1790650010.745659466] [vision_manager]: Empty shelf target: xyz=(-0.100, 0.491, 0.366)
+[INFO] [1790650012.367379682] [vision_manager]: ROI 밖 책: (0.368, 0.476, 0.334) @arm_base_link
+[INFO] [1790650012.367788614] [vision_manager]: ROI 밖 책: (0.333, 0.478, 0.332) @arm_base_link
+[INFO] [1790650012.368143329] [vision_manager]: ROI 밖 책: (0.281, 0.480, 0.325) @arm_base_link
+[INFO] [1790650012.368478330] [vision_manager]: ROI 밖 책: (0.171, 0.483, 0.348) @arm_base_link
+[INFO] [1790650012.368809286] [vision_manager]: ROI 밖 책: (0.928, 0.502, -0.309) @arm_base_link
+[INFO] [1790650012.369038609] [vision_manager]: ROI 밖 책 5권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650012.400698705] [vision_manager]: Empty center pixel=(286, 280), shelf_front_z=0.704m; Depth L/C/R=0.716/1.990/0.692m; center-left=1.275m, center-right=1.298m; contrast=PASS
+[INFO] [1790650012.401582515] [vision_manager]: Empty shelf target: xyz=(-0.077, 0.490, 0.364)
+[INFO] [1790650014.314604331] [vision_manager]: ROI 밖 책: (0.338, 0.479, 0.326) @arm_base_link
+[INFO] [1790650014.315002061] [vision_manager]: ROI 밖 책: (0.447, 0.472, 0.355) @arm_base_link
+[INFO] [1790650014.315339569] [vision_manager]: ROI 밖 책: (0.374, 0.475, 0.325) @arm_base_link
+[INFO] [1790650014.315665285] [vision_manager]: ROI 밖 책: (0.480, 0.478, 0.353) @arm_base_link
+[INFO] [1790650014.315987838] [vision_manager]: ROI 밖 책: (0.563, 0.038, -0.341) @arm_base_link
+[INFO] [1790650014.316213624] [vision_manager]: ROI 밖 책 5권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650014.354669636] [vision_manager]: Empty center pixel=(214, 280), shelf_front_z=0.718m; Depth L/C/R=0.744/1.973/0.692m; center-left=1.229m, center-right=1.280m; contrast=PASS
+[INFO] [1790650014.355418316] [vision_manager]: Empty shelf target: xyz=(-0.066, 0.502, 0.356)
+[INFO] [1790650016.524921689] [vision_manager]: ROI 밖 책: (0.485, 0.487, 0.360) @arm_base_link
+[INFO] [1790650016.525316305] [vision_manager]: ROI 밖 책: (0.557, 0.490, 0.366) @arm_base_link
+[INFO] [1790650016.525648876] [vision_manager]: ROI 밖 책: (0.590, 0.477, 0.343) @arm_base_link
+[INFO] [1790650016.525972601] [vision_manager]: ROI 밖 책: (0.453, 0.474, 0.345) @arm_base_link
+[INFO] [1790650016.526197257] [vision_manager]: ROI 밖 책 4권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650016.560347917] [vision_manager]: Empty center pixel=(139, 279), shelf_front_z=0.716m; Depth L/C/R=0.742/0.822/0.690m; center-left=0.080m, center-right=0.132m; contrast=PASS
+[INFO] [1790650016.561087544] [vision_manager]: Empty shelf target: xyz=(-0.060, 0.502, 0.359)
+[INFO] [1790650025.480838181] [vision_manager]: ROI 밖 책: (-0.104, -0.683, -0.341) @arm_base_link
+[INFO] [1790650025.481121250] [vision_manager]: ROI 밖 책 1권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650025.946794215] [vision_manager]: ROI 밖 책: (-0.120, -0.679, -0.341) @arm_base_link
+[INFO] [1790650025.947074518] [vision_manager]: ROI 밖 책 1권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650026.408059522] [vision_manager]: ROI 밖 책: (-0.111, -0.683, -0.341) @arm_base_link
+[INFO] [1790650026.408293177] [vision_manager]: ROI 밖 책 1권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650026.977887687] [vision_manager]: ROI 밖 책: (-0.114, -0.676, -0.341) @arm_base_link
+[INFO] [1790650026.978161606] [vision_manager]: ROI 밖 책 1권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650027.496417906] [vision_manager]: ROI 밖 책: (-0.136, -0.673, -0.341) @arm_base_link
+[INFO] [1790650027.497391294] [vision_manager]: ROI 밖 책 1권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650027.911251000] [vision_manager]: ROI 밖 책: (-0.120, -0.670, -0.341) @arm_base_link
+[INFO] [1790650027.911527383] [vision_manager]: ROI 밖 책 1권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650028.414042607] [vision_manager]: ROI 밖 책: (-0.126, -0.670, -0.341) @arm_base_link
+[INFO] [1790650028.414279417] [vision_manager]: ROI 밖 책 1권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650029.007848252] [vision_manager]: ROI 밖 책: (-0.151, -0.667, -0.341) @arm_base_link
+[INFO] [1790650029.008131732] [vision_manager]: ROI 밖 책 1권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650029.444243999] [vision_manager]: ROI 밖 책: (-0.148, -0.670, -0.341) @arm_base_link
+[INFO] [1790650029.444528569] [vision_manager]: ROI 밖 책 1권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650029.973963767] [vision_manager]: ROI 밖 책: (-0.114, -0.676, -0.341) @arm_base_link
+[INFO] [1790650029.974210146] [vision_manager]: ROI 밖 책 1권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650030.489461843] [vision_manager]: ROI 밖 책: (-0.117, -0.673, -0.341) @arm_base_link
+[INFO] [1790650030.489920249] [vision_manager]: ROI 밖 책 1권 제외 (남은 1권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650030.504730256] [vision_manager]: Book picked(best): xyz=(-0.368, -0.188, 0.160), center=(149, 308), conf=0.60, depth=patch, yaw=0.000 rad (후보 1권)
+[INFO] [1790650030.953451008] [vision_manager]: ROI 밖 책: (-0.123, -0.670, -0.341) @arm_base_link
+[INFO] [1790650030.954722597] [vision_manager]: ROI 밖 책 1권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650031.491515911] [vision_manager]: ROI 밖 책: (-0.117, -0.676, -0.341) @arm_base_link
+[INFO] [1790650031.491756820] [vision_manager]: ROI 밖 책 1권 제외 (남은 0권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650031.957640451] [vision_manager]: ROI 밖 책: (-0.123, -0.676, -0.341) @arm_base_link
+[INFO] [1790650031.958065007] [vision_manager]: ROI 밖 책 1권 제외 (남은 1권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650031.962541754] [vision_manager]: Book picked(best): xyz=(-0.356, 0.159, 0.213), center=(377, 315), conf=0.55, depth=patch, yaw=0.000 rad (후보 1권)
+[INFO] [1790650032.441779751] [vision_manager]: ROI 밖 책: (-0.123, -0.673, -0.341) @arm_base_link
+[INFO] [1790650032.442311898] [vision_manager]: ROI 밖 책 1권 제외 (남은 2권). ROI [-0.4, -0.2, 0.0] ~ [-0.26, 0.4, 0.32] @arm_base_link
+[INFO] [1790650032.447508983] [vision_manager]: Book picked(best): xyz=(-0.374, -0.191, 0.160), center=(147, 304), conf=0.60, depth=patch, yaw=0.000 rad (후보 2권)
