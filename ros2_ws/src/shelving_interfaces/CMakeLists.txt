@@ -19,7 +19,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "action/DetectGraspPoint.action"
   "action/PlaceBook.action"
   "action/LoadTray.action"
-  "action/LookAt.action"
   DEPENDENCIES builtin_interfaces geometry_msgs std_msgs action_msgs
 )
 

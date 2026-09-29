@@ -562,4 +562,3 @@ colcon build --symlink-install
 - 트레이 양 끝 책은 현재 Franka 작업영역 밖에 있을 수 있다.
 - 파지 후 책 추종은 Isaac Sim 안정화를 위한 시뮬레이션 전용 처리다.
 - Stop/Play만으로 전체 장면을 완전히 초기화하는 기능은 아직 최종 완료되지 않았다.
-- `scripts/setup_check.sh`에는 Carter/M0609 기준의 오래된 검사 항목이 남아 있으므로 Ridgeback-Franka용으로 수정하기 전에는 결과를 신뢰하지 않는다.
