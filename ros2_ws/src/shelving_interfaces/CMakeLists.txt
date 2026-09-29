@@ -14,6 +14,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/TargetSlot.msg"
   "msg/GraspObservation.msg"
   "msg/ScenarioState.msg"
+  "msg/SystemStatus.msg"
   "action/NavigateToTarget.action"
   "action/DetectTargetSlot.action"
   "action/DetectGraspPoint.action"

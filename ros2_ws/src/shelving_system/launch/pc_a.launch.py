@@ -76,8 +76,7 @@ def generate_launch_description():
                 {
                     "use_sim_time": use_sim_time,
                     "auto_publish": False,
-                    "publish_on_scenario_restart": True,
-                    "scenario_restart_publish_delay_sec": 2.0,
+                    "publish_on_scenario_restart": False,
 
                     "book_ids": [
                         "book_001",
@@ -88,6 +87,23 @@ def generate_launch_description():
                     "classification_codes": [
                         "005.7",
                     ],
+                }
+            ],
+        ),
+
+        # A/B 전체 준비 상태를 계산하고
+        # 관제 PC의 작업 시작 요청을 처리한다.
+        Node(
+            package="shelving_system",
+            executable="system_supervisor_node",
+            name="system_supervisor_node",
+            output="screen",
+            emulate_tty=True,
+            parameters=[
+                {
+                    # Isaac Stop 상태에서도 heartbeat와 timeout이
+                    # 계속 동작하도록 시스템 시간을 사용한다.
+                    "use_sim_time": False,
                 }
             ],
         ),

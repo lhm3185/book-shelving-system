@@ -106,10 +106,7 @@ def _launch_setup(context, *_args, **_kwargs):
                 {
                     "use_sim_time": use_sim_time,
                     "auto_publish": False,
-                    "publish_on_scenario_restart": True,
-                    # 1초간 reset 0속도를 유지하고 AMCL을 다시 맞춘 뒤
-                    # 새 작업을 발행한다.
-                    "scenario_restart_publish_delay_sec": 2.0,
+                    "publish_on_scenario_restart": False,
 
                     # 통합 시나리오에서는 동일한 shelf_01에
                     # 배치할 책 두 권을 발행한다.
@@ -194,6 +191,19 @@ def _launch_setup(context, *_args, **_kwargs):
                 output="screen",
                 emulate_tty=True,
                 parameters=[manipulation_config, {"use_sim_time": use_sim_time}],
+            ),
+            # full 단일-PC 실행에서도 동일한 관제 인터페이스를 제공한다.
+            Node(
+                package="shelving_system",
+                executable="system_supervisor_node",
+                name="system_supervisor_node",
+                output="screen",
+                emulate_tty=True,
+                parameters=[
+                    {
+                        "use_sim_time": False,
+                    }
+                ],
             ),
         ])
 

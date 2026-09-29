@@ -32,6 +32,7 @@ setup(
             ('return_machine_node = shelving_system.return_machine_node:main'),
             ('task_manager_node = shelving_system.task_manager_node:main'),
             ('simulation_bridge_node = shelving_system.simulation_bridge_node:main'),
+            ('system_supervisor_node = shelving_system.system_supervisor_node:main'),
             ('mock_manipulation_server = shelving_system.mock_manipulation_server:main')
         ],
     },
