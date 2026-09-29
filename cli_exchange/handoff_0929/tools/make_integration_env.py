@@ -10,7 +10,10 @@
   4. /World/env_Base/Cube_002 의 충돌체를 convexDecomposition → none 으로
      (통합 월드와 같은 값. 안 하면 로봇이 출발 자리에서 떨며 못 움직인다 — 2026-09-29 10.10.0.1 에서 확인)
 
-낸 파일은 env_base_collider.usd · textures/ 와 같은 폴더에 둔다. 2026-09-29 에 light1 레벨로 만든 것의 md5 는 40dae43e… 다.
+낸 파일은 env_base_collider.usd · textures/ 와 같은 폴더에 둔다.
+
+md5 는 저장 횟수에 따라 달라진다(usdc 는 같은 내용도 바이트가 다를 수 있다). 넘긴 파일(40dae43e…)과 같은지는
+usda 로 풀어 비교한다 — 2026-09-29 에 이 도구로 다시 만들어 내용이 같음을 확인했다.
 """
 import hashlib
 import shutil
