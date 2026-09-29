@@ -5,7 +5,7 @@ def slot(y):
 P=re.compile(r'\[(\d+\.\d+)\].*Book picked\(best\): xyz=\(([-\d.]+), ([-\d.]+), ([-\d.]+)\).*conf=([\d.]+).*후보 (\d+)권')
 D=re.compile(r'\[(\d+\.\d+)\].*책 좌표 정함 \(([-+\d.]+), ([-+\d.]+)')
 F=re.compile(r'\[(\d+\.\d+)\].*(411|책을 찾지 못|검출 실패|timeout)')
-for d in sorted(glob.glob('*/')):
+for d in sorted(x for x in glob.glob('*/') if os.path.exists(x+'manipulation.log') and os.path.exists(x+'vision.log')):
     v=open(d+'vision.log',errors='replace').read().splitlines()
     m=open(d+'manipulation.log',errors='replace').read().splitlines() if os.path.exists(d+'manipulation.log') else []
     picks=[(float(a),float(y),float(c),int(n)) for a,x,y,z,c,n in (g.groups() for g in map(P.search,v) if g)]

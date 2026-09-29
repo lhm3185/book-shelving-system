@@ -1,0 +1,6 @@
+[37;1m2026-09-29 13:05:59.714 [31;1m[[37;1mXMLProfileManager[31;1m Error] [37mCould not extract any profile[34;1m -> Function [36mextractProfiles[m
+[INFO] [1790654759.984773112] [nav_manager]: Navigation bridge ready: /navigate_to_target -> /navigation/sim/command; patrol=library_loop points=6
+[INFO] [1790654794.675199732] [nav_manager]: 서가 shelf_02: 경로 to_shelf_02 (4점) 로 patrol
+[INFO] [1790655037.372610727] [nav_manager]: 서가 shelf_02: 이미 앞에 서 있다 (-0.548, 1.225) — 주행 생략
+[INFO] [1790655195.646250440] [nav_manager]: 서가 shelf_01: 경로 to_shelf_01_from_shelf_02 (4점) 로 patrol
+[INFO] [1790655429.729004825] [nav_manager]: 서가 shelf_01: 이미 앞에 서 있다 (2.535, -3.019) — 주행 생략
