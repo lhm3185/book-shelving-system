@@ -14,11 +14,15 @@ ROS_WORKSPACE="$REPO_ROOT/ros2_ws"
 NETWORK_ENV="$REPO_ROOT/config/ros_network.env"
 PERCEPTION_SITE_PACKAGES="$REPO_ROOT/.venv/lib/python3.12/site-packages"
 DDS_PROFILE="${FASTRTPS_DEFAULT_PROFILES_FILE:-$HOME/.ros/fastdds_whitelist.xml}"
+RVIZ_CONFIG="/opt/ros/jazzy/share/nav2_bringup/rviz/nav2_default_view.rviz"
+RVIZ_LOG="/tmp/book-shelving-system-rviz-$(id -u).log"
 RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}/book-shelving-system-$(id -u)"
 LAUNCHER_STATE="$RUNTIME_DIR/pc_b_launcher.pid"
 ROS_LAUNCH_STATE="$RUNTIME_DIR/pc_b_ros.pgid"
+RVIZ_STATE="$RUNTIME_DIR/pc_b_rviz.pgid"
 
 ROS_LAUNCH_PID=""
+RVIZ_PID=""
 CLEANUP_STARTED=0
 
 
@@ -73,12 +77,14 @@ remove_process_state() {
 }
 
 
-wait_for_ros_launch() {
+wait_for_pc_b_processes() {
     local retry_count="$1"
     local index
 
     for ((index = 0; index < retry_count; index++)); do
-        if ! process_group_is_running "$ROS_LAUNCH_PID"; then
+        if ! process_group_is_running "$ROS_LAUNCH_PID" \
+            && ! process_group_is_running "$RVIZ_PID"
+        then
             return 0
         fi
 
@@ -102,21 +108,29 @@ cleanup() {
 
     printf '\nPC B 구성요소를 종료합니다.\n'
     signal_process_group INT "$ROS_LAUNCH_PID"
+    signal_process_group INT "$RVIZ_PID"
 
-    if ! wait_for_ros_launch 20; then
+    if ! wait_for_pc_b_processes 20; then
         signal_process_group TERM "$ROS_LAUNCH_PID"
+        signal_process_group TERM "$RVIZ_PID"
     fi
 
-    if ! wait_for_ros_launch 10; then
+    if ! wait_for_pc_b_processes 10; then
         signal_process_group KILL "$ROS_LAUNCH_PID"
-        wait_for_ros_launch 4 || true
+        signal_process_group KILL "$RVIZ_PID"
+        wait_for_pc_b_processes 4 || true
     fi
 
     if [[ -n "$ROS_LAUNCH_PID" ]]; then
         wait "$ROS_LAUNCH_PID" 2>/dev/null || true
     fi
 
+    if [[ -n "$RVIZ_PID" ]]; then
+        wait "$RVIZ_PID" 2>/dev/null || true
+    fi
+
     remove_process_state "$ROS_LAUNCH_STATE" "$ROS_LAUNCH_PID"
+    remove_process_state "$RVIZ_STATE" "$RVIZ_PID"
     remove_process_state "$LAUNCHER_STATE" "$$"
     rmdir "$RUNTIME_DIR" 2>/dev/null || true
 
@@ -144,6 +158,11 @@ if [[ ! -f "$DDS_PROFILE" ]]; then
     exit 1
 fi
 
+if [[ ! -f "$RVIZ_CONFIG" ]]; then
+    echo "Nav2 RViz 설정을 찾을 수 없습니다: $RVIZ_CONFIG" >&2
+    exit 1
+fi
+
 if [[ ! -d "$PERCEPTION_SITE_PACKAGES/ultralytics" ]]; then
     echo "PC B perception Python 환경이 없습니다." >&2
     echo "확인 경로: $PERCEPTION_SITE_PACKAGES" >&2
@@ -162,6 +181,18 @@ export PYTHONPATH="$PERCEPTION_SITE_PACKAGES${PYTHONPATH:+:$PYTHONPATH}"
 
 export FASTRTPS_DEFAULT_PROFILES_FILE="$DDS_PROFILE"
 unset ROS_STATIC_PEERS
+
+# SSH 등 원격 셸에서도 PC B의 그래픽 세션(:1)에 RViz를 표시한다.
+export DISPLAY=":1"
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+
+if [[ -r "$XDG_RUNTIME_DIR/gdm/Xauthority" ]]
+then
+    export XAUTHORITY="$XDG_RUNTIME_DIR/gdm/Xauthority"
+elif [[ -r "$HOME/.Xauthority" ]]
+then
+    export XAUTHORITY="$HOME/.Xauthority"
+fi
 
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
@@ -186,5 +217,24 @@ setsid ros2 launch \
     use_sim_time:=true &
 ROS_LAUNCH_PID=$!
 write_process_state "$ROS_LAUNCH_STATE" "$ROS_LAUNCH_PID"
+
+setsid rviz2 \
+    -d "$RVIZ_CONFIG" \
+    --ros-args \
+    -p use_sim_time:=true \
+    >"$RVIZ_LOG" 2>&1 &
+RVIZ_PID=$!
+
+# Qt/OpenGL/X11 초기화 실패를 잡되 기존 ROS 실행에는 영향을 주지 않는다.
+sleep 2
+if process_group_is_running "$RVIZ_PID"; then
+    write_process_state "$RVIZ_STATE" "$RVIZ_PID"
+    printf 'RViz를 DISPLAY=%s에 시작했습니다.\n' "$DISPLAY"
+else
+    wait "$RVIZ_PID" 2>/dev/null || true
+    RVIZ_PID=""
+    printf 'RViz 시작에 실패했습니다. 로그: %s\n' "$RVIZ_LOG" >&2
+    sed -n '1,120p' "$RVIZ_LOG" >&2 || true
+fi
 
 wait "$ROS_LAUNCH_PID"
