@@ -7,14 +7,13 @@
   <img src="https://img.shields.io/badge/Host_Python-3.12-3776AB?logo=python&logoColor=white" alt="Host Python 3.12">
 </p>
 
-<!-- 아래 GIF 파일을 저장소에 업로드한 후 실제 경로에 맞게 수정합니다. -->
 <p align="center">
   <img src="image/full_cycle.gif" width="49%" alt="트레이 인수부터 도서 배치와 복귀까지의 전체 사이클">
   <img src="image/book_placement.gif" width="49%" alt="서가 빈 공간 인식과 로봇팔 도서 삽입">
 </p>
 
 <p align="center">
-  <sub>전체 도서 배치 사이클 · 빈 공간 인식 및 도서 삽입</sub>
+  <sub>전체 도서 배치 사이클 · 2배속 / 빈 공간 인식 및 도서 삽입 · 1.5배속</sub>
 </p>
 
 무인반납기에서 반환된 책을 **AMR과 로봇팔이 서가까지 운반하고, RGB-D 비전으로 빈 공간을 찾아 배치하는 ROS 2 기반 자동화 시스템**입니다.
@@ -35,6 +34,14 @@ Isaac Sim의 도서관 환경에서 트레이 인수, 자율주행, 서가 스�
 - State Lattice 경로 계획과 MPPI 제어를 사용합니다.
 - 서가 접근 후 위치와 방향을 정밀하게 정렬하고, 선택한 삽입 위치에 맞춰 차체를 조정합니다.
 
+<p align="center">
+  <img src="image/navigation.gif" width="800" alt="Isaac Sim에서 서가로 이동하는 로봇과 Nav2 주행 화면">
+</p>
+
+<p align="center">
+  <sub>서가 이동 및 Nav2 주행 화면 · 1.5배속</sub>
+</p>
+
 ### RGB-D 기반 책·빈 공간 인식
 
 - 손목 RGB-D 카메라와 YOLO 모델로 트레이의 책과 서가 영역을 검출합니다.
@@ -52,6 +59,14 @@ Isaac Sim의 도서관 환경에서 트레이 인수, 자율주행, 서가 스�
 - 지도, 로봇 위치, 작업 단계와 구성요소별 준비 상태를 표시합니다.
 - 시뮬레이터, 주행, 비전과 조작 기능의 준비 여부를 확인합니다.
 - 시스템이 `READY`일 때 운영자의 작업 시작 요청을 수락합니다.
+
+<p align="center">
+  <img src="image/web_dashboard.gif" width="800" alt="웹 대시보드에서 갱신되는 로봇 위치와 작업 상태">
+</p>
+
+<p align="center">
+  <sub>로봇 위치 및 작업 상태 실시간 모니터링 · 원본 재생 속도</sub>
+</p>
 
 ## 시스템 구성
 
