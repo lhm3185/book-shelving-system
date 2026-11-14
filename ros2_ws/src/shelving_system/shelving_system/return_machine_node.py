@@ -6,9 +6,15 @@ from uuid import uuid4
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import (
+    DurabilityPolicy,
+    HistoryPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+)
 from std_srvs.srv import Trigger
 
-from shelving_interfaces.msg import TrayJob
+from shelving_interfaces.msg import ScenarioState, TrayJob
 
 
 def validate_tray_data(
@@ -119,6 +125,42 @@ class ReturnMachineNode(Node):
 
         self._auto_publish_timer = None
 
+        self.declare_parameter(
+            "scenario_state_topic",
+            "/scenario/state",
+        )
+        self.declare_parameter(
+            "publish_on_scenario_restart",
+            False,
+        )
+        self.declare_parameter(
+            "scenario_restart_publish_delay_sec",
+            1.0,
+        )
+
+        self._last_scenario_run_id = ""
+        self._restart_publish_timer = None
+
+        scenario_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+
+        self._scenario_state_subscription = (
+            self.create_subscription(
+                ScenarioState,
+                str(
+                    self.get_parameter(
+                        "scenario_state_topic"
+                    ).value
+                ),
+                self._handle_scenario_state,
+                scenario_qos,
+            )
+        )
+
         auto_publish = bool(
             self.get_parameter(
                 "auto_publish"
@@ -153,6 +195,80 @@ class ReturnMachineNode(Node):
             "A tray job can be requested through "
             f"'{publish_service}'."
         )
+
+    def _handle_scenario_state(
+        self,
+        message: ScenarioState,
+    ) -> None:
+        """새로운 시나리오 READY에서 작업을 한 번 발행한다."""
+        if message.state != ScenarioState.READY:
+            return
+
+        run_id = message.run_id.strip()
+
+        if not run_id:
+            return
+
+        if run_id == self._last_scenario_run_id:
+            return
+
+        is_initial_run = not self._last_scenario_run_id
+        self._last_scenario_run_id = run_id
+
+        # 최초 작업은 scripts/run.sh가 모든 Nav2/센서 준비를 확인한 뒤
+        # service로 발행한다.
+        if is_initial_run:
+            self.get_logger().info(
+                "Initial scenario READY recorded: "
+                f"run_id={run_id}"
+            )
+            return
+
+        if not bool(
+            self.get_parameter(
+                "publish_on_scenario_restart"
+            ).value
+        ):
+            return
+
+        if self._restart_publish_timer is not None:
+            self.destroy_timer(
+                self._restart_publish_timer
+            )
+            self._restart_publish_timer = None
+
+        delay = float(
+            self.get_parameter(
+                "scenario_restart_publish_delay_sec"
+            ).value
+        )
+
+        self.get_logger().info(
+            "New scenario READY detected. "
+            f"Scheduling a new tray job: run_id={run_id}, "
+            f"delay={delay:.1f}s"
+        )
+
+        self._restart_publish_timer = self.create_timer(
+            delay,
+            self._publish_after_scenario_restart,
+        )
+
+    def _publish_after_scenario_restart(self) -> None:
+        """시나리오 재시작 후 새 작업을 한 번만 발행한다."""
+        if self._restart_publish_timer is not None:
+            self.destroy_timer(
+                self._restart_publish_timer
+            )
+            self._restart_publish_timer = None
+
+        try:
+            self.publish_tray_job()
+        except ValueError as error:
+            self.get_logger().error(
+                "Scenario restart TrayJob failed: "
+                f"{error}"
+            )
 
     def _read_tray_parameters(
         self,

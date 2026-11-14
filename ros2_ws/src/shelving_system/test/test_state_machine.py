@@ -22,7 +22,6 @@ def move_to_next_book(state_machine):
         SystemState.RECEIVE_TRAY,
         SystemState.SELECT_BOOK,
         SystemState.NAV_TO_SHELF,
-        SystemState.DETECT_TARGET_SLOT,
         SystemState.PLACE_BOOK,
         SystemState.UPDATE_DATA,
         SystemState.NEXT_BOOK,
@@ -46,7 +45,6 @@ def test_normal_flow_to_completed(state_machine):
         SystemState.RECEIVE_TRAY,
         SystemState.SELECT_BOOK,
         SystemState.NAV_TO_SHELF,
-        SystemState.DETECT_TARGET_SLOT,
         SystemState.PLACE_BOOK,
         SystemState.UPDATE_DATA,
         SystemState.NEXT_BOOK,
@@ -58,6 +56,25 @@ def test_normal_flow_to_completed(state_machine):
     for next_state in transitions:
         state_machine.transition(next_state)
         assert state_machine.current_state == next_state
+
+def test_nav_to_shelf_transitions_directly_to_place_book(state_machine):
+    """서가 도착 후 상위 FSM은 바로 PLACE_BOOK으로 이동해야 한다."""
+    transitions = [
+        SystemState.IDLE,
+        SystemState.PLANNING,
+        SystemState.NAV_TO_RETURN,
+        SystemState.RECEIVE_TRAY,
+        SystemState.SELECT_BOOK,
+        SystemState.NAV_TO_SHELF,
+    ]
+
+    for next_state in transitions:
+        state_machine.transition(next_state)
+
+    assert state_machine.can_transition(SystemState.PLACE_BOOK)
+    state_machine.transition(SystemState.PLACE_BOOK)
+
+    assert state_machine.current_state == SystemState.PLACE_BOOK
 
 
 def test_next_book_can_continue_with_another_book(state_machine):

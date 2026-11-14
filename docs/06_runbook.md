@@ -1,165 +1,190 @@
 # 실행 및 운영 Runbook
 
-## 1. 현재 상태
+## 1. 실행 구성
 
-이 저장소의 다섯 패키지는 ROS2 Jazzy의 ros2 pkg create로 생성했고, package.xml, setup.py, setup.cfg, resource marker와 공통 메시지·액션 생성 설정을 갖춘다. colcon build로 다섯 패키지와 여섯 인터페이스가 정상 생성되는 것을 확인했다. 다만 담당 기능의 Python 알고리즘, launch 내용, YAML 값과 실행 스크립트는 아직 빈 구현 골격이므로 실제 로봇 동작은 각 담당자가 개발해야 한다.
+| 대상 | 역할 | 한 줄 실행 |
+| --- | --- | --- |
+| PC B | Nav2, AMCL, perception, manipulation, RViz | `./scripts/ros/run_pc_b.sh` |
+| PC A | Isaac Sim, Task Manager, bridge, supervisor | `./scripts/ros/run_pc_a.sh` |
+| PC C | 웹 대시보드 | `./scripts/ros/run_pc_c.sh` |
+| 한 PC 개발 | Isaac+ROS 통합 | `./scripts/run.sh full` |
 
-브랜치 생성, commit, pull, push, 충돌 해결과 담당자별 빌드 명령은 [08_git_and_terminal_guide.md](08_git_and_terminal_guide.md)를 따른다.
+PC A 스크립트가 PC B 준비를 기다리므로 PC B를 먼저 실행하는 것이 가장 명확하다.
 
-## 2. 실행 구성
+## 2. 공통 사전 조건
 
-| 실행 대상 | 패키지·기능 |
-| --- | --- |
-| PC A | Isaac Sim, shelving_system, Task Manager, YAML, 무인반납기 노드 |
-| PC B | shelving_perception, shelving_navigation, shelving_manipulation |
-| 통합 개발 PC | all.launch.py로 전체 노드 |
-| 모니터 PC | ROS2 토픽, action, TF와 로그 확인 |
+- Ubuntu 24.04, ROS 2 Jazzy, Isaac Sim 5.1
+- 세 PC에 동일한 repository commit과 빌드 결과
+- `config/ros_network.env`: `ROS_DOMAIN_ID=130`, `rmw_fastrtps_cpp`
+- PC A/B/C의 `$HOME/.ros/fastdds_whitelist.xml` 존재
+- PC B의 `.venv/lib/python3.12/site-packages/ultralytics` 존재
+- PC C의 `fastapi`, `uvicorn`, `yaml` Python 패키지 존재
+- 유선 ROS 네트워크에서 서로 도달 가능
 
-## 3. 실행 전 확인
+## 3. 빌드
 
-- PC A와 PC B가 같은 ROS2 배포판과 interfaces 버전을 사용한다.
-- 두 PC의 ROS_DOMAIN_ID와 DDS 설정이 같다.
-- PC A와 PC B가 네트워크에서 서로 도달 가능하다.
-- Isaac Sim stage와 ROS2 bridge가 정상 로드된다.
-- RGB-D 카메라 frame이 존재한다.
-- map→odom→base_link→arm_base_link와 camera_link TF가 연결된다.
-- YAML의 목표 서가와 waypoint가 존재한다.
-- AMR은 HOME, 로봇팔은 주행 안전 자세다.
+저장소 루트에서 실행한다.
 
-## 4. 전체 빌드
+```bash
+./scripts/ros/build.sh
+```
 
-~~~bash
+수동 빌드는 다음과 같다.
+
+```bash
 source /opt/ros/jazzy/setup.bash
 cd ros2_ws
 rosdep install --from-paths src --ignore-src -r -y
 colcon build --symlink-install
-source install/setup.bash
-~~~
+```
 
-하나의 workspace 안에 다섯 패키지가 있으므로 별도 workspace를 만들거나 담당자별로 따로 빌드할 필요가 없다. 특정 패키지만 확인할 때는 packages-select 옵션을 사용할 수 있지만 통합 전에는 전체 빌드를 수행한다.
+## 4. PC B 실행
+
+```bash
+cd /home/rokey/isaac_ws/book-shelving-system
+./scripts/ros/run_pc_b.sh
+```
+
+스크립트가 network env와 workspace를 source하고 `pc_b.launch.py`를 시작한다. 이어서 Nav2 기본 RViz를 PC B의 `DISPLAY=:1`에 띄우며 `/run/user/1000/gdm/Xauthority`를 사용한다.
+
+정상 메시지:
+
+```text
+PC B를 시작합니다. ROS_DOMAIN_ID=130
+RViz를 DISPLAY=:1에 시작했습니다.
+```
+
+RViz가 실패해도 ROS 노드는 계속 실행되며 원인은 다음 파일에 남는다.
+
+```text
+/tmp/book-shelving-system-rviz-1000.log
+```
+
+RViz에서 확인할 항목은 fixed frame `map`, `/map`, `/scan`, `/amcl_pose`, global/local costmap과 `/plan`이다.
 
 ## 5. PC A 실행
 
-~~~bash
-./scripts/run_pc_a.sh
-~~~
+```bash
+cd /home/rokey/isaac_ws/book-shelving-system
+./scripts/ros/run_pc_a.sh
+```
 
-또는 구현된 launch 파일을 직접 실행한다.
+스크립트는 다음 순서로 동작한다.
 
-~~~bash
-ros2 launch shelving_system pc_a.launch.py
-~~~
+1. GNOME 그래픽 세션을 찾고 Isaac Sim을 시작한다.
+2. `/clock`, `/odom`을 기다린다.
+3. PC B의 navigation/perception/manipulation 준비를 무기한 기다린다.
+4. `pc_a.launch.py`를 시작한다.
+5. `/system/status`가 READY가 될 때까지 기다린다.
+6. 자동으로 작업을 시작하지 않고 운영자 명령을 기다린다.
 
-다음 항목을 확인한다.
+## 6. PC C 실행
 
-- Isaac Sim과 ROS2 bridge
-- return_machine_node 준비
-- task_manager_node 준비
-- YAML 로드 성공
-- FSM이 INITIALIZING에서 IDLE로 전이
-- TrayJob 발행 가능
+```bash
+cd /home/rokey/isaac_ws/book-shelving-system
+./scripts/ros/run_pc_c.sh
+```
 
-## 6. PC B 실행
+브라우저 주소:
 
-~~~bash
-./scripts/run_pc_b.sh
-~~~
+- PC C 자체: `http://localhost:8080`
+- 프로젝트 유선망: `http://10.10.0.3:8080`
 
-또는 다음 launch 파일을 사용한다.
+대시보드에서 상태, phase, 준비 여부, 로봇 pose와 map을 확인하고 READY일 때 사이클을 시작한다.
 
-~~~bash
-ros2 launch shelving_system pc_b.launch.py
-~~~
+## 7. CLI로 작업 시작
 
-다음 항목을 확인한다.
+PC C 없이 시작하려면 ROS 환경이 설정된 터미널에서 다음 service만 호출한다.
 
-- perception node와 RGB-D 카메라 입력
-- navigation node와 Nav2 준비
-- manipulation node와 MoveIt·joint state
-- NavigateToTarget, DetectTargetSlot, PlaceBook action server
-- RobotStatus heartbeat
+```bash
+ros2 service call /system/start_cycle std_srvs/srv/Trigger '{}'
+```
 
-## 7. 한 컴퓨터 통합 실행
+Supervisor가 READY가 아니면 요청을 거부하고 빠진 component를 message로 알려준다. `/return_machine/publish_job`을 직접 호출하는 것은 supervisor 준비 게이트를 우회하므로 정상 운영에서는 사용하지 않는다.
 
-~~~bash
-./scripts/run_all.sh
-~~~
+## 8. 정상 시연 체크
 
-또는 다음을 사용한다.
+1. PC B 터미널과 RViz에서 Nav2, map, scan, costmap을 확인한다.
+2. PC A의 Isaac Sim에서 로봇, 반납기, 트레이, 책과 서가 초기 상태를 확인한다.
+3. `/system/status` 또는 웹 화면이 READY인지 확인한다.
+4. 작업을 한 번 시작한다.
+5. 반납기 이동과 실제 트레이 적재를 확인한다.
+6. `shelf_01` 이동과 정밀 정렬을 확인한다.
+7. 팔 스윕, 빈 슬롯 선택과 AMR 횡정렬을 확인한다.
+8. 트레이 책 재인식, 파지·삽입·해제·후퇴를 확인한다.
+9. 배치 검증 후 서가 후퇴와 HOME 복귀를 확인한다.
+10. FSM IDLE, SystemStatus READY 복귀와 job/run ID를 기록한다.
 
-~~~bash
-ros2 launch shelving_system all.launch.py
-~~~
+## 9. 상태 확인 명령
 
-이 방식은 통합 개발과 반복시험용이며, 실제 두 PC 시험에서는 pc_a와 pc_b launch를 나누어 실행한다.
+```bash
+ros2 topic echo /system/status --once
+ros2 topic echo /system/state --once
+ros2 topic echo /scenario/state --once
+ros2 action list
+ros2 topic hz /scan
+ros2 topic hz /rgb
+ros2 lifecycle get /bt_navigator
+ros2 run tf2_ros tf2_echo map base_link
+```
 
-## 8. 정상 시연 순서
+PC 간 discovery 확인:
 
-1. library_system.usd를 Isaac Sim에서 연다.
-2. AMR, 로봇팔, 카메라, 서가, 트레이와 책 초기 위치를 확인한다.
-3. PC A를 실행하고 FSM IDLE을 확인한다.
-4. PC B를 실행하고 세 기능의 READY를 확인한다.
-5. TF와 RGB-D 입력을 확인한다.
-6. 정상 시나리오의 TrayJob을 한 번 발행한다.
-7. CP1 트레이 확인을 관찰한다.
-8. AMR의 서가 관측 위치 이동과 CP2 정렬을 확인한다.
-9. CP3에서 선택한 빈 공간의 폭, pose와 confidence를 확인한다.
-10. CP4 파지·삽입·해제·후퇴를 확인한다.
-11. 성공 후 YAML 상태가 갱신되는지 확인한다.
-12. AMR HOME 복귀와 FSM IDLE을 확인한다.
-13. job_id 기준 로그와 시험 결과를 저장한다.
-
-## 9. 중지 조건
-
-- 필수 node 또는 heartbeat가 없으면 TrayJob을 시작하지 않는다.
-- 트레이와 작업 정보가 일치하지 않으면 서가로 이동하지 않는다.
-- 서가가 카메라 시야나 로봇팔 범위에 없으면 빈 공간 인식을 확정하지 않는다.
-- 빈 공간이 책보다 좁거나 confidence가 낮으면 삽입하지 않는다.
-- 좌표 변환이 실패하거나 TF가 오래되었으면 TargetSlot을 사용하지 않는다.
-- IK 또는 충돌 검사가 실패하면 로봇팔을 움직이지 않는다.
-- 배치 확인이 실패하면 점유 상태를 변경하지 않는다.
+```bash
+ros2 node list
+ros2 topic list -t
+ros2 action list -t
+```
 
 ## 10. 장애 대응
 
-### PC A와 PC B 통신 불가
+### PC A가 PC B를 계속 기다림
 
-ROS_DOMAIN_ID, DDS 설정, 네트워크 인터페이스와 방화벽을 확인한다. 양쪽의 shelving_interfaces 버전이 같은지 확인한다. 진행 중 작업이 있었다면 양쪽 job_id와 로봇의 물리 상태를 확인하기 전 자동 재개하지 않는다.
+PC B에서 `run_pc_b.sh`가 실행 중인지 확인한다. `/navigate_to_target`, `/place_book`, `/detect_grasp_point`, `/detect_target_slot`, `/scan`, `/amcl_pose`, `map→base_link` 중 빠진 항목을 확인한다. 양쪽 `config/ros_network.env`와 Fast DDS whitelist가 같아야 한다.
 
-### 서가 또는 빈 공간 미검출
+### RViz 창이 뜨지 않음
 
-RGB-D 입력, 노출, depth 유효 범위, 관측 거리와 카메라 각도를 확인한다. AMR 자세를 한 번 재정렬하고 재촬영한다. 계속 실패하면 삽입하지 않고 작업을 종료한다.
+```bash
+cat /tmp/book-shelving-system-rviz-1000.log
+echo "$DISPLAY"
+echo "$XAUTHORITY"
+xdpyinfo -display :1 >/dev/null && echo OK
+```
 
-### 잘못된 좌표
+PC B 스크립트는 `DISPLAY=:1`과 GDM Xauthority를 내부 설정하므로 추가 export는 필요 없다.
 
-camera_link와 arm_base_link transform, timestamp와 단위를 확인한다. RViz와 Isaac Sim에서 TargetSlot을 표시하여 실제 빈 공간과 일치하는지 확인한다. 좌표 검증 전에는 로봇팔 삽입을 수행하지 않는다.
+### SystemStatus가 WAITING_FOR_PC_B
 
-### AMR 이동 또는 정렬 실패
+status message의 missing 목록을 확인한다. scan은 3초 이내 최신이어야 하고 AMCL pose는 현재 scenario run에서 최소 한 번 받아야 한다.
 
-localization, map, 목표 frame과 장애물을 확인한다. 허용된 횟수만 재계획·재정렬하고 계속 실패하면 안전 정지한다.
+### 슬롯 또는 책 미검출
 
-### 파지 또는 삽입 실패
+`/rgb`, `/depth`, `/camera_info`, TF와 `/perception/debug_image`를 확인한다. 차체 정렬 전 프레임은 `not_before` 때문에 거부되는 것이 정상이다. ROI, YOLO 모델과 shelf plane 값을 확인한다.
 
-책을 잡고 있는지 먼저 확인한다. 책을 잡은 상태에서는 임의로 그리퍼를 열지 않는다. 삽입 중 문제가 생기면 전진을 멈추고 짧게 후퇴한 뒤 pose, 책 크기와 충돌 모델을 확인한다.
+### 주행·정렬 실패
 
-## 11. 로그와 증거
+RViz에서 localization, costmap, footprint와 계획 경로를 확인한다. navigation은 마지막 목표를 제한적으로 재시도하고 접근 반경 안에서는 정밀 정렬로 전환한다. `shelf_retreat` 목표가 0.75 m를 넘으면 안전상 거부된다.
 
-- 로그에 job_id, book_id, component, FSM state와 timestamp를 포함한다.
-- 통합시험 시 주요 토픽과 TF를 rosbag으로 저장한다.
-- CP2 위치·yaw 오차, CP3 공간 크기·confidence, CP4 파지 횟수와 삽입 결과를 기록한다.
-- 결과는 docs/05_test_plan_and_results.md에 남긴다.
-- 영상과 로그 이름에 날짜, scenario와 run 번호를 포함한다.
+### 조작 실패
 
-## 12. 종료 절차
+`PlaceBook`의 `failed_phase`, error code, message와 `/manipulation/sim/state`를 함께 확인한다. 책을 잡았을 가능성이 있으면 임의로 gripper를 열거나 scenario를 재개하지 말고 Isaac 상태를 먼저 확인한다.
 
-1. 새 TrayJob 접수를 중지한다.
-2. 진행 중 작업을 완료하거나 안전 취소 상태로 이동한다.
-3. 로봇팔을 주행 안전 자세로 이동한다.
-4. AMR을 HOME으로 복귀시킨다.
-5. PC B 노드를 종료한다.
-6. PC A의 Task Manager와 무인반납기 노드를 종료한다.
-7. Isaac Sim을 종료한다.
-8. YAML 상태와 로그 저장 여부를 확인한다.
+## 11. Reset과 종료
 
-## 13. 발표 당일
+Timeline Stop/Play는 scenario reset이며 자동 작업 재시작 명령이 아니다. reset 뒤 supervisor가 READY로 돌아온 것을 확인하고 새 사이클을 시작한다.
 
-검증된 commit과 설정을 발표 직전에 변경하지 않는다. 정상 시나리오, YAML, USD와 실행 순서를 고정한다. 마지막 성공 영상과 주요 로그를 백업으로 준비하되 라이브 시연 실패를 성공으로 표현하지 않고 안전정지와 원인을 설명한다.
+정상 종료는 각 실행 터미널에서 `Ctrl+C`를 사용한다. 전체 프로젝트 프로세스를 즉시 정리해야 하면 저장소 루트에서 다음을 실행한다.
+
+```bash
+./scripts/emergency_stop.sh
+```
+
+이 스크립트는 등록된 PC A/B ROS, Isaac, RViz와 웹 프로세스 그룹에 순차적으로 INT, TERM, KILL을 적용한다.
+
+## 12. 발표 당일
+
+- 세 PC에 같은 commit과 `ROS_DOMAIN_ID=130`을 배포한다.
+- 좌표, 모델, map과 Fast DDS 설정을 직전에 변경하지 않는다.
+- 먼저 PC B, 다음 PC A, 마지막 PC C를 실행한다.
+- READY와 RViz 화면을 확인한 뒤 사이클을 한 번만 시작한다.
+- 실패하면 성공으로 표현하지 말고 phase/error/message와 안전 정지 상태를 설명한다.

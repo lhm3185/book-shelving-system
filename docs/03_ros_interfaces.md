@@ -1,177 +1,121 @@
-# ROS2 인터페이스 명세
+# ROS 2 인터페이스 명세
 
-## 1. 목적
+## 1. 공통 규칙
 
-이 문서는 다섯 ROS2 패키지가 서로 주고받는 최소 인터페이스를 정의한다. 각 담당자는 다른 패키지의 내부 Python 파일을 직접 불러오지 않고 이 인터페이스만 사용한다.
+- 실제 정의의 기준은 `ros2_ws/src/shelving_interfaces`다.
+- 길이는 m, 각도는 rad를 사용한다.
+- pose 결과는 `std_msgs/Header`로 frame과 timestamp를 전달한다.
+- 장시간 동작은 action, 운영자 트리거는 service, 연속 상태는 topic을 사용한다.
+- Isaac 전용 JSON 토픽은 bridge 내부 계약이다.
 
-## 2. 공통 규칙
+## 2. 메시지
 
-- 모든 작업에 중복되지 않는 job_id를 사용한다.
-- 책 한 권마다 book_id를 사용한다.
-- 좌표는 frame_id와 timestamp를 포함한다.
-- 길이는 미터, 각도는 라디안을 사용한다.
-- 성공 여부와 함께 error_code와 사람이 읽을 수 있는 message를 제공한다.
-- 시간이 오래 걸리는 이동·인식·삽입은 ROS2 action으로 구현한다.
-- 액션 취소 시 즉시 모터 명령만 끊지 않고 정의된 안전 상태로 이동한 뒤 결과를 반환한다.
+### `TrayJob.msg`
 
-## 3. TrayJob.msg
+`job_id`, `tray_id`, `created_at`, `book_ids`, `rfid_tags`, `classification_codes`로 구성한다. 세 배열은 길이가 같고 책 ID는 중복되지 않아야 한다. 기본 topic은 `/return_machine/tray_job`이다.
 
-무인반납기에서 공급된 책 묶음을 표현한다.
+### `RobotStatus.msg`
 
-| 필드 개념 | 설명 |
-| --- | --- |
-| job_id | 전체 작업 ID |
-| tray_id | 트레이 ID |
-| book_ids | 책 ID 목록 |
-| rfid_tags | 가상 RFID 목록 |
-| classification_codes | 책별 분류코드 |
-| created_at | 작업 생성 시각 |
+`header`, `component`, `state`, `active_job_id`, `progress`, `error_code`, `message`, `heartbeat_time`으로 실행 상태를 나타낸다. Task Manager 상태는 `/system/state`, component 상태는 `/robot/status`를 사용한다.
 
-1차에서는 return_machine_node가 이 메시지를 발행하고 task_manager_node가 구독한다.
+### `TargetSlot.msg`
 
-## 4. RobotStatus.msg
+`header`, `pose`, `available_width`, `available_height`, `insertion_depth`, `pre_insert_offset`, `confidence`로 구성한다. 현재 최종 frame은 `arm_base_link`다.
 
-전체 시스템이 PC B의 현재 상태를 확인하기 위한 메시지다.
+### `GraspObservation.msg`
 
-| 필드 개념 | 설명 |
-| --- | --- |
-| component | perception, navigation 또는 manipulation |
-| state | IDLE, RUNNING, SUCCEEDED, FAILED |
-| active_job_id | 현재 작업 |
-| progress | 0.0~1.0 진행률 |
-| error_code | 오류 코드 |
-| message | 현재 상태 설명 |
-| heartbeat_time | 마지막 상태 갱신 |
+`header`, `top_center`, `spine_yaw`, `thickness`, `width`, `height`, `confidence`로 구성한다. `top_center`는 `arm_base_link` 기준 책 윗면 중심이다.
 
-## 5. TargetSlot.msg
+### `ScenarioState.msg`
 
-비전이 발견한 삽입 가능한 빈 공간의 결과다.
+상수 `UNKNOWN`, `STOPPED`, `RESETTING`, `READY`, `RUNNING`, `FAILED`와 `run_id`, `state`, `message`를 가진다. bridge가 `/simulation/scenario/state` JSON을 `/scenario/state`로 변환한다.
 
-| 필드 개념 | 설명 |
-| --- | --- |
-| frame_id | 좌표 기준, 최종 전달은 arm_base_link 권장 |
-| position | 빈 공간 중심 |
-| orientation | 책 삽입 방향 |
-| available_width | 사용 가능한 폭 |
-| available_height | 사용 가능한 높이 |
-| insertion_depth | 권장 삽입 깊이 |
-| pre_insert_offset | 사전 삽입 거리 |
-| confidence | 0.0~1.0 신뢰도 |
-| detection_time | 촬영·계산 시각 |
+### `SystemStatus.msg`
 
-## 6. NavigateToTarget.action
+상수 `BOOTING`, `WAITING_FOR_SIM`, `WAITING_FOR_PC_B`, `READY`, `RUNNING`, `STOPPING`, `STOPPED`, `RESETTING`, `ERROR`, `EMERGENCY_STOPPED`를 제공한다. run/phase/job/progress, PC·기능별 readiness, error와 heartbeat가 포함되며 `/system/status`로 발행된다.
 
-AMR 이동과 작업 위치 정렬에 사용한다.
+## 3. 액션
 
-### Goal
+### `NavigateToTarget.action` — `/navigate_to_target`
 
-- job_id
-- target_type: RETURN_STATION, SHELF, HOME
-- target_id
-- map 기준 목표 pose
-- position_tolerance
-- yaw_tolerance
+Goal은 `job_id`, `target_type`, `target_id`, `waypoints`, `target_pose`, `enable_fine_alignment`다. Feedback은 phase, waypoint index/count, 남은 거리, position/yaw error와 retry count다. Result는 성공 여부, 최종 pose, 허용오차 충족 여부, error와 message다.
 
-### Feedback
+경유점이 있으면 `NavigateThroughPoses`, 없으면 `NavigateToPose`를 쓴다. `target_type=shelf_retreat`은 Nav2를 우회하고 제한된 직접 `cmd_vel` 정렬을 수행한다.
 
-- 현재 이동 단계
-- 남은 거리
-- position error
-- yaw error
-- 재시도 횟수
+### `LoadTray.action` — `/load_tray`
 
-### Result
+Goal은 `job_id`, `tray_id`, feedback은 `phase`, `progress`, result는 `success`, `error_code`, `message`다. Bridge가 Isaac tray JSON 계약으로 변환한다.
 
-- 성공 여부
-- 최종 base pose
-- 허용오차 충족 여부
-- error_code와 message
+### `DetectGraspPoint.action` — `/detect_grasp_point`
 
-## 7. DetectTargetSlot.action
+Goal의 `not_before`보다 오래된 영상은 사용할 수 없다. Result는 성공 여부, `GraspObservation`, 후보 수, error와 message다.
 
-서가의 빈 공간을 탐지하고 로봇팔이 사용할 pose를 생성한다.
+### `DetectTargetSlot.action` — `/detect_target_slot`
 
-### Goal
+Goal에는 책의 width/height/thickness, Isaac 스윕의 `shelf_plane_y`, `shelf_floor_z`, 최신 영상 하한 `not_before`가 포함된다. Result는 성공 여부, `TargetSlot`, 후보 수, error와 message다.
 
-- job_id와 book_id
-- shelf_id
-- 대상 책 폭·높이·두께
-- 최소 안전 여유
-- 최대 재촬영 횟수
+### `PlaceBook.action` — `/place_book`
 
-### Feedback
+Goal에는 필드가 없다. Task Manager는 사이클 시작만 요청하며 manipulation이 perception을 호출해 책과 슬롯을 선택한다. Feedback은 `phase`, `progress`, result는 `success`, `failed_phase`, `placement_verified`, `error_code`, `message`다.
 
-- CAPTURING
-- DETECTING_SHELF
-- FINDING_EMPTY_SPACE
-- CALCULATING_POSE
-- TRANSFORMING_FRAME
-- 현재 후보 수와 최고 신뢰도
+```text
+SCANNING_SHELF → DETECTING_SLOT → ALIGNING_BASE → DETECTING_BOOK
+→ PLANNING_GRASP → APPROACHING_BOOK → GRASPING
+→ MOVING_TO_PRE_INSERT → INSERTING → RELEASING → RETREATING → VERIFYING
+```
 
-### Result
+## 4. 서비스
 
-- 성공 여부
-- TargetSlot
-- 검토한 후보 수
-- 실패 원인
-- error_code와 message
-
-## 8. PlaceBook.action
-
-트레이 책 인식, 파지와 빈 공간 삽입을 요청한다.
-
-### Goal
-
-- job_id와 book_id
-- TargetSlot
-- 책 크기 또는 book profile ID
-- 삽입 속도 제한
-
-### Feedback
-
-- DETECTING_BOOK
-- PLANNING_GRASP
-- APPROACHING_BOOK
-- GRASPING
-- MOVING_TO_PRE_INSERT
-- INSERTING
-- RELEASING
-- RETREATING
-- VERIFYING
-
-### Result
-
-- 성공 여부
-- 실패 단계
-- 최종 배치 확인 결과
-- error_code와 message
-
-## 9. 오류 코드 범위
-
-| 범위 | 기능 | 예 |
+| 서비스 | 형식 | 역할 |
 | --- | --- | --- |
-| C1xx | System/FSM | 잘못된 상태 전이, 중복 작업 |
-| P2xx | Perception | 서가 미검출, 빈 공간 없음, 낮은 신뢰도 |
-| N3xx | Navigation | 경로 실패, 정렬 오차 초과 |
-| M4xx | Manipulation | IK 실패, 파지 실패, 삽입 충돌 |
-| Y5xx | YAML/Data | 서가 정보 없음, 상태 저장 실패 |
-| S6xx | Simulation | 트레이 생성 또는 시나리오 초기화 실패 |
+| `/system/start_cycle` | `std_srvs/Trigger` | 전체 상태가 READY일 때만 새 사이클 수락 |
+| `/return_machine/publish_job` | `std_srvs/Trigger` | 설정된 한 개의 TrayJob 발행 |
 
-## 10. 패키지 의존 방향
+웹 대시보드는 start service만 호출하고 Supervisor가 내부적으로 return machine service를 호출한다.
 
-~~~text
-shelving_interfaces
-   ↑        ↑        ↑        ↑
-system  perception  navigation  manipulation
-~~~
+## 5. 주요 표준 ROS 인터페이스
 
-네 실행 패키지는 interfaces에만 의존한다. perception이 manipulation 내부 파일을 직접 호출하거나 system이 navigation Python 모듈을 import하지 않는다.
+| 이름 | 형식 | 사용처 |
+| --- | --- | --- |
+| `/rgb`, `/depth`, `/camera_info` | sensor_msgs | perception 입력 |
+| `/lidar/points_raw`, `/scan` | PointCloud2, LaserScan | Isaac LiDAR와 Nav2 입력 |
+| `/odom`, `/amcl_pose`, `/tf` | 표준 navigation | 위치 추정과 웹 위치 |
+| `/cmd_vel_nav`, `/cmd_vel` | Twist | Nav2 입력과 collision monitor 이후 출력 |
+| `/navigate_to_pose`, `/navigate_through_poses` | nav2_msgs action | navigation 내부 Nav2 호출 |
 
-## 11. 인터페이스 변경 절차
+## 6. Isaac 내부 JSON 토픽
 
-1. 변경이 필요한 이유와 사용 예시를 기록한다.
-2. 영향을 받는 담당자와 필드·단위·좌표계를 합의한다.
-3. shelving_interfaces를 먼저 수정한다.
-4. 각 담당자가 자신의 action client 또는 server를 갱신한다.
-5. PC A와 PC B 통신 시험 후 통합 브랜치에 반영한다.
+| 토픽 | 방향 | 역할 |
+| --- | --- | --- |
+| `/simulation/scenario/state` | Isaac → bridge | scenario state와 run_id |
+| `/simulation/tray/command` | bridge → Isaac | 트레이 LOAD/CANCEL |
+| `/simulation/tray/state` | Isaac → bridge | 트레이 phase와 결과 |
+| `/manipulation/sim/command` | manipulation → Isaac | scan/place/cancel |
+| `/manipulation/sim/state` | Isaac → manipulation | 스윕 관측과 조작 결과 |
 
+## 7. 오류 코드
+
+| 범위 | 실제 사용 |
+| --- | --- |
+| `1001` | 작업 계획 실패 |
+| `2001`~`2007` | navigation server/reject/failure/result/TF/fine alignment/busy |
+| `3001`~`3004` | tray bridge 오류. perception도 현재 `3002`~`3004`를 사용 |
+| `4001`~`4004` | Task Manager가 본 manipulation 연결·결과 오류 |
+| `401`~`412` | manipulation/Isaac의 IK, 경로, 속도, timeout, grasp, drop, insert, release, verify, invalid target, not ready, cancelled |
+
+코드 범위가 완전히 분리되어 있지 않으므로 번호만 보지 말고 action, component, phase, message를 같이 기록한다.
+
+## 8. QoS와 시간
+
+- `/scenario/state`와 `/system/status`는 reliable + transient local이다.
+- 카메라와 LaserScan은 sensor-data QoS를 사용한다.
+- 작업 노드는 주로 simulation time, Supervisor와 웹은 system time을 사용한다.
+- perception action의 `not_before`로 이동 전의 오래된 RGB-D 프레임 사용을 막는다.
+
+## 9. 변경 절차
+
+1. `.msg` 또는 `.action` 원본을 먼저 수정한다.
+2. producer, consumer, launch/config 영향을 함께 검토한다.
+3. 전체 build 후 양쪽 PC에 동일 commit을 배포한다.
+4. `ros2 interface show`, action 준비와 실제 한 사이클을 확인한다.
+5. 이 문서와 Runbook을 함께 갱신한다.

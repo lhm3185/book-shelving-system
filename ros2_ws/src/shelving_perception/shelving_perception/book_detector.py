@@ -65,11 +65,12 @@ class BookDetector:
             ):
                 continue
 
-            # 중심 픽셀의 깊이를 읽고 미터 단위로 변환합니다.
-            z = self._depth_in_meters(
-                self._center_depth(depth_image, u, v),
-                depth_scale,
-            )
+            # 파지할 면의 깊이를 구합니다. **중심 픽셀 하나만 읽으면 안 됩니다** —
+            # 그 픽셀이 책과 책 사이 틈에 떨어지면 뒤쪽 바닥 깊이를 읽어
+            # 좌표가 0.67 m 까지 튄 적이 있습니다 (2026-09-17 사고 #5).
+            raw_depth, depth_source = self._grasp_depth(
+                depth_image, mask, x1, y1, x2, y2, u, v)
+            z = self._depth_in_meters(raw_depth, depth_scale)
             # 깊이가 없거나 잘못된 값이면 3차원 좌표를 계산할 수 없습니다.
             if z is None:
                 continue
@@ -91,6 +92,8 @@ class BookDetector:
                 'confidence': confidence,
                 # 마스크의 주축으로 계산한 책의 영상상 회전각입니다.
                 'image_angle': self._mask_angle(mask),
+                # 깊이를 어디서 얻었는지 (mask / patch / center). 틀린 좌표를 추적할 때 쓴다
+                'depth_source': depth_source,
             })
 
         # 유효한 책 검출 결과를 vision_manager로 반환합니다.
@@ -118,6 +121,40 @@ class BookDetector:
         axis = eigenvectors[:, int(np.argmax(eigenvalues))]
         # 주축 벡터를 이용해 영상 좌표계 기준 회전각을 계산합니다.
         return float(np.arctan2(axis[0], axis[1]))
+
+    def _grasp_depth(self, depth_image, mask, x1, y1, x2, y2, u, v):
+        """**파지할 윗면**의 깊이를 강건하게 구합니다. (깊이, 출처) 를 돌려줍니다.
+
+        손목 카메라는 트레이를 내려다보므로, 책의 **윗면이 카메라에 가장 가깝습니다.**
+        그래서 우선순위는 이렇습니다.
+
+        1. **마스크 안 픽셀의 중앙값** — 책 영역만 보므로 배경이 안 섞인다 (가장 좋음)
+        2. 상자 **중앙 40% 패치**의 중앙값 — 마스크가 없을 때. 가장자리 배경을 피한다
+        3. 중심 픽셀 하나 — 위가 다 실패했을 때만
+
+        상자 **전체**의 중앙값은 쓰지 않습니다 — 세운 책의 상자에는 옆 책과 트레이 바닥이
+        많이 들어와 중앙값이 배경으로 끌려갑니다.
+        """
+        height, width = depth_image.shape[:2]
+        # 1) 마스크 안쪽
+        if mask is not None and mask.shape[:2] == depth_image.shape[:2]:
+            values = depth_image[mask]
+            valid = values[np.isfinite(values) & (values > 0)]
+            if valid.size >= 10:
+                return float(np.median(valid)), 'mask'
+        # 2) 상자 중앙 40% 패치
+        bw, bh = max(1, x2 - x1), max(1, y2 - y1)
+        px1 = max(0, min(width, int(x1 + bw * 0.3)))
+        px2 = max(0, min(width, int(x2 - bw * 0.3)))
+        py1 = max(0, min(height, int(y1 + bh * 0.3)))
+        py2 = max(0, min(height, int(y2 - bh * 0.3)))
+        if px2 > px1 and py2 > py1:
+            values = depth_image[py1:py2, px1:px2].reshape(-1)
+            valid = values[np.isfinite(values) & (values > 0)]
+            if valid.size >= 10:
+                return float(np.median(valid)), 'patch'
+        # 3) 중심 픽셀 (마지막 수단)
+        return self._center_depth(depth_image, u, v), 'center'
 
     def _sample_depth(self, depth_image, x1, y1, x2, y2):
         """검출 상자 내부의 유효 깊이값 중앙값을 반환합니다."""

@@ -1,125 +1,131 @@
 # 시험 계획 및 결과
 
-## 1. 목적
+## 1. 목적과 기록 원칙
 
-각 담당 기능의 독립 동작과 PC A·PC B 전체 정상 플로우를 확인한다. 예상 동작과 실제 결과를 구분하며, 실행하지 않은 시험은 NOT_RUN으로 기록한다.
+빌드·단위시험·3-PC 준비 상태·한 권 전체 사이클을 분리해서 검증한다. 실행하지 않은 시험은 `NOT_RUN`, 제한된 환경 때문에 판단할 수 없는 시험은 `BLOCKED`, 요구사항을 만족하면 `PASS`, 실제 결함이 확인되면 `FAIL`로 기록한다.
 
-## 2. 시험 단계
+## 2. 시험 계층
 
-| 단계 | 목적 | 통과 조건 |
+| 계층 | 대상 | 통과 기준 |
 | --- | --- | --- |
-| 패키지 빌드 | package와 dependency 확인 | colcon build 성공 |
-| 기능 시험 | 담당 알고리즘 확인 | 담당자가 정의한 핵심 입력·출력 성공 |
-| 인터페이스 시험 | action과 message 호환 | PC A/B mock 통신 성공 |
-| 1차 통합 | 정상 플로우 연결 | 책 1권 배치와 주차 복귀 |
-| 2차 통합 | 예외·DB·복구 | 대표 실패 처리와 이력 저장 |
-| 3차 통합 | 관제·재고 | 명령·상태·DB 일치 |
-| 최종 회귀 | 재현성 | 동일 초기 조건에서 5회 연속 성공 |
+| 정적 확인 | shell/Python/YAML/launch | 구문 오류와 누락 파일 없음 |
+| 단위시험 | planner, FSM, perception 변환, 조작 기하·경로 | pytest 핵심 assertion 통과 |
+| ROS 계약 | msg/action, action server, status | 동일 인터페이스로 goal/result 교환 |
+| 준비 상태 | supervisor | `SystemStatus.READY` |
+| 기능 통합 | tray, navigation, perception, manipulation | 각 action 성공과 안전 실패 처리 |
+| 전체 회귀 | 한 권 정상 사이클 | 적재→서가→배치→후퇴→HOME→READY |
 
-## 3. 담당별 기능 시험
+## 3. 담당별 핵심 시험
 
-### A 이현민
+### A 이현민 — 시스템
 
-- TrayJob 중복 확인
-- YAML에서 분류코드에 맞는 서가·waypoint 조회
-- FSM 정상 상태 전이
-- 허용되지 않은 상태 전이 거부
-- action timeout과 실패 처리
-- 배치 성공 후에만 YAML 상태 갱신
+- TrayJob 배열 길이, 빈 값, 중복 book ID 거부
+- 분류코드 `005.7`이 `shelf_01`로 계획되는지 확인
+- FSM 허용/금지 전이와 scenario reset 초기화
+- Supervisor가 scan, AMCL, TF, action이 빠졌을 때 start를 거부하는지 확인
+- `LoadTray` JSON bridge와 timeout/cancel 확인
+- 완료 기록이 메모리 범위임을 확인하고 YAML/DB 영속화로 오인하지 않기
 
-### B 윤재민
+### B 윤재민 — 비전
 
-- RGB-D 입력 수신
-- 서가 영역과 전면 탐지
-- 빈 공간 후보 탐지
-- 책 두께와 안전 여유 비교
-- TargetSlot의 중심·방향·깊이 계산
-- camera_link에서 arm_base_link 변환
-- 낮은 신뢰도와 빈 공간 없음 처리
-- 트레이 책 pose 탐지
+- RGB/depth/camera_info 동기화와 최신 프레임 조건
+- 트레이 ROI 안 책 후보와 `GraspObservation` frame/치수/confidence
+- shelf YOLO 후보, depth 차이와 광선-서가 평면 교차
+- `TargetSlot`의 `arm_base_link`, pose, 크기, 삽입 깊이
+- 후보 없음, 잘못된 depth, TF 실패와 cancel 결과
 
-### C 이동준
+### C 이동준 — AMR
 
-- HOME, RETURN_STATION, SHELF waypoint 이동
-- 목표 취소
-- 서가 관측 위치 정렬
-- position·yaw 허용오차 판정
-- 경로 실패와 재계획
-- localization 또는 heartbeat 상실 시 정지
+- `/lidar/points_raw`→`/scan`, map, AMCL, `map→base_link`
+- waypoint가 있으면 NavigateThroughPoses, 없으면 NavigateToPose 사용
+- 접근 반경에서 Nav2 취소 후 정밀 position/yaw 정렬
+- 최종 target 재시도와 action cancel
+- `shelf_retreat` 0.75 m 안전 제한 및 direct cmd_vel 동작
+- RViz의 map, scan, global/local costmap, `/plan` 표시
 
-### D 김도윤
+### D 김도윤 — 조작
 
-- 책 크기별 파지 pose
-- IK와 충돌 검사
-- 트레이 접근·파지
-- 사전 삽입 위치 이동
-- 저속 삽입·해제·후퇴
-- 파지 실패와 삽입 실패 안전 처리
+- 팔 스윕 관측점과 slot 후보 취합·선택
+- 선택 슬롯에 맞춘 navigation action 횡정렬
+- 책 관측을 트레이 교정 슬롯과 연결하고 유효성 검사
+- IK, 연속 경로, 속도와 충돌 전 검사
+- 파지·삽입·해제·후퇴 phase와 배치 검증
+- cancel, heartbeat timeout, 책 낙하·삽입 막힘의 안전 결과
 
-## 4. 1차 통합 시험
+## 4. 전체 정상 시나리오 시험
 
-| ID | 시험 | 담당 | 성공 기준 | 초기 상태 |
-| --- | --- | --- | --- | --- |
-| T1-01 | 시스템 준비 | 이현민 | 필수 노드 READY, FSM IDLE | NOT_RUN |
-| T1-02 | 작업 계획 | 이현민 | 올바른 서가와 waypoint 선택 | NOT_RUN |
-| T1-03 | CP1 트레이 인수 | 이현민·김도윤 | 트레이·책 목록 일치 | NOT_RUN |
-| T1-04 | CP2 서가 위치 정렬 | 이동준 | 카메라 시야·팔 작업 범위 확보 | NOT_RUN |
-| T1-05 | CP3 빈 공간 탐지 | 윤재민 | 책이 들어갈 유효 TargetSlot 생성 | NOT_RUN |
-| T1-06 | CP4 책 배치 | 김도윤 | 파지·삽입·해제·후퇴 성공 | NOT_RUN |
-| T1-07 | 상태 갱신·복귀 | 이현민·이동준 | YAML 갱신, HOME 복귀, FSM IDLE | NOT_RUN |
+| ID | 확인 내용 | 성공 기준 | 상태 |
+| --- | --- | --- | --- |
+| E2E-01 | PC B 기동 | Nav2/perception/manipulation/RViz 실행 | NOT_RUN |
+| E2E-02 | PC A 기동 | Isaac READY, AMCL 초기화, supervisor READY | NOT_RUN |
+| E2E-03 | PC C 관제 | 상태·map·pose 표시, start 버튼 활성 | NOT_RUN |
+| E2E-04 | 작업 시작 | start service 수락, 유일한 TrayJob 생성 | NOT_RUN |
+| E2E-05 | 반납기 이동 | 경유점·정밀 정렬 성공 | NOT_RUN |
+| E2E-06 | 트레이 인수 | 실제 tray runtime 적재 성공 | NOT_RUN |
+| E2E-07 | 서가 이동 | `shelf_01` 도착·정렬 성공 | NOT_RUN |
+| E2E-08 | 스윕·인식 | 유효 슬롯과 트레이 책 선택 | NOT_RUN |
+| E2E-09 | 배치 | `PlaceBook.success`와 `placement_verified` true | NOT_RUN |
+| E2E-10 | 복귀 | shelf retreat, HOME, FSM IDLE, system READY | NOT_RUN |
 
-## 5. 2차 예외 시험
+`NOT_RUN`은 문서 갱신 시 저장된 실기 결과표가 저장소에 없다는 뜻이다. 팀이 보유한 영상이나 로그가 있으면 commit/run_id/job_id와 함께 아래 표에 추가한다.
 
-- 빈 공간이 없음: 로봇팔을 동작하지 않고 실패를 기록한다.
-- 공간 폭이 부족함: 해당 후보를 제외한다.
-- 인식 신뢰도가 낮음: 한 번 재촬영하고 실패 정책으로 전이한다.
-- TF가 오래됨: TargetSlot을 폐기하고 다시 인식한다.
-- Nav2 경로 실패: 제한된 횟수만 재계획한다.
-- 서가 관측 위치 정렬 실패: perception과 manipulation을 호출하지 않는다.
-- 책 파지 실패: 후퇴 후 제한된 횟수만 재시도한다.
-- 삽입 충돌: 전진을 멈추고 안전하게 후퇴한다.
-- YAML 또는 DB 저장 실패: 같은 책을 자동으로 다시 꽂지 않는다.
-- PC A/B 통신 단절: 안전 상태로 전이하고 작업 ID를 대조한다.
+## 5. 대표 실패 시나리오
 
-## 6. 결과 기록 양식
+- PC B action 또는 최신 `/scan`이 없음: `/system/start_cycle` 거부
+- Timeline reset: 활성 goal 취소, 0 속도 유지, AMCL 초기 pose 재발행
+- unknown classification: 계획 단계 실패
+- LoadTray timeout/reject: 서가로 출발하지 않고 FSM 실패
+- Nav2 실패: 마지막 목표만 제한된 횟수 재시도 후 정지
+- 슬롯 후보 없음: 책 인식과 팔 배치 명령을 진행하지 않음
+- base 횡정렬 실패: stale slot으로 삽입하지 않음
+- 책 후보 없음/잘못된 frame: error 410/411 계열로 조작 중단
+- 삽입 막힘/배치 미검증: 성공 기록 없이 안전 동작 후 실패
+- cancel: 시뮬 실행기의 안전 정지 응답을 기다린 뒤 종료
 
-| 실행일 | Commit | 시나리오 | 실행 번호 | 결과 | 실패 단계 | 측정값 | 증거 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 미실행 | - | normal_flow | 1 | NOT_RUN | - | - | - |
-| 미실행 | - | normal_flow | 2 | NOT_RUN | - | - | - |
-| 미실행 | - | normal_flow | 3 | NOT_RUN | - | - | - |
-| 미실행 | - | normal_flow | 4 | NOT_RUN | - | - | - |
-| 미실행 | - | normal_flow | 5 | NOT_RUN | - | - | - |
+## 6. 자동시험 현황
 
-## 7. CP 측정 항목
+2026-09-30 문서 갱신 중 다음 명령을 실행했다.
 
-| 항목 | 기록 값 |
+```bash
+./scripts/tests/run.sh
+```
+
+| 구간 | 관찰 결과 | 판정 |
+| --- | --- | --- |
+| `isaac_sim/tests` | `test_arm.py`가 오래된 `isaac_sim/controllers` 경로를 추가하여 `arm_mock` import 실패 | FAIL |
+| manipulation pytest | 55 passed, 1 skipped | 부분 PASS |
+| manipulation lint | flake8 271건, pep257 8건 | FAIL |
+| manipulation ROS node 시험 | 제한된 작업 환경에서 `$HOME/.ros/log` 쓰기 불가로 10건 setup error | BLOCKED |
+| system/perception/navigation package | 현재 runner가 실행하지 않음 | NOT_RUN |
+
+위 결과는 라이브 PC A/B 전체 동작의 실패를 뜻하지 않는다. 다만 `scripts/tests/run.sh`가 “전부 통과”하는 상태는 아니므로 수정 전까지 자동시험 통과로 보고하면 안 된다.
+
+## 7. 반복 결과 기록표
+
+| 실행일 | Commit | run_id | job_id | 실행 번호 | 결과 | 실패 phase | 주요 측정값 | 증거 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| - | - | - | - | 1 | NOT_RUN | - | - | - |
+| - | - | - | - | 2 | NOT_RUN | - | - | - |
+| - | - | - | - | 3 | NOT_RUN | - | - | - |
+| - | - | - | - | 4 | NOT_RUN | - | - | - |
+| - | - | - | - | 5 | NOT_RUN | - | - | - |
+
+## 8. 필수 측정값
+
+| 구간 | 기록 값 |
 | --- | --- |
-| CP1 트레이 확인 시간 | 초 |
-| CP2 최종 position error | m |
-| CP2 최종 yaw error | rad 또는 deg를 명시 |
-| CP3 빈 공간 후보 수 | 개 |
-| CP3 선택 공간 폭·높이·깊이 | m |
-| CP3 confidence | 0.0~1.0 |
-| CP4 파지 시도 횟수 | 회 |
-| CP4 삽입 시간 | 초 |
-| 전체 작업 시간 | 초 |
-| 최종 성공 여부 | PASS/FAIL |
-
-## 8. 결함 우선순위
-
-- P0: 충돌, 안전 위반, 잘못된 공간 삽입, 데이터 손상
-- P1: 정상 플로우 완주 불가 또는 반복 재현 불가
-- P2: 복구 실패, 상태와 기록 불일치
-- P3: 로그·화면·문서 문제
-
-P0와 P1은 시연 전에 해결한다. 모든 결함에는 재현 절차, job_id, 관련 CP, 담당자, 수정 commit과 재시험 결과를 기록한다.
+| 준비 | READY까지 걸린 시간, 빠진 component |
+| navigation | 최종 position/yaw error, retry count |
+| perception | 관측점 수, 후보 수, confidence, 선택 slot pose |
+| base alignment | 정렬 전후 slot x 오차 |
+| manipulation | tray slot, phase별 시간, error code, placement_verified |
+| 전체 | 작업 시작부터 HOME·READY까지 시간 |
 
 ## 9. 최종 통과 기준
 
-- P0·P1 미해결 결함이 없다.
-- 정상 시나리오가 동일한 초기 조건에서 5회 연속 성공한다.
-- 빈 공간이 없거나 너무 좁으면 로봇팔이 삽입을 시도하지 않는다.
-- 실제 배치가 확인된 경우에만 점유 상태가 갱신된다.
-- 문서의 패키지명, action, 실행 명령과 실제 구현이 일치한다.
-
+- 미해결 안전 결함(P0)과 정상 플로우 차단 결함(P1)이 없다.
+- 같은 commit과 초기 조건에서 한 권 사이클이 5회 연속 성공한다.
+- 실패 입력에서는 다음 위험 단계로 진행하지 않는다.
+- RViz로 map, 위치, scan, costmap과 계획 경로를 확인할 수 있다.
+- 문서, action 정의, 실행 명령과 실제 코드가 일치한다.
+- 자동시험의 FAIL/BLOCKED 항목을 해결하거나 최종 보고서에 제한으로 명시한다.

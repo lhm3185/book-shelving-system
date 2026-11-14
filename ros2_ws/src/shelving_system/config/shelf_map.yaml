@@ -9,8 +9,8 @@ calibration_required: true
 locations:
   home:
     position:
-      x: 0.0
-      y: 0.0
+      x: -6.666722
+      y: -4.500000
       z: 0.0
     orientation:
       x: 0.0
@@ -18,16 +18,70 @@ locations:
       z: 0.0
       w: 1.0
 
+    waypoints:
+      # 작업 책장에서 먼저 아래쪽 통로로 빠진다.
+      - position:
+          x: 0.056159
+          y: -4.801575
+          z: 0.0
+        orientation:
+          x: 0.0
+          y: 0.0
+          z: -0.999989
+          w: 0.004587
+
+      - position:
+          x: -4.106222
+          y: -4.290406
+          z: 0.0
+        orientation:
+          x: 0.0
+          y: 0.0
+          z: 0.707107
+          w: 0.707107
+
   return_station:
     position:
-      x: 1.0
-      y: 0.0
+      # 반납기 앞에서 padded footprint와 0.16 m 이상 간격을 둔다.
+      x: 4.60
+      y: -5.45
       z: 0.0
     orientation:
       x: 0.0
       y: 0.0
-      z: 0.0
-      w: 1.0
+      z: 1.0
+      w: 0.0
+
+    waypoints:
+      - position:
+          x: -3.229932
+          y: -4.777234
+          z: 0.0
+        orientation:
+          x: 0.0
+          y: 0.0
+          z: -0.005525
+          w: 0.999985
+
+      - position:
+          x: 0.859426
+          y: -4.874600
+          z: 0.0
+        orientation:
+          x: 0.0
+          y: 0.0
+          z: -0.364433
+          w: 0.931229
+
+      - position:
+          x: 3.512640
+          y: -4.777234
+          z: 0.0
+        orientation:
+          x: 0.0
+          y: 0.0
+          z: -0.696264
+          w: 0.717786
 
 shelves:
   shelf_01:
@@ -42,14 +96,25 @@ shelves:
 
     observation_pose:
       position:
-        x: 3.0
-        y: 1.0
+        x: 2.229003667831421
+        y: -3.0101053714752197
         z: 0.0
       orientation:
         x: 0.0
         y: 0.0
         z: 0.0
         w: 1.0
+
+    waypoints:
+      - position:
+          x: 3.025811
+          y: -4.801575
+          z: 0.0
+        orientation:
+          x: 0.0
+          y: 0.0
+          z: 0.854493
+          w: 0.519463
 
   shelf_02:
     name: "분류 500~999 서가"
@@ -63,11 +128,11 @@ shelves:
 
     observation_pose:
       position:
-        x: 5.0
-        y: 1.0
+        x: 0.0
+        y: -3.2
         z: 0.0
       orientation:
         x: 0.0
         y: 0.0
-        z: 1.0
-        w: 0.0
+        z: 0.0
+        w: 1.0

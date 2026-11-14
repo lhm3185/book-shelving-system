@@ -8,11 +8,21 @@
   <license>Apache-2.0</license>
 
   <depend>rclpy</depend>
+  <depend>geometry_msgs</depend>
   <depend>shelving_interfaces</depend>
+  <depend>std_msgs</depend>
   <depend>std_srvs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>lifecycle_msgs</depend>
 
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>shelving_navigation</exec_depend>
+  <exec_depend>shelving_perception</exec_depend>
+  <exec_depend>shelving_manipulation</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

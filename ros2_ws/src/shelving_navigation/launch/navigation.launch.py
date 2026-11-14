@@ -1,72 +1,220 @@
-"""Launch the shelving navigation action server.
-
-This node bridges the shelving ``/navigate_to_target`` action used by the
-task manager to the Nav2 ``navigate_to_pose`` action server driving the
-Isaac Sim Nova Carter AMR.
-"""
+"""Launch Ridgeback-Franka Nav2 and the shelving navigation server."""
 
 import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
+    """Build the Ridgeback-Franka navigation launch description."""
     package_share = get_package_share_directory("shelving_navigation")
-    default_waypoints = os.path.join(
-        package_share, "config", "waypoints.yaml"
-    )
+    nav2_share = get_package_share_directory("nav2_bringup")
+    smac_share = get_package_share_directory("nav2_smac_planner")
 
-    action_name = LaunchConfiguration("action_name")
-    nav2_action_name = LaunchConfiguration("nav2_action_name")
-    waypoints_path = LaunchConfiguration("waypoints_path")
-    frame_id = LaunchConfiguration("frame_id")
-    nav2_server_timeout_sec = LaunchConfiguration(
-        "nav2_server_timeout_sec"
+    default_map = os.path.join(
+        package_share,
+        "maps",
+        "library_map.yaml",
     )
+    default_params = os.path.join(
+        package_share,
+        "config",
+        "nav2_ridgeback_franka.yaml",
+    )
+    default_lidar_params = os.path.join(
+        package_share,
+        "config",
+        "pointcloud_to_laserscan.yaml",
+    )
+    default_navigation_params = os.path.join(
+        package_share,
+        "config",
+        "navigation.yaml",
+    )
+    default_lattice_file = os.path.join(
+        smac_share,
+        "sample_primitives",
+        "5cm_resolution",
+        "0.5m_turning_radius",
+        "omni",
+        "output.json",
+    )
+    map_file = LaunchConfiguration("map")
+    params_file = LaunchConfiguration("params_file")
+    lidar_params_file = LaunchConfiguration("lidar_params_file")
+    navigation_params_file = LaunchConfiguration(
+        "navigation_params_file"
+    )
+    use_sim_time = LaunchConfiguration("use_sim_time")
+    pointcloud_topic = LaunchConfiguration("pointcloud_topic")
+    scan_topic = LaunchConfiguration("scan_topic")
+    lattice_file = LaunchConfiguration("lattice_file")
 
-    navigation_node = Node(
-        package="shelving_navigation",
-        executable="navigation_node",
-        name="navigation_node",
-        output="screen",
-        parameters=[{
-            "action_name": action_name,
-            "nav2_action_name": nav2_action_name,
-            "waypoints_path": waypoints_path,
-            "frame_id": frame_id,
-            "nav2_server_timeout_sec": nav2_server_timeout_sec,
-        }],
+    localization_launch = os.path.join(
+        nav2_share,
+        "launch",
+        "localization_launch.py",
     )
 
     return LaunchDescription([
         DeclareLaunchArgument(
-            "action_name",
-            default_value="/navigate_to_target",
-            description="Shelving navigation action server name.",
+            "map",
+            default_value=default_map,
+            description="Occupancy map YAML file.",
         ),
         DeclareLaunchArgument(
-            "nav2_action_name",
-            default_value="navigate_to_pose",
-            description="Nav2 action server name for navigation.",
+            "params_file",
+            default_value=default_params,
+            description="Ridgeback-Franka Nav2 parameter file.",
         ),
         DeclareLaunchArgument(
-            "waypoints_path",
-            default_value=default_waypoints,
-            description="Path to the fixed waypoint YAML file.",
+            "lidar_params_file",
+            default_value=default_lidar_params,
+            description="PointCloud2 to LaserScan parameter file.",
         ),
         DeclareLaunchArgument(
-            "frame_id",
-            default_value="map",
-            description="Frame of the navigation targets.",
+            "navigation_params_file",
+            default_value=default_navigation_params,
+            description="Shelving navigation node parameter file.",
         ),
         DeclareLaunchArgument(
-            "nav2_server_timeout_sec",
-            default_value="10.0",
-            description="Timeout for connecting to Nav2.",
+            "use_sim_time",
+            default_value="true",
+            description="Use Isaac Sim clock.",
         ),
-        navigation_node,
+        DeclareLaunchArgument(
+            "pointcloud_topic",
+            default_value="/lidar/points_raw",
+            description="Ridgeback LiDAR PointCloud2 topic from Isaac Sim.",
+        ),
+        DeclareLaunchArgument(
+            "scan_topic",
+            default_value="/scan",
+            description="Generated LaserScan topic.",
+        ),
+        DeclareLaunchArgument(
+            "lattice_file",
+            default_value=default_lattice_file,
+            description="Omnidirectional State Lattice primitive file.",
+        ),
+
+        Node(
+            package="pointcloud_to_laserscan",
+            executable="pointcloud_to_laserscan_node",
+            name="pointcloud_to_laserscan",
+            output="screen",
+            parameters=[
+                lidar_params_file,
+                {"use_sim_time": use_sim_time},
+            ],
+            remappings=[
+                ("cloud_in", pointcloud_topic),
+                ("scan", scan_topic),
+            ],
+        ),
+
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(localization_launch),
+            launch_arguments={
+                "map": map_file,
+                "params_file": params_file,
+                "use_sim_time": use_sim_time,
+                "autostart": "true",
+                "use_composition": "False",
+            }.items(),
+        ),
+
+        Node(
+            package="nav2_controller",
+            executable="controller_server",
+            name="controller_server",
+            output="screen",
+            parameters=[params_file, {"use_sim_time": use_sim_time}],
+            remappings=[("cmd_vel", "cmd_vel_nav")],
+        ),
+
+        Node(
+            package="nav2_planner",
+            executable="planner_server",
+            name="planner_server",
+            output="screen",
+            parameters=[
+                params_file,
+                {
+                    "use_sim_time": use_sim_time,
+                    "GridBased.lattice_filepath": lattice_file,
+                },
+            ],
+        ),
+
+        Node(
+            package="nav2_behaviors",
+            executable="behavior_server",
+            name="behavior_server",
+            output="screen",
+            parameters=[params_file, {"use_sim_time": use_sim_time}],
+            remappings=[("cmd_vel", "cmd_vel_nav")],
+        ),
+
+        Node(
+            package="nav2_bt_navigator",
+            executable="bt_navigator",
+            name="bt_navigator",
+            output="screen",
+            parameters=[params_file, {"use_sim_time": use_sim_time}],
+        ),
+
+        Node(
+            package="nav2_velocity_smoother",
+            executable="velocity_smoother",
+            name="velocity_smoother",
+            output="screen",
+            parameters=[params_file, {"use_sim_time": use_sim_time}],
+            remappings=[("cmd_vel", "cmd_vel_nav")],
+        ),
+
+        Node(
+            package="nav2_collision_monitor",
+            executable="collision_monitor",
+            name="collision_monitor",
+            output="screen",
+            parameters=[params_file, {"use_sim_time": use_sim_time}],
+        ),
+
+        Node(
+            package="nav2_lifecycle_manager",
+            executable="lifecycle_manager",
+            name="lifecycle_manager_navigation",
+            output="screen",
+            parameters=[{
+                "use_sim_time": use_sim_time,
+                "autostart": True,
+                "node_names": [
+                    "controller_server",
+                    "planner_server",
+                    "behavior_server",
+                    "velocity_smoother",
+                    "collision_monitor",
+                    "bt_navigator",
+                ],
+            }],
+        ),
+
+        Node(
+            package="shelving_navigation",
+            executable="navigation_node",
+            name="navigation_node",
+            output="screen",
+            parameters=[
+                navigation_params_file,
+                {
+                    "use_sim_time": use_sim_time,
+                },
+            ],
+        ),
     ])

@@ -13,7 +13,6 @@ class SystemState(Enum):
     RECEIVE_TRAY = auto()
     SELECT_BOOK = auto()
     NAV_TO_SHELF = auto()
-    DETECT_TARGET_SLOT = auto()
     PLACE_BOOK = auto()
     UPDATE_DATA = auto()
     NEXT_BOOK = auto()
@@ -73,15 +72,11 @@ class StateMachine:
         },
         SystemState.SELECT_BOOK: {
             SystemState.NAV_TO_SHELF,
+            SystemState.PLACE_BOOK,
             SystemState.FAILED,
             SystemState.WAIT_FOR_OPERATOR,
         },
         SystemState.NAV_TO_SHELF: {
-            SystemState.DETECT_TARGET_SLOT,
-            SystemState.FAILED,
-            SystemState.WAIT_FOR_OPERATOR,
-        },
-        SystemState.DETECT_TARGET_SLOT: {
             SystemState.PLACE_BOOK,
             SystemState.FAILED,
             SystemState.WAIT_FOR_OPERATOR,

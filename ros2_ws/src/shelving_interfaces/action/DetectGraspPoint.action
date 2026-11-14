@@ -1,0 +1,15 @@
+# Manipulation이 트레이 관측 자세에서 Vision에 요청한다.
+# Vision은 집을 수 있는 책 하나를 선택한다.
+# not_before 이전에 촬영된 영상은 사용하지 않는다.
+
+builtin_interfaces/Time not_before
+---
+bool success
+shelving_interfaces/GraspObservation grasp
+uint32 candidate_count
+int32 error_code
+string message
+---
+string phase
+uint32 candidate_count
+float32 best_confidence

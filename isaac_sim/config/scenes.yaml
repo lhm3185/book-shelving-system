@@ -1,0 +1,55 @@
+scenes:
+  library_map:
+    world_usd: assets/worlds/library/library_environment.usd
+    tray_usd: assets/props/tray/tray_set.usd
+    nav_map_yaml: ../ros2_ws/src/shelving_navigation/maps/library_map.yaml
+
+    robot:
+      usd: assets/robots/franka_nav.usda
+      prim_path: /World/ridgeback_franka
+
+      simulation_pose:
+        position: [-6.666722, -4.500000, 0.0]
+        yaw: 0.0
+
+    ros:
+      domain_id: 130
+      namespace: ""
+
+    runtime:
+      scenario_state_topic: /simulation/scenario/state
+
+      required_graphs:
+        - /Graphs/Nav2BaseController
+        - /Graphs/LidarSensorGraph
+
+    manipulation:
+      camera_prim_path: /World/ridgeback_franka/panda_hand/rsd455/RSD455/Camera_OmniVision_OV9782_Color
+      shelf_prim_path: /World/bookshelves_main/shelf_brown__book_shelf_11
+      shelf_row_z: 0.498
+      sweep_boards_world:
+        - 1.042
+        - 0.498
+      sweep_x_from: -0.35
+      sweep_x_to: 0.35
+      sweep_points: 5
+      command_topic: /manipulation/sim/command
+      state_topic: /manipulation/sim/state
+
+    tray:
+      group_prim_path: /World/tray_books
+      tray_prim_path: /World/tray_books/tray_04
+      carrier_prim_path: /World/ridgeback_franka/base_link
+
+      command_topic: /simulation/tray/command
+      state_topic: /simulation/tray/state
+
+      transfer_duration_sec: 3.0
+
+      # R&D 브랜치에서 검증한 로봇-트레이 상대 배치.
+      # base_link 기준이며 Z는 상판보다 4~5 mm 높다.
+      handoff_position_base: [-0.05271017990112359, -0.007185708618163922, 0.3381]
+
+      # 오차가 이 값보다 클 때만 적재물을 갱신한다.
+      follow_translation_threshold_m: 0.002
+      follow_rotation_threshold_rad: 0.002

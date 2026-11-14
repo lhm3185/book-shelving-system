@@ -2,17 +2,17 @@
 [EN]
 ROS 2 node that feeds Isaac Sim camera data to BookDetector.
 ROS 2 node that feeds Isaac Sim camera data to TargetDetector.
-[KR] 
+[KR]
 Isaac Sim 카메라 데이터를 BookDetector로 전달하는 ROS 2 노드.
 Isaac Sim 카메라 데이터를 TargetDetector로 전달하는 ROS 2 노드.
 '''
 
 # ROS 2 Python 클라이언트 라이브러리입니다.
+from pathlib import Path
+
 import rclpy
 # 종료 시 OpenCV 창을 정리하기 위해 가져옵니다.
 import cv2
-# 설치된 ROS 패키지 share 경로를 조합할 때 사용합니다.
-import os
 # roll/pitch/yaw를 사원수로 바꿀 때 사용할 삼각함수 모듈입니다.
 import math
 # RGB·Depth·CameraInfo를 시간 기준으로 묶어주는 ROS 메시지 필터입니다.
@@ -30,23 +30,28 @@ from ultralytics import YOLO
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 # action 실행 콜백과 센서 콜백을 함께 처리할 수 있는 콜백 그룹입니다.
 from rclpy.callback_groups import ReentrantCallbackGroup
-from rclpy.clock import ClockType
 # task_manager_node와 주고받는 검출 action 인터페이스입니다.
-from shelving_interfaces.action import DetectTargetSlot
+from shelving_interfaces.action import DetectGraspPoint, DetectTargetSlot
 # 향후 선반 슬롯 메시지에 사용할 타입입니다.
-from shelving_interfaces.msg import TargetSlot
+from shelving_interfaces.msg import GraspObservation
 # ROS 2 노드의 기본 클래스입니다.
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
-from ament_index_python.packages import get_package_share_directory
+from rclpy.qos import (
+    DurabilityPolicy,
+    HistoryPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+)
+from ament_index_python.packages import (
+    PackageNotFoundError,
+    get_package_share_directory,
+)
 # RGB/Depth 영상과 카메라 내부 파라미터 메시지입니다.
 from sensor_msgs.msg import Image, CameraInfo
 # 책 위치와 책 pose를 발행할 메시지입니다.
 from geometry_msgs.msg import PointStamped, PoseStamped
-# 수동 검출 요청 토픽의 Boolean 메시지입니다.
-from std_msgs.msg import Bool
-# ROS Image 메시지를 OpenCV 영상으로 바꾸는 브리지입니다.
-from cv_bridge import CvBridge, CvBridgeError
+# **cv_bridge 를 쓰지 않습니다.** 이 파일 위쪽의 _imgmsg_to_* / _bgr8_to_imgmsg 로 대신합니다.
+# cv_bridge 의 컴파일된 부분이 NumPy 1.x 로 빌드돼 있어 NumPy 2.x PC 에서 죽습니다.
 # 카메라 좌표를 로봇 좌표로 변환하는 함수입니다.
 from tf2_geometry_msgs import (
     do_transform_point,
@@ -61,6 +66,72 @@ from .book_detector import BookDetector
 from .target_detector import TargetDetector
 
 
+# sensor_msgs/Image 의 encoding → (numpy 자료형, 채널 수).
+# cv_bridge 가 하던 일이지만, 여기 것은 순수 파이썬이라 OpenCV·NumPy 판과 무관합니다.
+_ENCODINGS = {
+    'rgb8': (np.uint8, 3), 'bgr8': (np.uint8, 3),
+    'rgba8': (np.uint8, 4), 'bgra8': (np.uint8, 4),
+    'mono8': (np.uint8, 1), '8UC1': (np.uint8, 1), '8UC3': (np.uint8, 3),
+    'mono16': (np.uint16, 1), '16UC1': (np.uint16, 1),
+    '32FC1': (np.float32, 1), '64FC1': (np.float64, 1),
+}
+
+
+def _imgmsg_to_array(msg):
+    """sensor_msgs/Image → numpy 배열. **cv_bridge 를 거치지 않습니다**.
+
+    `.1` 의 cv_bridge 는 컴파일된 `cvtColor2` 가 NumPy 1.x 로 빌드돼 있어,
+    NumPy 2.x 환경에서 imgmsg_to_cv2 를 부르면 **세그폴트로 죽습니다**
+    (2026-09-21 10.10.0.1, numpy 2.5.3). 바이트를 직접 해석하면 그 의존이 사라집니다.
+    """
+    entry = _ENCODINGS.get(msg.encoding)
+    if entry is None:
+        raise ValueError(f'모르는 encoding: {msg.encoding}')
+    dtype, channels = entry
+    dtype = np.dtype(dtype).newbyteorder('>' if msg.is_bigendian else '<')
+    array = np.frombuffer(bytearray(msg.data), dtype=dtype)
+    # step 은 한 줄의 바이트 수입니다. 줄 끝 padding 이 있을 수 있으므로 step 으로 자릅니다
+    array = array.reshape(msg.height, msg.step // dtype.itemsize)
+    array = array[:, :msg.width * channels]
+    return array.reshape(msg.height, msg.width) if channels == 1 \
+        else array.reshape(msg.height, msg.width, channels)
+
+
+def _imgmsg_to_bgr(msg):
+    """sensor_msgs/Image → BGR 3채널 uint8. 색 변환은 cv2 로 합니다."""
+    array = _imgmsg_to_array(msg)
+    if msg.encoding == 'rgb8':
+        return cv2.cvtColor(array, cv2.COLOR_RGB2BGR)
+    if msg.encoding == 'rgba8':
+        return cv2.cvtColor(array, cv2.COLOR_RGBA2BGR)
+    if msg.encoding == 'bgra8':
+        return cv2.cvtColor(array, cv2.COLOR_BGRA2BGR)
+    if msg.encoding in ('mono8', '8UC1'):
+        return cv2.cvtColor(array, cv2.COLOR_GRAY2BGR)
+    if msg.encoding in ('bgr8', '8UC3'):
+        return array
+    raise ValueError(f'BGR 로 바꿀 수 없는 encoding: {msg.encoding}')
+
+
+def _bgr8_to_imgmsg(image):
+    """BGR numpy 배열 → sensor_msgs/Image. **cv_bridge 를 거치지 않습니다.**
+
+    cv_bridge.cv2_to_imgmsg 는 OpenCV 5 에서 KeyError 로 죽습니다. OpenCV 5 가
+    CV_CN_SHIFT 를 3 에서 5 로 바꿔, cv_bridge 가 만든 타입 표(CV_8UC3 = 64)와
+    자체 계산값(16)이 어긋나기 때문입니다. bgr8 은 메모리 배치가 그대로이므로
+    직접 채우면 OpenCV 판 번호와 무관하게 동작합니다.
+    """
+    image = np.ascontiguousarray(image, dtype=np.uint8)
+    height, width = image.shape[:2]
+    msg = Image()
+    msg.height = int(height)
+    msg.width = int(width)
+    msg.encoding = 'bgr8'
+    msg.is_bigendian = 0
+    msg.step = int(width * 3)
+    msg.data = image.tobytes()
+    return msg
+
 
 class VisionManager(Node):
     """카메라 영상을 받아 책을 검출하고 ROS 결과로 변환하는 노드입니다."""
@@ -69,8 +140,6 @@ class VisionManager(Node):
         # 노드 이름을 vision_manager로 등록합니다.
         super().__init__('vision_manager')
 
-        # ROS Image와 OpenCV 이미지 사이의 변환 도구를 생성합니다.
-        self.bridge = CvBridge()
         # RGB 영상이 들어오는 토픽 이름을 파라미터에서 읽습니다.
         self.rgb_topic = self.declare_parameter(
             'rgb_topic', '/rgb').value
@@ -80,21 +149,16 @@ class VisionManager(Node):
         # 카메라 내부 파라미터가 들어오는 토픽 이름을 읽습니다.
         self.camera_info_topic = self.declare_parameter(
             'camera_info_topic', '/camera_info').value
-        # 수동 검출 요청을 받을 Boolean 토픽 이름을 읽습니다.
-        self.trigger_topic = self.declare_parameter(
-            'trigger_topic', '/perception/detect_request').value
-        # task_manager와 통신할 action 이름을 읽습니다.
-        self.perception_action = self.declare_parameter(
-            'perception_action', '/detect_target_slot').value
-        # True이면 요청을 받은 뒤에만 한 프레임을 처리합니다.
-        self.wait_for_trigger = bool(self.declare_parameter(
-            'wait_for_trigger', True).value)
+        # Manipulation이 요청할 책 검출 및 빈 슬롯 검출 action 이름을 읽습니다.
+        self.grasp_action = self.declare_parameter("grasp_action", "/detect_grasp_point").value
+        self.slot_action = self.declare_parameter("slot_action", "/detect_target_slot").value
+        self.action_timeout_s = float(self.declare_parameter("action_timeout_s", 15.0).value)
         # RGB·Depth·CameraInfo가 촬영된 카메라 frame 이름입니다.
         self.camera_frame = self.declare_parameter(
-            'camera_frame', 'RSD455').value
+            'camera_frame', 'sim_camera').value
         # 검출 좌표를 변환할 최종 로봇 frame 이름입니다.
         self.target_frame = self.declare_parameter(
-            'target_frame', 'base_link').value
+            'target_frame', 'arm_base_link').value
         # RGB와 Depth가 서로 정렬되어 있는지 나타내는 설정입니다.
         self.depth_registered = bool(self.declare_parameter(
             'depth_registered', True).value)
@@ -102,7 +166,7 @@ class VisionManager(Node):
         self.depth_scale = float(self.declare_parameter(
             'depth_scale', 0.0).value)
         # 세 센서 메시지를 같은 프레임으로 인정할 최대 시간 차이입니다.
-        self.sync_slop = float(self.declare_parameter('sync_slop', 0.5).value)
+        self.sync_slop = float(self.declare_parameter('sync_slop', 0.1).value)
         # 책의 3차원 점을 발행할 토픽입니다.
         self.book_topic = self.declare_parameter(
             'book_topic', '/perception/books').value
@@ -115,52 +179,35 @@ class VisionManager(Node):
         # 책장 빈 단의 3D 점을 발행할 토픽입니다.
         self.empty_slot_topic = self.declare_parameter(
             'empty_slot_topic', '/perception/empty_shelf_position').value
-        # True이면 vision_manager가 실행 중인 PC에 OpenCV 검출 창을 표시합니다.
-        # OpenCV 5의 Qt 백엔드 호환성 문제로 기본값은 창을 표시하지 않습니다.
-        self.show_debug_window = bool(self.declare_parameter(
-            'show_debug_window', False).value)
+        # 패키지 resource 폴더에 포함된 YOLO weight의 기본 경로입니다.
+        try:
+            resource_dir = (
+                Path(get_package_share_directory('shelving_perception'))
+                / 'resource'
+            )
+        except PackageNotFoundError:
+            resource_dir = Path(__file__).resolve().parent.parent / 'resource'
+        default_model_path = str(resource_dir / 'book_tray_best.pt')
+        default_shelf_model_path = str(resource_dir / 'best.pt')
+        # 책 검출 모델의 경로입니다.
+        self.model_path = self.declare_parameter(
+            'model_path', default_model_path).value
         # 책장 segmentation 모델의 경로입니다.
-        package_share = get_package_share_directory('shelving_perception')
-        resource_dir = os.path.join(package_share, 'resource')
         self.shelf_model_path = self.declare_parameter(
-            'shelf_model_path',
-            os.path.join(resource_dir, 'best.pt'),
-        ).value
+            'shelf_model_path', default_shelf_model_path).value
         # 책장 검출을 인정할 최소 confidence입니다.
         self.shelf_confidence_threshold = float(self.declare_parameter(
             'shelf_confidence_threshold', 0.50).value)
-        # 현재 학습된 책장은 5단이므로 기본값을 5로 둡니다.
-        self.shelf_row_count = int(self.declare_parameter(
-            'shelf_row_count', 5).value)
-        # 책 표면과 빈 칸의 배경 깊이를 구분할 최소 차이(m)입니다.
-        self.shelf_depth_margin = float(self.declare_parameter(
-            'shelf_depth_margin', 0.05).value)
-        # 삽입 후보를 화면에 투영해 깊이를 읽을 때 사용할 로봇 기준 frame입니다.
+        # 책 ROI를 카메라에 투영할 때 사용하는 로봇 기준 frame입니다.
         self.slot_position_frame = self.declare_parameter(
-            'slot_position_frame', 'base_link').value
-        # x,y,z가 반복되는 평탄화된 삽입 후보 좌표 목록입니다.
-        self.slot_positions = list(self.declare_parameter(
-            'slot_positions', [
-                -0.3497, 0.5495, 0.3399,
-                -0.4297, 0.5495, 0.3399,
-                -0.5097, 0.5495, 0.3399,
-                -0.2697, 0.5495, 0.3399,
-            ]).value)
-        # 후보 중심 주변에서 깊이를 샘플링할 픽셀 반경입니다.
-        self.slot_sample_radius_px = int(self.declare_parameter(
-            'slot_sample_radius_px', 10).value)
-        # 예상 삽입점보다 먼 값이 빈 칸임을 나타내는 거리 기준입니다.
-        self.slot_empty_depth_margin = float(self.declare_parameter(
-            'slot_empty_depth_margin', 0.04).value)
-        # 예상 삽입점보다 가까운 값이 점유를 나타내는 거리 기준입니다.
-        self.slot_occupied_depth_margin = float(self.declare_parameter(
-            'slot_occupied_depth_margin', 0.03).value)
-        # 샘플 중 먼 깊이값이 차지해야 하는 최소 비율입니다.
-        self.slot_min_far_ratio = float(self.declare_parameter(
-            'slot_min_far_ratio', 0.50).value)
-        # 샘플 중 가까운 물체 깊이가 허용되는 최대 비율입니다.
-        self.slot_max_near_ratio = float(self.declare_parameter(
-            'slot_max_near_ratio', 0.25).value)
+            'slot_position_frame', 'arm_base_link').value
+        # 책장 안의 연속된 빈 영역을 찾을 때 사용하는 깊이 샘플 설정입니다.
+        self.target_sample_radius_px = int(self.declare_parameter(
+            'target_sample_radius_px', 5).value)
+        self.target_side_offset_px = int(self.declare_parameter(
+            'target_side_offset_px', 25).value)
+        self.target_min_depth_difference = float(self.declare_parameter(
+            'target_min_depth_difference', 0.05).value)
         # 결과 pose에 적용할 gripper roll 보정값입니다.
         self.gripper_roll = float(self.declare_parameter(
             'gripper_roll', 0.0).value)
@@ -173,9 +220,26 @@ class VisionManager(Node):
         # action 결과 TargetSlot에 넣을 삽입 깊이입니다.
         self.insertion_depth = float(self.declare_parameter(
             'insertion_depth', 0.25).value)
+        # 검출된 선반 앞면에서 책 중심이 들어갈 만큼 안쪽으로 보정합니다.
+        self.slot_center_inset = float(self.declare_parameter(
+            'slot_center_inset', 0.024).value)
+        # 서가 바닥에서 책 AABB 중심을 이만큼 띄운다.
+        # book_scene.plan_job의 grip_z 계약과 같은 4 mm이다.
+        self.slot_floor_clearance = float(self.declare_parameter(
+            'slot_floor_clearance', 0.004).value)
         # 삽입 전 대기 위치의 오프셋입니다.
         self.pre_insert_offset = float(self.declare_parameter(
             'pre_insert_offset', 0.05).value)
+
+        # 현재 시뮬레이션에서 사용하는 표준 책의 실제 치수입니다.
+        # 책 종류가 다양해지면 검출 결과 또는 별도 프로파일로 교체합니다.
+        self.default_book_thickness = float(self.declare_parameter(
+            'default_book_thickness', 0.0353).value)
+        self.default_book_height = float(self.declare_parameter(
+            'default_book_height', 0.2374).value)
+        self.default_book_width = float(self.declare_parameter(
+            'default_book_width', 0.1631).value)
+
         # Shelf targeting is disabled until the shelf model and slot contract
         # are finalized.
         # self.target_slot_topic = self.declare_parameter(
@@ -191,14 +255,37 @@ class VisionManager(Node):
         # YOLO 검출 결과를 책으로 인정할 최소 confidence입니다.
         self.confidence_threshold = float(self.declare_parameter(
             'confidence_threshold', 0.75).value)
+        # 접근 가능한 ROI 안에 고신뢰도 후보가 없을 때만 사용하는
+        # 보조 confidence입니다. 양 끝 책은 이후 ROI 필터에서 계속 제외됩니다.
+        self.fallback_confidence_threshold = float(self.declare_parameter(
+            'fallback_confidence_threshold', 0.20).value)
+        if (
+            self.fallback_confidence_threshold <= 0.0
+            or self.fallback_confidence_threshold > self.confidence_threshold
+        ):
+            raise ValueError(
+                'fallback_confidence_threshold must be greater than 0 '
+                'and no greater than confidence_threshold.'
+            )
+        # 신뢰도 1등 한 권만 발행·표시할지. false 면 검출된 전부 (디버그용)
+        self.publish_best_only = bool(self.declare_parameter(
+            'publish_best_only', True).value)
+        # **책 검출 ROI — 트레이 영역만 본다.** 팔 기준(arm_base_link) 3D 상자다.
+        # 픽셀 ROI 가 아니라 3D 로 두는 이유: 카메라가 움직여도 같은 영역을 가리킨다.
+        # **책장 빈 공간 경로에는 적용하지 않는다** (거기는 ROI 가 있으면 안 된다).
+        # **가로(x)는 트레이에 딱 맞춘다.** 넓게 두면 로봇팔 받침대나 바닥이
+        # 책으로 잡히는 일이 있다 (2026-09-21 현장 관찰).
+        #   칸 중심   -0.6623 ~ -0.2873   (6칸, 간격 0.075)
+        #   책 바깥면 -0.6800 ~ -0.2697   (두께 0.0353 의 절반을 더함)
+        #   여유 10mm -0.690  ~ -0.260    ← 이것을 쓴다
+        # y·z 는 깊이·높이라 여유를 둔다 (책 윗면 z ~0.1935).
+        self.book_roi_enabled = bool(self.declare_parameter(
+            'book_roi_enabled', True).value)
+        self.book_roi_min = [float(v) for v in self.declare_parameter(
+            'book_roi_min', [-0.69, -0.02, 0.00]).value]
+        self.book_roi_max = [float(v) for v in self.declare_parameter(
+            'book_roi_max', [-0.26, 0.18, 0.32]).value]
 
-        # 도서관 데이터로 학습된 YOLO 모델(.pt) 파일 경로입니다.
-        # 다른 모델을 사용할 때만 실행 시 -p model_path:=... 로 덮어쓰세요.
-        # 실행할 학습된 YOLO weight 파일 경로입니다.
-        self.model_path = self.declare_parameter(
-            'model_path',
-            os.path.join(resource_dir, 'book_tray_best.pt'),
-        ).value
         # self.target_topic = self.declare_parameter(
         #     'target_topic', '/perception/empty_shelf_position').value
         # self.scan_radius = float(self.declare_parameter('scan_radius', 0.15).value)
@@ -211,10 +298,10 @@ class VisionManager(Node):
             raise ValueError(
                 'model_path parameter is required, for example '
                 '-p model_path:=/path/to/book_best.pt')
-        # 삽입 후보는 x,y,z 세 값이 한 묶음이어야 하므로 길이를 검증합니다.
-        if len(self.slot_positions) % 3 != 0:
-            raise ValueError(
-                'slot_positions must contain x,y,z triples')
+        if self.slot_center_inset < 0.0:
+            raise ValueError('slot_center_inset must be non-negative')
+        if self.slot_floor_clearance < 0.0:
+            raise ValueError('slot_floor_clearance must be non-negative')
 
         # 학습된 YOLO 모델을 메모리에 로드합니다.
         self.model = YOLO(self.model_path)
@@ -224,404 +311,564 @@ class VisionManager(Node):
         self.book_detector = BookDetector()
         # 책장 각 단의 빈 공간을 깊이로 판단하는 객체를 생성합니다.
         self.target_detector = TargetDetector(
-            row_count=self.shelf_row_count,
-            depth_margin=self.shelf_depth_margin,
-            sample_radius_px=self.slot_sample_radius_px,
-            empty_depth_margin=self.slot_empty_depth_margin,
-            occupied_depth_margin=self.slot_occupied_depth_margin,
-            min_far_ratio=self.slot_min_far_ratio,
-            max_near_ratio=self.slot_max_near_ratio,
+            sample_radius_px=self.target_sample_radius_px,
+            side_offset_px=self.target_side_offset_px,
+            min_side_depth_difference=self.target_min_depth_difference,
         )
         # TF 변환을 조회할 버퍼와 listener를 생성합니다.
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         # action callback이 센서 callback과 동시에 실행될 수 있도록 그룹을 만듭니다.
+
         self._action_group = ReentrantCallbackGroup()
-        # action 상태를 여러 스레드에서 안전하게 접근하기 위한 lock입니다.
         self._action_lock = threading.Lock()
-        # 센서 처리 완료를 action 실행 콜백에 알려주는 이벤트입니다.
         self._action_event = threading.Event()
-        # 현재 실행 중인 action goal을 저장합니다.
+
         self._active_goal = None
-        # 센서 처리 결과를 action 콜백에 전달하기 위한 변수입니다.
+        self._active_kind = None
         self._action_result = None
-        # task_manager가 보내는 DetectTargetSlot goal을 받는 action 서버입니다.
-        self._action_server = ActionServer(
+        self._goal_reserved = False
+        self.pending_detection = False
+
+        self._grasp_action_server = ActionServer(
             self,
-            DetectTargetSlot,
-            self.perception_action,
-            execute_callback=self._execute_detection,
+            DetectGraspPoint,
+            self.grasp_action,
+            execute_callback=self._execute_grasp_detection,
             goal_callback=self._accept_detection_goal,
             cancel_callback=self._cancel_detection_goal,
             callback_group=self._action_group,
         )
-        # 책마다 변환된 3차원 위치를 PointStamped로 발행합니다.
-        self.book_pub = self.create_publisher(PointStamped, self.book_topic, 10)
-        # 책마다 변환된 pose를 PoseStamped로 발행합니다.
+
+        self._slot_action_server = ActionServer(
+            self,
+            DetectTargetSlot,
+            self.slot_action,
+            execute_callback=self._execute_slot_detection,
+            goal_callback=self._accept_detection_goal,
+            cancel_callback=self._cancel_detection_goal,
+            callback_group=self._action_group,
+        )
+
+        self.book_pub = self.create_publisher(
+            PointStamped,
+            self.book_topic,
+            10,
+        )
+
         self.book_pose_pub = self.create_publisher(
-            PoseStamped, self.book_pose_topic, 10)
-        # 검출 결과를 그린 디버그 영상을 Image 메시지로 발행합니다.
-        self.debug_image_pub = self.create_publisher(
-            Image, self.debug_image_topic, 10)
-        # 찾은 빈 단마다 카메라/로봇 기준 3D 점을 발행합니다.
+            PoseStamped,
+            self.book_pose_topic,
+            10,
+        )
+
         self.empty_slot_pub = self.create_publisher(
-            PointStamped, self.empty_slot_topic, 10)
-        # OpenCV 창을 한 번 생성해 실행 직후 검출 화면을 준비합니다.
-        self._debug_window_name = 'vision_manager detections'
-        self._debug_window_available = self.show_debug_window
-        if self._debug_window_available:
-            try:
-                cv2.namedWindow(self._debug_window_name, cv2.WINDOW_NORMAL)
-            except cv2.error as error:
-                # 디스플레이가 없는 PC에서도 ROS 노드는 계속 실행되게 합니다.
-                self._debug_window_available = False
-                self.get_logger().warning(
-                    f'Could not open debug window: {error}')
-        # self.target_pub = self.create_publisher(PointStamped, self.target_topic, 10)
-        # self.target_slot_pub = self.create_publisher(
-        #     TargetSlot, self.target_slot_topic, 10)
-        # 수동 테스트용 Boolean 검출 요청 subscriber를 생성합니다.
-        self.trigger_sub = self.create_subscription(
-            Bool, self.trigger_topic, self.trigger_callback, 10)
-        # trigger를 기다리는 설정이면 False, 아니면 즉시 처리 가능하게 합니다.
-        self.pending_detection = not self.wait_for_trigger
+            PointStamped,
+            self.empty_slot_topic,
+            10,
+        )
 
-        # Isaac Sim Replicator가 RGB·Depth·CameraInfo에 서로 다른
-        # simulation timestamp를 넣을 수 있으므로 message_filters의
-        # 엄격한 timestamp 동기화는 사용하지 않습니다.
-        self.latest_depth_msg = None
-        self.latest_camera_info_msg = None
-        self.depth_sub = self.create_subscription(
-            Image, self.depth_topic, self._depth_stream_callback, 10)
-        self.camera_info_sub = self.create_subscription(
-            CameraInfo, self.camera_info_topic,
-            self._camera_info_stream_callback, 10)
-        self.rgb_sub = self.create_subscription(
-            Image, self.rgb_topic, self._rgb_stream_callback, 10)
+        self.debug_image_pub = self.create_publisher(
+            Image,
+            self.debug_image_topic,
+            10,
+        )
 
-        # 현재 연결된 센서·action 설정을 로그로 출력합니다.
+        # Isaac 카메라는 렌더 프레임마다 대용량 메시지를 발행합니다. 기본
+        # reliable 큐를 사용하면 Python 검출기가 처리하는 동안 과거 영상이
+        # 누적되어, action의 not_before 시각보다 오래된 프레임만 계속 받게
+        # 됩니다. 검출에는 기록 보존보다 최신 프레임이 중요하므로 센서 QoS로
+        # 한 장만 유지합니다.
+        sensor_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
+        )
+
+        self.rgb_sub = message_filters.Subscriber(
+            self,
+            Image,
+            self.rgb_topic,
+            qos_profile=sensor_qos,
+        )
+
+        self.depth_sub = message_filters.Subscriber(
+            self,
+            Image,
+            self.depth_topic,
+            qos_profile=sensor_qos,
+        )
+
+        self.camera_info_sub = message_filters.Subscriber(
+            self,
+            CameraInfo,
+            self.camera_info_topic,
+            qos_profile=sensor_qos,
+        )
+
+        self.image_sync = message_filters.ApproximateTimeSynchronizer(
+            [
+                self.rgb_sub,
+                self.depth_sub,
+                self.camera_info_sub,
+            ],
+            queue_size=3,
+            slop=self.sync_slop,
+        )
+
+        self.image_sync.registerCallback(self.rgb_callback)
+
         self.get_logger().info(
-            f'Subscribed to rgb={self.rgb_topic}, depth={self.depth_topic}, '
-            f'camera_info={self.camera_info_topic}, '
-            f'target_frame={self.target_frame}, '
-            f'trigger={self.trigger_topic}, '
-            f'action={self.perception_action}')
+            "Perception action servers ready: "
+            f"grasp={self.grasp_action}, "
+            f"slot={self.slot_action}"
+        )
 
     def _accept_detection_goal(self, goal_request):
-        """동시에 하나의 검출 action만 실행하도록 goal을 수락합니다."""
-        # 현재 다른 goal이 실행 중인지 lock으로 안전하게 확인합니다.
+        """두 perception action 중 하나만 실행되도록 제한합니다."""
         with self._action_lock:
-            # 이미 처리 중인 goal이 있으면 새 goal을 거절합니다.
-            if self._active_goal is not None:
+            if self._goal_reserved or self._active_goal is not None:
+                self.get_logger().warning(
+                    "Another perception request is already running."
+                )
                 return GoalResponse.REJECT
-        # 현재 처리 중인 goal이 없으므로 새 goal을 수락합니다.
+
+            self._goal_reserved = True
+
         return GoalResponse.ACCEPT
 
     def _cancel_detection_goal(self, goal_handle):
-        """진행 중인 검출 action의 취소 요청을 수락합니다."""
-        # 실제 정리는 execute callback의 취소 검사에서 처리합니다.
+        """진행 중인 perception action의 취소를 허용합니다."""
         return CancelResponse.ACCEPT
 
-    def _execute_detection(self, goal_handle):
-        """action 요청 후 들어오는 다음 유효한 카메라 프레임을 처리합니다."""
-        # action 상태를 센서 callback과 공유하므로 lock을 사용합니다.
+    def _execute_grasp_detection(self, goal_handle):
+        """트레이 위 책 검출 action을 실행합니다."""
+        return self._execute_detection(goal_handle, "grasp")
+
+    def _execute_slot_detection(self, goal_handle):
+        """책장의 빈 슬롯 검출 action을 실행합니다."""
+        return self._execute_detection(goal_handle, "slot")
+
+    def _new_action_result(self, action_kind):
+        """현재 action 종류에 맞는 Result 메시지를 생성합니다."""
+        if action_kind == "grasp":
+            return DetectGraspPoint.Result()
+
+        return DetectTargetSlot.Result()
+
+    def _clear_action_state(self):
+        """현재 perception action의 공유 상태를 초기화합니다."""
         with self._action_lock:
-            # 현재 활성 goal을 기록합니다.
-            self._active_goal = goal_handle
-            # 이전 action 결과를 비웁니다.
+            self._active_goal = None
+            self._active_kind = None
             self._action_result = None
-            # 이전 처리 완료 이벤트를 초기화합니다.
+            self._goal_reserved = False
+            self.pending_detection = False
             self._action_event.clear()
-            # 다음 동기화 프레임에서 검출하도록 활성화합니다.
+
+    def _execute_detection(self, goal_handle, action_kind):
+        """다음 유효한 카메라 프레임의 검출 결과를 기다립니다."""
+        with self._action_lock:
+            self._active_goal = goal_handle
+            self._active_kind = action_kind
+            self._action_result = None
+            self._action_event.clear()
             self.pending_detection = True
 
-        # action 클라이언트에게 촬영 단계가 시작되었음을 알립니다.
-        self._publish_action_feedback(goal_handle, 'CAPTURING', 0, 0.0)
-        # 카메라 프레임을 기다릴 최대 시간(초)입니다.
-        timeout = 10.0
-        # timeout 계산용 실제 시작 시각을 기록합니다.
+        self._publish_action_feedback(
+            goal_handle,
+            "CAPTURING",
+            0,
+            0.0,
+        )
+
         started = time.monotonic()
-        # 센서 callback이 결과를 만들 때까지 짧게 반복 대기합니다.
+
         while not self._action_event.wait(0.1):
-            # action 클라이언트가 취소했는지 확인합니다.
             if goal_handle.is_cancel_requested:
-                # 활성 goal과 대기 상태를 정리합니다.
-                with self._action_lock:
-                    self._active_goal = None
-                    self.pending_detection = False
-                # action을 canceled 상태로 종료합니다.
-                goal_handle.canceled()
-                # 취소 결과 메시지를 생성합니다.
-                result = DetectTargetSlot.Result()
+                result = self._new_action_result(action_kind)
+                result.success = False
                 result.error_code = 3002
-                result.message = 'Perception request was canceled.'
-                return result
-            # 현재까지 경과한 실제 시간을 계산합니다.
-            now = time.monotonic()
-            # 10초 안에 프레임이 오지 않으면 action을 실패시킵니다.
-            if now - started > timeout:
-                # timeout 상태를 정리합니다.
-                with self._action_lock:
-                    self._active_goal = None
-                    self.pending_detection = False
-                # action을 aborted 상태로 종료합니다.
-                goal_handle.abort()
-                # timeout 결과 메시지를 생성합니다.
-                result = DetectTargetSlot.Result()
-                result.error_code = 3003
-                result.message = 'Timed out waiting for a valid camera frame.'
+                result.message = "Perception request was canceled."
+
+                self._clear_action_state()
+                goal_handle.canceled()
                 return result
 
-        # 센서 callback이 저장한 결과를 가져오고 active goal을 해제합니다.
+            if time.monotonic() - started > self.action_timeout_s:
+                result = self._new_action_result(action_kind)
+                result.success = False
+                result.error_code = 3003
+                result.message = (
+                    "Timed out waiting for a valid camera frame."
+                )
+
+                self._clear_action_state()
+                goal_handle.abort()
+                return result
+
         with self._action_lock:
             result = self._action_result
-            self._active_goal = None
 
-        # 결과가 비어 있으면 내부 오류로 action을 종료합니다.
         if result is None:
-            goal_handle.abort()
-            result = DetectTargetSlot.Result()
+            result = self._new_action_result(action_kind)
+            result.success = False
             result.error_code = 3004
-            result.message = 'Perception returned no result.'
+            result.message = "Perception returned no result."
+
+            self._clear_action_state()
+            goal_handle.abort()
             return result
 
-        # 검출 성공 여부에 따라 action 상태를 확정합니다.
+        self._clear_action_state()
+
         if result.success:
             goal_handle.succeed()
         else:
             goal_handle.abort()
-        # task_manager로 최종 결과를 반환합니다.
+
         return result
 
-    def _publish_action_feedback(self, goal_handle, phase, count, confidence):
-        # action feedback 메시지를 생성합니다.
-        feedback = DetectTargetSlot.Feedback()
-        # 현재 처리 단계를 설정합니다.
+    def _publish_action_feedback(
+        self,
+        goal_handle,
+        phase,
+        count,
+        confidence,
+    ):
+        """현재 실행 중인 action 형식으로 feedback을 발행합니다."""
+        with self._action_lock:
+            action_kind = self._active_kind
+
+        if action_kind == "grasp":
+            feedback = DetectGraspPoint.Feedback()
+        elif action_kind == "slot":
+            feedback = DetectTargetSlot.Feedback()
+        else:
+            return
+
         feedback.phase = phase
-        # 현재 검출 후보 개수를 설정합니다.
         feedback.candidate_count = count
-        # 가장 높은 confidence를 설정합니다.
-        feedback.best_confidence = confidence
-        # action 클라이언트에 feedback을 전송합니다.
+        feedback.best_confidence = float(confidence)
+
         goal_handle.publish_feedback(feedback)
 
-    def trigger_callback(self, msg):
-        """True 토픽을 받으면 한 번의 동기화 영상 처리를 예약합니다."""
-        # True 요청일 때만 다음 센서 프레임을 처리하도록 활성화합니다.
-        if msg.data:
-            self.pending_detection = True
-            self.get_logger().info(
-                'Detection request received; waiting for synchronized frame')
+    def rgb_callback(self, rgb_msg, depth_msg, camera_info_msg):
+        """현재 실행 중인 perception action에 필요한 검출만 수행합니다."""
+        with self._action_lock:
+            if not self.pending_detection:
+                return
 
-    def _depth_stream_callback(self, msg):
-        """가장 최근 Depth 메시지를 저장합니다."""
-        self.latest_depth_msg = msg
+            active_goal = self._active_goal
+            action_kind = self._active_kind
 
-    def _camera_info_stream_callback(self, msg):
-        """가장 최근 CameraInfo 메시지를 저장합니다."""
-        self.latest_camera_info_msg = msg
-
-    def _rgb_stream_callback(self, rgb_msg):
-        """요청이 있을 때 최신 RGB·Depth·CameraInfo로 한 프레임을 처리합니다."""
-        if not self.pending_detection:
+        if active_goal is None or action_kind is None:
             return
-        if self.latest_depth_msg is None or self.latest_camera_info_msg is None:
+
+        if not rgb_msg.header.frame_id or not depth_msg.header.frame_id:
             self.get_logger().warning(
-                'Detection requested, but Depth or CameraInfo has not arrived')
+                "RGB or depth frame_id is empty."
+            )
             return
-        self.rgb_callback(
-            rgb_msg,
-            self.latest_depth_msg,
-            self.latest_camera_info_msg,
+
+        if (
+            rgb_msg.header.frame_id != self.camera_frame
+            or depth_msg.header.frame_id != self.camera_frame
+            or camera_info_msg.header.frame_id != self.camera_frame
+        ):
+            self.get_logger().warning(
+                f"Expected camera frame {self.camera_frame}, got "
+                f"rgb={rgb_msg.header.frame_id}, "
+                f"depth={depth_msg.header.frame_id}, "
+                f"camera_info={camera_info_msg.header.frame_id}"
+            )
+            return
+
+        if (
+            rgb_msg.header.frame_id != depth_msg.header.frame_id
+            and not self.depth_registered
+        ):
+            self.get_logger().warning(
+                "RGB and depth frames differ, but depth_registered is false."
+            )
+            return
+
+        # 로봇팔이 관측 위치에 도달하기 전에 촬영된 프레임은 사용하지 않습니다.
+        frame_stamp = rgb_msg.header.stamp
+        frame_stamp_ns = (
+            int(frame_stamp.sec) * 1_000_000_000
+            + int(frame_stamp.nanosec)
         )
 
-    def rgb_callback(self, rgb_msg, depth_msg, camera_info_msg):
-        # action 또는 수동 trigger가 없으면 현재 프레임을 처리하지 않습니다.
-        if not self.pending_detection:
-            return
+        not_before = active_goal.request.not_before
+        not_before_ns = (
+            int(not_before.sec) * 1_000_000_000
+            + int(not_before.nanosec)
+        )
 
-        # RGB와 Depth 메시지에 frame_id가 있는지 확인합니다.
-        if not rgb_msg.header.frame_id or not depth_msg.header.frame_id:
-            self.get_logger().warning('RGB or depth frame_id is empty')
-            return
-        # 세 메시지가 예상한 카메라 frame에서 왔는지 확인합니다.
-        if (rgb_msg.header.frame_id != self.camera_frame
-                or depth_msg.header.frame_id != self.camera_frame
-                or camera_info_msg.header.frame_id != self.camera_frame):
-            self.get_logger().warning(
-                f'Expected camera optical frame {self.camera_frame}, got '
-                f'rgb={rgb_msg.header.frame_id}, '
-                f'depth={depth_msg.header.frame_id}, '
-                f'camera_info={camera_info_msg.header.frame_id}')
-            return
-        # RGB와 Depth frame이 다르면 registered depth 설정을 확인합니다.
-        if (rgb_msg.header.frame_id != depth_msg.header.frame_id
-                and not self.depth_registered):
-            self.get_logger().warning(
-                'RGB and depth frames differ; depth must be registered to RGB')
+        if (
+            not_before_ns > 0
+            and frame_stamp_ns < not_before_ns
+        ):
             return
 
         try:
-            # ROS RGB 메시지를 OpenCV BGR 이미지로 변환합니다.
-            rgb_image = self.bridge.imgmsg_to_cv2(
-                rgb_msg, desired_encoding='bgr8')
-            # Depth 메시지는 원래 숫자 encoding을 유지한 채 변환합니다.
-            depth_image = self.bridge.imgmsg_to_cv2(
-                depth_msg, desired_encoding='passthrough')
-        except CvBridgeError as error:
-            self.get_logger().error(f'Image conversion failed: {error}')
+            rgb_image = _imgmsg_to_bgr(rgb_msg)
+            depth_image = _imgmsg_to_array(depth_msg)
+        except ValueError as error:
+            self.get_logger().warning(
+                f"Image conversion failed: {error}"
+            )
             return
 
-        # RGB와 Depth의 가로·세로 크기가 같은지 확인합니다.
         if rgb_image.shape[:2] != depth_image.shape[:2]:
-            self.get_logger().warning('RGB and depth image sizes differ')
+            self.get_logger().warning(
+                "RGB and depth image sizes differ."
+            )
             return
 
-        # 이번 요청은 현재 동기화 프레임으로 처리했으므로 다시 대기 상태로 바꿉니다.
-        self.pending_detection = False
-        # Depth encoding과 자료형을 보고 미터 변환 배율을 결정합니다.
-        depth_scale = self._get_depth_scale(depth_msg.encoding, depth_image)
-
-        # CameraInfo에서 카메라 내부 파라미터를 가져옵니다.
         info = camera_info_msg
-        # x/y 초점거리와 주점 좌표를 추출합니다.
-        fx, fy = info.k[0], info.k[4]
-        cx, cy = info.k[2], info.k[5]
+        fx = float(info.k[0])
+        fy = float(info.k[4])
+        cx = float(info.k[2])
+        cy = float(info.k[5])
 
-        # 초점거리가 0 이하이면 3D 투영을 수행할 수 없습니다.
-        if fx <= 0 or fy <= 0:
-            self.get_logger().warning('Invalid camera intrinsics in CameraInfo')
+        if fx <= 0.0 or fy <= 0.0:
+            self.get_logger().warning(
+                "Invalid camera intrinsics in CameraInfo."
+            )
             return
+
+        depth_scale = self._get_depth_scale(
+            depth_msg.encoding,
+            depth_image,
+        )
+
+        # 유효한 프레임 하나를 확보했으므로 중복 처리를 막습니다.
+        with self._action_lock:
+            if self._active_goal is not active_goal:
+                return
+
+            self.pending_detection = False
 
         try:
-            # RGB 이미지에서 YOLO 책 검출 결과를 계산합니다.
-            detections = self._detect_books(rgb_image)
-            self.get_logger().info(
-                f'Synchronized frame received: rgb={rgb_image.shape}, '
-                f'depth={depth_image.shape}, '
-                f'book_detections={len(detections)}')
-            if not detections:
-                self.get_logger().warning(
-                    'No book detected in the requested frame; check camera '
-                    'view, model confidence, and lighting.')
-            # 검출 상자와 Depth로 각 책의 카메라 기준 3D 위치를 계산합니다.
-            detected_targets = self.book_detector.process(
-                detections,
-                depth_image,
-                fx,
-                fy,
-                cx,
-                cy,
-                depth_scale,
-            )
-            # 책장 전체의 bbox와 클래스를 책장 YOLO 모델로 검출합니다.
-            shelf_detection = self._detect_shelf(rgb_image)
-            # 로봇 기준의 삽입 후보들을 현재 카메라 기준 좌표로 변환합니다.
-            candidate_slots = self._candidate_slots_in_camera(
-                rgb_msg.header.frame_id,
-                rgb_msg.header.stamp,
-            )
-            # 각 후보 주변의 Depth를 비교해 빈 칸만 선택합니다.
-            empty_slots = self.target_detector.find_empty_slots_at_positions(
-                depth_image,
-                candidate_slots,
-                fx,
-                fy,
-                cx,
-                cy,
-                depth_scale,
-            )
-            # 책과 책장 검출 결과를 화면과 debug image 토픽에 표시합니다.
-            self._publish_debug_image(
-                rgb_image,
-                rgb_msg.header,
-                detections,
-                shelf_detection,
-                empty_slots,
-            )
-        except (IndexError, ValueError) as error:
-            # 모델 출력 또는 깊이 계산 오류를 action 실패 결과로 전달합니다.
-            self.get_logger().error(f'Book detection failed: {error}')
+            if action_kind == "grasp":
+                self._process_grasp_frame(
+                    active_goal,
+                    rgb_image,
+                    depth_image,
+                    rgb_msg.header,
+                    fx,
+                    fy,
+                    cx,
+                    cy,
+                    depth_scale,
+                )
+                return
+
+            if action_kind == "slot":
+                self._process_slot_frame(
+                    active_goal,
+                    rgb_image,
+                    depth_image,
+                    rgb_msg.header,
+                    fx,
+                    fy,
+                    cx,
+                    cy,
+                    depth_scale,
+                )
+                return
+
             self._finish_action_with_failure(
-                3003, f'Book detection failed: {error}')
-            return
-
-        # 현재 action goal을 안전하게 읽습니다.
-        with self._action_lock:
-            active_goal = self._active_goal
-        # action 요청으로 처리 중이면 검출 단계 feedback을 전송합니다.
-        if active_goal is not None:
-            self._publish_action_feedback(
-                active_goal,
-                'DETECTING_SHELF',
-                len(detected_targets),
-                max(
-                    (target['confidence'] for target in detected_targets),
-                    default=0.0,
-                ),
+                3004,
+                f"Unknown perception action kind: {action_kind}",
             )
 
-        # 검출된 모든 책을 하나씩 로봇 좌표로 변환하고 발행합니다.
-        for target in detected_targets:
-            # 책의 카메라 좌표를 target_frame 기준 점으로 변환합니다.
-            book_point = self._transform_xyz(
-                target['xyz'], rgb_msg.header.frame_id, rgb_msg.header.stamp)
-            # TF 변환에 실패한 책은 결과 발행을 건너뜁니다.
-            if book_point is None:
-                continue
-            # 변환된 점을 담을 ROS 메시지를 생성합니다.
-            book_msg = PointStamped()
-            # TF 변환 결과의 frame과 timestamp를 복사합니다.
-            book_msg.header = book_point.header
-            # TF 변환 결과의 x/y/z 위치를 복사합니다.
-            book_msg.point = book_point.point
-            # 책의 3D 점을 외부 노드로 발행합니다.
-            self.book_pub.publish(book_msg)
-            # 책의 위치와 영상상의 yaw를 pose로 변환합니다.
-            book_pose = self._make_book_pose(
-                target['xyz'],
-                rgb_msg.header.frame_id,
-                rgb_msg.header.stamp,
-                target['image_angle'],
+        except Exception as error:
+            self.get_logger().error(
+                f"{action_kind} detection failed: "
+                f"{type(error).__name__}: {error}"
             )
-            # pose 변환에 성공한 경우에만 pose를 발행합니다.
-            if book_pose is not None:
-                self.book_pose_pub.publish(book_pose)
-            # 사람이 확인할 수 있도록 검출 위치와 각도를 로그로 출력합니다.
-            self.get_logger().info(
-                f"Book detected: xyz=({book_point.point.x:.3f}, "
-                f"{book_point.point.y:.3f}, {book_point.point.z:.3f}), "
-                f"center={target['center']}, "
-                f"yaw={target['image_angle']:.3f} rad")
+            self._finish_action_with_failure(
+                3003,
+                f"{action_kind} detection failed: {error}",
+            )
 
-        # 찾은 빈 단들을 하나씩 target_frame으로 변환하고 토픽으로 발행합니다.
-        transformed_empty_slots = []
-        for empty_slot in empty_slots:
-            # 후보가 정의된 로봇 frame의 좌표를 최종 target frame으로 변환합니다.
-            empty_point = self._transform_xyz(
-                empty_slot['target_xyz'],
-                self.slot_position_frame,
-                rgb_msg.header.stamp,
+    def _process_grasp_frame(
+        self,
+        goal_handle,
+        rgb_image,
+        depth_image,
+        header,
+        fx,
+        fy,
+        cx,
+        cy,
+        depth_scale,
+    ):
+        """트레이 영상에서 책 후보만 검출합니다."""
+        detections = self._detect_books(rgb_image)
+
+        projected_targets = self.book_detector.process(
+            detections,
+            depth_image,
+            fx,
+            fy,
+            cx,
+            cy,
+            depth_scale,
+        )
+
+        reachable_targets, roi_dropped = self._filter_book_roi(
+            projected_targets,
+            header.frame_id,
+            header.stamp,
+        )
+
+        strong_targets = [
+            target for target in reachable_targets
+            if float(target['confidence']) >= self.confidence_threshold
+        ]
+        if strong_targets:
+            detected_targets = strong_targets
+            selection_mode = 'primary'
+        else:
+            detected_targets = [
+                target for target in reachable_targets
+                if float(target['confidence'])
+                >= self.fallback_confidence_threshold
+            ]
+            selection_mode = 'fallback' if detected_targets else 'none'
+
+        if selection_mode == 'fallback':
+            self.get_logger().warning(
+                'No reachable book met primary confidence '
+                f'{self.confidence_threshold:.2f}; using ROI-constrained '
+                'fallback candidates at or above '
+                f'{self.fallback_confidence_threshold:.2f}.'
+            )
+
+        best_confidence = max(
+            (
+                float(target["confidence"])
+                for target in detected_targets
+            ),
+            default=0.0,
+        )
+
+        self._publish_action_feedback(
+            goal_handle,
+            "DETECTING_BOOK",
+            len(detected_targets),
+            best_confidence,
+        )
+
+        self._publish_debug_image(
+            rgb_image,
+            header,
+            detections,
+            roi_px=self._book_roi_pixels(
+                header.frame_id,
+                header.stamp,
+                fx,
+                fy,
+                cx,
+                cy,
+                rgb_image.shape,
+            ),
+            keep_boxes=[
+                target["box"]
+                for target in detected_targets
+            ],
+            dropped=roi_dropped,
+        )
+
+        self.get_logger().info(
+            'Book candidates: '
+            f'detections={len(detections)}, '
+            f'projected={len(projected_targets)}, '
+            f'reachable={len(reachable_targets)}, '
+            f'valid={len(detected_targets)}, '
+            f'selection_mode={selection_mode}, '
+            f'roi_dropped={roi_dropped}, '
+            f'best_confidence={best_confidence:.3f}'
+        )
+
+        self._complete_action_from_books(
+            goal_handle,
+            detected_targets,
+            header.frame_id,
+            header.stamp,
+        )
+
+    def _process_slot_frame(
+        self,
+        goal_handle,
+        rgb_image,
+        depth_image,
+        header,
+        fx,
+        fy,
+        cx,
+        cy,
+        depth_scale,
+    ):
+        """책장 영상에서 고정 후보 없이 연속된 빈 영역을 검출합니다."""
+        shelf_detection = self._detect_shelf(rgb_image)
+        inspection = self.target_detector.find_empty_position(
+            depth_image,
+            shelf_detection['box'] if shelf_detection is not None else None,
+            fx,
+            fy,
+            cx,
+            cy,
+            depth_scale,
+        )
+        is_empty = bool(inspection and inspection.get('is_empty'))
+
+        self._publish_action_feedback(
+            goal_handle,
+            "DETECTING_SLOT",
+            int(is_empty),
+            1.0 if is_empty else 0.0,
+        )
+
+        self._publish_debug_image(
+            rgb_image,
+            header,
+            [],
+            shelf_detection,
+            inspection,
+        )
+        empty_point = None
+        if is_empty:
+            empty_point = self._project_slot_to_shelf_plane(
+                inspection,
+                header.frame_id,
+                header.stamp,
+                goal_handle.request,
             )
             if empty_point is None:
-                continue
-            empty_msg = PointStamped()
-            empty_msg.header = empty_point.header
-            empty_msg.point = empty_point.point
-            self.empty_slot_pub.publish(empty_msg)
-            transformed_empty_slots.append(empty_point)
-            self.get_logger().info(
-                f"Empty shelf row={empty_slot['row_index']}: "
-                f"xyz=({empty_point.point.x:.3f}, "
-                f"{empty_point.point.y:.3f}, "
-                f"{empty_point.point.z:.3f})")
+                # shelf_plane_y/shelf_floor_z가 없는 독립 비전 테스트만
+                # 기존 depth 기반 경로로 돌아간다. 운영 통합에서는
+                # manipulation executor가 두 값을 반드시 보낸다.
+                empty_point = self._transform_xyz(
+                    inspection['target_xyz'],
+                    header.frame_id,
+                    header.stamp,
+                )
+            if empty_point is not None:
+                self.empty_slot_pub.publish(empty_point)
+                self.get_logger().info(
+                    "Empty shelf target: "
+                    f"xyz=({empty_point.point.x:.3f}, "
+                    f"{empty_point.point.y:.3f}, "
+                    f"{empty_point.point.z:.3f})"
+                )
 
-        # action 요청이었다면 첫 번째 빈 단을 TargetSlot 결과로 반환합니다.
-        if active_goal is not None:
-            self._complete_action_from_empty_slots(
-                active_goal,
-                transformed_empty_slots,
-            )
+        self._complete_action_from_empty_position(goal_handle, empty_point)
 
     def _detect_shelf(self, rgb_image):
         """책장 YOLO 모델에서 가장 신뢰도 높은 책장 검출을 반환합니다."""
@@ -660,52 +907,76 @@ class VisionManager(Node):
         # 가장 신뢰도가 높은 책장 하나를 선택합니다.
         return max(candidates, key=lambda candidate: candidate['confidence'])
 
-    def _candidate_slots_in_camera(self, camera_frame, stamp):
-        """로봇 기준 삽입 후보 좌표를 현재 카메라 기준으로 변환합니다."""
-        # 카메라 시각에 맞는 TF를 한 번만 조회합니다.
+    def _arm_to_camera_tf(self, camera_frame, stamp):
+        """팔 기준 → 카메라 기준 TF. 못 구하면 None."""
         try:
-            transform = self._lookup_transform_with_latest_fallback(
-                camera_frame, self.slot_position_frame, stamp)
-        except TransformException as error:
-            # 카메라와 슬롯 frame의 TF가 없으면 모든 후보를 건너뜁니다.
-            self.get_logger().warning(
-                f'Could not transform slot frame '
-                f'{self.slot_position_frame} to {camera_frame}: {error}')
-            return []
-
-        # 변환된 후보를 저장할 목록입니다.
-        candidates = []
-        # 평탄화된 좌표 목록을 x,y,z 세 값씩 나눠 처리합니다.
-        for index in range(0, len(self.slot_positions), 3):
-            # 후보의 고유 번호를 생성합니다.
-            slot_id = index // 3
-            # 로봇 기준 삽입 후보 좌표를 읽습니다.
-            target_xyz = tuple(
-                float(value) for value in self.slot_positions[index:index + 3]
+            return self.tf_buffer.lookup_transform(
+                camera_frame,
+                self.slot_position_frame,
+                rclpy.time.Time.from_msg(stamp),
+                timeout=rclpy.duration.Duration(seconds=0.2),
             )
-            # TF 변환을 적용할 PointStamped를 생성합니다.
-            point = PointStamped()
-            # 점의 원래 frame을 후보 좌표 frame으로 설정합니다.
-            point.header.frame_id = self.slot_position_frame
-            # 센서 timestamp를 사용해 같은 시각의 TF를 적용합니다.
-            point.header.stamp = stamp
-            # 후보 좌표를 메시지에 기록합니다.
-            point.point.x, point.point.y, point.point.z = target_xyz
-            # 후보를 카메라 frame으로 변환합니다.
-            camera_point = do_transform_point(point, transform)
-            # 깊이 판정기가 사용할 정보를 저장합니다.
-            candidates.append({
-                'slot_id': slot_id,
-                'target_xyz': target_xyz,
-                'camera_xyz': (
-                    camera_point.point.x,
-                    camera_point.point.y,
-                    camera_point.point.z,
-                ),
-            })
+        except TransformException:
+            return None
 
-        # 카메라 기준으로 변환된 후보 목록을 반환합니다.
-        return candidates
+    def _filter_book_roi(self, targets, camera_frame, stamp):
+        """**트레이 ROI 안의 책만** 남깁니다. (남은 것, 버린 수) 를 돌려줍니다.
+
+        왜 3D 인가: 픽셀 상자로 자르면 카메라가 조금만 움직여도 엉뚱한 영역을 가립니다.
+        팔 기준 상자는 카메라가 어디서 보든 **같은 실제 공간**을 가리킵니다.
+
+        **책장 빈 공간 판정에는 쓰지 않습니다.** 거기는 ROI 가 있으면 안 됩니다 —
+        서가 어디든 빈 칸이 생길 수 있기 때문입니다.
+        """
+        if not self.book_roi_enabled or not targets:
+            return targets, 0
+        kept, dropped = [], 0
+        for target in targets:
+            point = self._transform_xyz(target['xyz'], camera_frame, stamp)
+            if point is None:
+                # 변환 실패는 **버리지 않습니다** — ROI 판정을 못 한 것이지
+                # 밖에 있다고 밝혀진 것이 아닙니다
+                kept.append(target)
+                continue
+            p = point.point
+            lo, hi = self.book_roi_min, self.book_roi_max
+            if (lo[0] <= p.x <= hi[0] and lo[1] <= p.y <= hi[1]
+                    and lo[2] <= p.z <= hi[2]):
+                kept.append(target)
+            else:
+                dropped += 1
+        if dropped:
+            self.get_logger().info(
+                f'ROI 밖 책 {dropped}권 제외 (남은 {len(kept)}권). '
+                f'ROI {self.book_roi_min} ~ {self.book_roi_max} @'
+                f'{self.slot_position_frame}')
+        return kept, dropped
+
+    def _book_roi_pixels(self, camera_frame, stamp, fx, fy, cx, cy, shape):
+        """ROI 3D 상자를 화면 사각형으로 투영합니다. 못 구하면 None."""
+        if not self.book_roi_enabled:
+            return None
+        transform = self._arm_to_camera_tf(camera_frame, stamp)
+        if transform is None:
+            return None
+        lo, hi = self.book_roi_min, self.book_roi_max
+        us, vs = [], []
+        for x in (lo[0], hi[0]):
+            for y in (lo[1], hi[1]):
+                for z in (lo[2], hi[2]):
+                    pt = PointStamped()
+                    pt.header.frame_id = self.slot_position_frame
+                    pt.point.x, pt.point.y, pt.point.z = x, y, z
+                    c = do_transform_point(pt, transform).point
+                    if c.z <= 1e-6:          # 카메라 뒤쪽은 투영할 수 없다
+                        continue
+                    us.append(c.x * fx / c.z + cx)
+                    vs.append(c.y * fy / c.z + cy)
+        if len(us) < 2:
+            return None
+        h, w = shape[:2]
+        return (max(0, int(min(us))), max(0, int(min(vs))),
+                min(w - 1, int(max(us))), min(h - 1, int(max(vs))))
 
     def _transform_xyz(self, xyz, source_frame, stamp):
         """카메라 기준 점을 target_frame 기준 점으로 변환합니다."""
@@ -719,8 +990,12 @@ class VisionManager(Node):
         point.point.x, point.point.y, point.point.z = xyz
         try:
             # target_frame에서 source_frame으로 가는 TF를 해당 시각에 조회합니다.
-            transform = self._lookup_transform_with_latest_fallback(
-                self.target_frame, source_frame, stamp)
+            transform = self.tf_buffer.lookup_transform(
+                self.target_frame,
+                source_frame,
+                rclpy.time.Time.from_msg(stamp),
+                timeout=rclpy.duration.Duration(seconds=0.2),
+            )
             # 조회한 TF를 점에 적용해 target_frame 기준 점을 반환합니다.
             return do_transform_point(point, transform)
         except TransformException as error:
@@ -730,47 +1005,147 @@ class VisionManager(Node):
                 f'{self.target_frame}: {error}')
             return None
 
-    def _lookup_transform_with_latest_fallback(self, target_frame,
-                                               source_frame, stamp):
-        """센서 timestamp와 무관하게 현재 TF를 조회합니다.
+    def _project_slot_to_shelf_plane(
+        self,
+        inspection,
+        source_frame,
+        stamp,
+        request,
+    ):
+        """빈칸 픽셀의 카메라 광선을 실제 서가 앞면과 교차시킵니다.
 
-        Isaac Sim의 센서와 TF publisher가 서로 다른 simulation timestamp를
-        발행하는 경우가 있어, 센서 timestamp로 조회하면 extrapolation이
-        발생합니다. 이 노드의 슬롯/카메라 extrinsic 변환은 현재 TF를
-        사용하는 편이 안정적입니다.
+        빈칸 중앙의 depth는 서가 뒤쪽 벽입니다. 그 값을 삽입
+        좌표로 쓰면 2~3 m 뒤의 서가가 목표가 됩니다. depth는
+        광선 방향을 정하는 데만 쓰고, 삽입 깊이와 단 높이는
+        Isaac이 USD에서 계산해 action goal로 보낸 값을 사용합니다.
+        """
+        plane_y = float(request.shelf_plane_y)
+        floor_z = float(request.shelf_floor_z)
+
+        if (
+            not math.isfinite(plane_y)
+            or not math.isfinite(floor_z)
+            or plane_y <= 0.0
+        ):
+            return None
+
+        ray_camera = inspection.get('camera_xyz')
+        if ray_camera is None:
+            return None
+
+        origin = self._transform_xyz(
+            (0.0, 0.0, 0.0),
+            source_frame,
+            stamp,
+        )
+        ray_point = self._transform_xyz(
+            ray_camera,
+            source_frame,
+            stamp,
+        )
+        if origin is None or ray_point is None:
+            return None
+
+        direction = np.array([
+            ray_point.point.x - origin.point.x,
+            ray_point.point.y - origin.point.y,
+            ray_point.point.z - origin.point.z,
+        ], dtype=float)
+
+        if abs(float(direction[1])) < 1e-6:
+            self.get_logger().warning(
+                'Empty-slot camera ray is parallel to the shelf plane.'
+            )
+            return None
+
+        distance = (
+            plane_y - float(origin.point.y)
+        ) / float(direction[1])
+        if not math.isfinite(distance) or distance <= 0.0:
+            self.get_logger().warning(
+                'Empty-slot camera ray does not point toward the shelf plane.'
+            )
+            return None
+
+        point = PointStamped()
+        point.header.frame_id = self.target_frame
+        point.header.stamp = stamp
+        point.point.x = float(origin.point.x + distance * direction[0])
+        point.point.y = plane_y
+        point.point.z = (
+            floor_z
+            + max(0.0, float(request.book_height)) * 0.5
+            + self.slot_floor_clearance
+        )
+
+        self.get_logger().info(
+            'Empty-slot plane projection: '
+            f'raw=({ray_point.point.x:.3f}, '
+            f'{ray_point.point.y:.3f}, '
+            f'{ray_point.point.z:.3f}), '
+            f'plane_y={plane_y:.3f}, floor_z={floor_z:.3f}, '
+            f'projected=({point.point.x:.3f}, '
+            f'{point.point.y:.3f}, '
+            f'{point.point.z:.3f})'
+        )
+        return point
+
+    def _publish_debug_image(self, *args, **kwargs):
+        """디버그 영상을 발행합니다. **그리다 실패해도 검출을 멈추지 않습니다**.
+
+        화면 표시는 곁가지인데, 여기서 난 예외가 노드를 통째로 내려버린 적이 있습니다
+        (2026-09-21 GPU PC: KeyError 'row_index' → vision_manager 종료 → 파지 중단).
+        검출·좌표 발행은 화면과 무관하게 계속되어야 합니다.
         """
         try:
-            return self.tf_buffer.lookup_transform(
-                target_frame,
-                source_frame,
-                # ROS time 0은 TF 버퍼에서 가장 최신 변환을 의미합니다.
-                # Isaac Sim simulation time과 섞이지 않도록 clock type을
-                # 명시합니다.
-                rclpy.time.Time(
-                    nanoseconds=0,
-                    clock_type=ClockType.ROS_TIME,
-                ),
-                timeout=rclpy.duration.Duration(seconds=0.5),
-            )
-        except TransformException as error:
+            self._draw_and_publish_debug_image(*args, **kwargs)
+        except Exception as error:       # noqa: BLE001 - 화면 때문에 노드가 죽으면 안 됩니다
             self.get_logger().warning(
-                f'Could not get latest TF for {source_frame} -> '
-                f'{target_frame}: {error}')
-            raise
+                f'디버그 영상 표시 실패(검출은 계속합니다): {type(error).__name__}: {error}',
+                throttle_duration_sec=10.0)
 
-    def _publish_debug_image(
+    def _draw_and_publish_debug_image(
         self,
         rgb_image,
         header,
         detections,
         shelf_detection=None,
         empty_slots=None,
+        roi_px=None,
+        keep_boxes=None,
+        dropped=0,
     ):
         """책장·책·빈 단 표시를 그린 영상을 ROS Image로 발행합니다."""
         # 원본 영상을 복사해 디버그 표시가 원본 데이터에 영향을 주지 않게 합니다.
         debug_image = rgb_image.copy()
-        # 검출된 모든 상자에 대해 시각화 정보를 그립니다.
-        for detection in detections:
+        # **트레이 ROI** 를 노란 상자로 그립니다 (팔 기준 3D 상자를 화면에 투영한 것).
+        if roi_px is not None:
+            rx1, ry1, rx2, ry2 = roi_px
+            cv2.rectangle(debug_image, (rx1, ry1), (rx2, ry2), (0, 255, 255), 2)
+            cv2.putText(
+                debug_image,
+                f"tray ROI (dropped {dropped})",
+                (rx1 + 4, max(18, ry1 - 6)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+        # ROI 밖이라 버린 책은 **회색 얇은 상자**로 남깁니다 — 왜 안 골랐는지 보이게
+        if keep_boxes is not None:
+            kept = {tuple(b) for b in keep_boxes}
+            for det in detections:
+                if tuple(det['box']) not in kept:
+                    bx1, by1, bx2, by2 = det['box']
+                    cv2.rectangle(
+                        debug_image, (bx1, by1), (bx2, by2), (150, 150, 150), 1)
+            detections = [d for d in detections if tuple(d['box']) in kept]
+        # **신뢰도 1등 한 권만** 그립니다 (로봇팔에 보내는 그 한 권).
+        draw_list = detections
+        if detections and getattr(self, 'publish_best_only', True):
+            draw_list = [max(detections, key=lambda d: d['confidence'])]
+        for detection in draw_list:
             # 검출 상자의 픽셀 좌표를 읽습니다.
             x1, y1, x2, y2 = detection['box']
             # 책 상자를 초록색 사각형으로 표시합니다.
@@ -781,6 +1156,9 @@ class VisionManager(Node):
                 (0, 255, 0),
                 2,
             )
+            # **로봇팔에 보내는 좌표가 바로 이 점**이다 — 눈으로 확인할 수 있게 찍는다
+            cu, cv_ = detection.get('center', ((x1 + x2) // 2, (y1 + y2) // 2))
+            cv2.circle(debug_image, (int(cu), int(cv_)), 5, (0, 0, 255), -1)
             # 화면에 표시할 confidence 문자열을 만듭니다.
             label = f"book {detection['confidence']:.2f}"
             # 상자 위쪽에 검출 class와 confidence를 표시합니다.
@@ -816,12 +1194,22 @@ class VisionManager(Node):
                 cv2.LINE_AA,
             )
         # 빈 단의 중심 픽셀을 빨간색 원으로 표시합니다.
-        for empty_slot in empty_slots or []:
-            u, v = empty_slot['pixel']
+        # **없는 열쇠에 죽지 않습니다.** 빈 단 정보의 구성은 경로마다 다른데,
+        # 그림을 그리다 KeyError 로 노드 전체가 내려간 적이 있습니다
+        # (2026-09-21 GPU PC: KeyError 'row_index' 로 vision_manager 종료 → 파지 중단).
+        slot_items = (
+            [empty_slots] if isinstance(empty_slots, dict)
+            else (empty_slots or [])
+        )
+        for empty_slot in slot_items:
+            pixel = empty_slot.get('pixel')
+            if pixel is None:
+                continue
+            u, v = pixel
             cv2.circle(debug_image, (u, v), 8, (0, 0, 255), -1)
             cv2.putText(
                 debug_image,
-                f"empty row {empty_slot['row_index']}",
+                "empty target",
                 (u + 10, v),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
@@ -830,36 +1218,15 @@ class VisionManager(Node):
                 cv2.LINE_AA,
             )
         # OpenCV BGR 영상을 ROS Image 메시지로 변환합니다.
-        #
-        # 현재 환경의 OpenCV 5에서는 cv_bridge가 사용하는 OpenCV 타입
-        # 상수와 Jazzy의 cv_bridge 확장 모듈이 서로 다른 값을 반환할 수
-        # 있어, 명시적인 ``bgr8`` 변환이 KeyError(16)를 발생시킵니다.
-        # ``passthrough``는 배열의 실제 타입(8UC3)을 그대로 사용하므로
-        # 같은 BGR 바이트 형식을 유지하면서 이 호환성 문제를 피합니다.
-        debug_msg = self.bridge.cv2_to_imgmsg(
-            np.ascontiguousarray(debug_image),
-            encoding='passthrough',
-        )
-        # 실제 바이트 형식은 BGR 8-bit 3채널이므로 ROS 표기는 bgr8로
-        # 유지합니다. 위 변환 단계에서만 cv_bridge의 OpenCV 5 호환성
-        # 문제를 우회합니다.
-        debug_msg.encoding = 'bgr8'
+        # **cv_bridge 를 쓰지 않습니다.** OpenCV 5 에서 CV_CN_SHIFT 가 3→5 로 바뀌어,
+        # cv_bridge 의 타입 표(키 32..36)와 자체 계산값(16)이 어긋나 cv2_to_imgmsg 가
+        # KeyError 로 죽습니다 (2026-09-21 GPU PC 10.10.0.1, cv2 5.0.0 에서 확인).
+        # bgr8 은 바이트를 그대로 옮기면 되므로 직접 만듭니다 — OpenCV 판 번호와 무관합니다.
+        debug_msg = _bgr8_to_imgmsg(debug_image)
         # 원본 RGB와 같은 timestamp/frame을 유지합니다.
         debug_msg.header = header
         # 다른 PC의 rqt_image_view가 구독할 수 있도록 발행합니다.
         self.debug_image_pub.publish(debug_msg)
-        # GUI가 사용 가능하면 같은 디버그 영상을 OpenCV 창에도 표시합니다.
-        if self._debug_window_available:
-            try:
-                cv2.imshow(self._debug_window_name, debug_image)
-                # OpenCV 창 이벤트를 처리하고 화면을 갱신합니다.
-                cv2.waitKey(1)
-            except cv2.error as error:
-                # GUI 오류가 반복되지 않도록 이후 창 표시를 비활성화합니다.
-                self._debug_window_available = False
-                self.get_logger().warning(
-                    f'Disabling debug window: {error}')
-
     def _make_book_pose(self, xyz, source_frame, stamp, image_angle):
         """책 위치와 영상 각도로 target_frame 기준 PoseStamped를 만듭니다."""
         # 영상에서 구한 책 방향에 gripper yaw 보정값을 더합니다.
@@ -882,8 +1249,12 @@ class VisionManager(Node):
         pose.pose.orientation.w = quaternion[3]
         try:
             # pose timestamp에 맞는 카메라→로봇 TF를 조회합니다.
-            transform = self._lookup_transform_with_latest_fallback(
-                self.target_frame, source_frame, stamp)
+            transform = self.tf_buffer.lookup_transform(
+                self.target_frame,
+                source_frame,
+                rclpy.time.Time.from_msg(stamp),
+                timeout=rclpy.duration.Duration(seconds=0.2),
+            )
             # Jazzy API에 맞는 PoseStamped용 TF 변환 함수를 호출합니다.
             return do_transform_pose_stamped(pose, transform)
         except TransformException as error:
@@ -893,65 +1264,65 @@ class VisionManager(Node):
                 f'{self.target_frame}: {error}')
             return None
 
-    def _complete_action_from_empty_slots(self, goal_handle, empty_points):
-        """첫 번째 빈 책장 단을 DetectTargetSlot 결과로 반환합니다."""
-        # action 결과 메시지를 생성합니다.
+    def _complete_action_from_empty_position(
+        self,
+        goal_handle,
+        point,
+    ):
+        """연속 빈 영역에서 계산한 삽입 중심 하나를 반환합니다."""
         result = DetectTargetSlot.Result()
-        # 찾은 빈 단의 개수를 action 후보 개수로 기록합니다.
-        result.candidate_count = len(empty_points)
-        # 빈 단을 하나도 찾지 못하면 action을 실패시킵니다.
-        if not empty_points:
+        result.success = False
+        result.candidate_count = int(point is not None)
+
+        if point is None:
             result.error_code = 3003
-            result.message = 'No empty shelf position was detected.'
+            result.message = "No empty shelf position was detected."
             self._set_action_result(result)
             return
 
-        # 현재는 위쪽에서부터 첫 번째 빈 단을 선택합니다.
-        point = empty_points[0]
+        request = goal_handle.request
+        book_half_depth = max(0.0, float(request.book_width)) * 0.5
+
         self._publish_action_feedback(
             goal_handle,
-            'CALCULATING_POSE',
-            len(empty_points),
+            "CALCULATING_POSE",
+            1,
             1.0,
         )
 
-        # action 결과의 TargetSlot에 빈 단 위치를 기록합니다.
         slot = result.target_slot
         slot.header = point.header
+
         slot.pose.position.x = point.point.x
-        slot.pose.position.y = point.point.y
+        slot.pose.position.y = (
+            point.point.y + book_half_depth + self.slot_center_inset
+        )
         slot.pose.position.z = point.point.z
-        # 로봇팔 삽입 규약인 yaw +90도 회전을 quaternion으로 설정합니다.
+
+        # 책장 삽입 방향은 현재 검증된 +90도 yaw를 유지합니다.
         slot.pose.orientation.x = 0.0
         slot.pose.orientation.y = 0.0
         slot.pose.orientation.z = math.sqrt(0.5)
         slot.pose.orientation.w = math.sqrt(0.5)
 
-        # goal의 책 크기를 이용해 삽입 가능한 폭과 높이를 계산합니다.
-        goal = goal_handle.request
-        slot.available_width = max(
-            0.0,
-            float(goal.book_thickness + 2.0 * goal.safety_margin),
-        )
-        slot.available_height = max(
-            0.0,
-            float(goal.book_height + goal.safety_margin),
-        )
-        # 삽입 관련 파라미터를 결과에 기록합니다.
+        # 연속 깊이 기반 검출은 고정 슬롯의 폭·높이를 가정하지 않습니다.
+        slot.available_width = 0.0
+        slot.available_height = 0.0
         slot.insertion_depth = self.insertion_depth
         slot.pre_insert_offset = self.pre_insert_offset
-        # 깊이 기반 빈 공간 판정의 기본 confidence를 기록합니다.
         slot.confidence = 1.0
+
         result.success = True
         result.error_code = 0
-        result.message = 'Empty shelf position detected from depth.'
+        result.message = "Empty shelf position detected."
+
         self._publish_action_feedback(
             goal_handle,
-            'TRANSFORMING_FRAME',
-            len(empty_points),
+            "TRANSFORMING_FRAME",
+            1,
             slot.confidence,
         )
-        # execute callback이 결과를 받아 action을 끝내도록 저장합니다.
+
         self._set_action_result(result)
 
     def _complete_action_from_books(
@@ -961,85 +1332,109 @@ class VisionManager(Node):
         source_frame,
         stamp,
     ):
-        """가장 신뢰도 높은 책을 임시 TargetSlot action 결과로 반환합니다."""
-        # action 결과 메시지를 생성합니다.
-        result = DetectTargetSlot.Result()
-        # 이번 프레임에서 찾은 후보 수를 기록합니다.
+        """가장 신뢰도가 높은 책을 GraspObservation으로 반환합니다."""
+        result = DetectGraspPoint.Result()
+        result.success = False
         result.candidate_count = len(detected_targets)
-        # 책 후보가 하나도 없으면 실패 결과를 저장합니다.
+
         if not detected_targets:
             result.error_code = 3003
-            result.message = 'No book candidate was detected.'
+            result.message = "No book candidate was detected."
             self._set_action_result(result)
             return
 
-        # confidence가 가장 높은 책을 action 대표 후보로 선택합니다.
         target = max(
             detected_targets,
-            key=lambda candidate: candidate['confidence'],
+            key=lambda candidate: candidate["confidence"],
         )
-        # 대표 후보의 위치를 target_frame으로 변환합니다.
-        point = self._transform_xyz(target['xyz'], source_frame, stamp)
-        # 변환에 실패하면 action 실패 결과를 저장합니다.
+
+        point = self._transform_xyz(
+            target["xyz"],
+            source_frame,
+            stamp,
+        )
+
         if point is None:
             result.error_code = 3004
-            result.message = 'Could not transform detected book coordinates.'
+            result.message = (
+                "Could not transform detected book coordinates."
+            )
             self._set_action_result(result)
             return
 
-        # pose 계산 단계와 대표 confidence를 feedback으로 보냅니다.
-        self._publish_action_feedback(
-            goal_handle, 'CALCULATING_POSE', len(detected_targets),
-            target['confidence'])
-        # 결과 TargetSlot 객체에 대표 책의 위치를 기록합니다.
-        slot = result.target_slot
-        slot.header = point.header
-        slot.pose.position.x = point.point.x
-        slot.pose.position.y = point.point.y
-        slot.pose.position.z = point.point.z
-        # 대표 책의 영상 각도와 gripper 보정값으로 방향을 계산합니다.
-        quaternion = self._quaternion_from_rpy(
-            self.gripper_roll,
-            self.gripper_pitch,
-            target['image_angle'] + self.gripper_yaw_offset,
+        book_pose = self._make_book_pose(
+            target["xyz"],
+            source_frame,
+            stamp,
+            target["image_angle"],
         )
-        slot.pose.orientation.x = quaternion[0]
-        slot.pose.orientation.y = quaternion[1]
-        slot.pose.orientation.z = quaternion[2]
-        slot.pose.orientation.w = quaternion[3]
 
-        # action goal에서 책 크기와 안전 여유를 읽습니다.
-        goal = goal_handle.request
-        # 책을 잡을 때 필요한 허용 폭을 계산합니다.
-        slot.available_width = max(
-            0.0, float(goal.book_thickness + 2.0 * goal.safety_margin))
-        # 책 높이와 안전 여유를 이용해 허용 높이를 계산합니다.
-        slot.available_height = max(
-            0.0, float(goal.book_height + goal.safety_margin))
-        # 삽입 관련 파라미터를 결과 슬롯에 기록합니다.
-        slot.insertion_depth = self.insertion_depth
-        slot.pre_insert_offset = self.pre_insert_offset
-        # 대표 검출의 confidence를 결과에 기록합니다.
-        slot.confidence = target['confidence']
-        # 현재 구현에서는 대표 책 후보를 성공 결과로 반환합니다.
+        if book_pose is None:
+            result.error_code = 3004
+            result.message = (
+                "Could not transform detected book orientation."
+            )
+            self._set_action_result(result)
+            return
+
+        self._publish_action_feedback(
+            goal_handle,
+            "CALCULATING_POSE",
+            len(detected_targets),
+            target["confidence"],
+        )
+
+        q = book_pose.pose.orientation
+
+        sin_yaw = 2.0 * (
+            q.w * q.z
+            + q.x * q.y
+        )
+        cos_yaw = 1.0 - 2.0 * (
+            q.y * q.y
+            + q.z * q.z
+        )
+        spine_yaw = math.atan2(sin_yaw, cos_yaw)
+
+        grasp = result.grasp
+        grasp.header = point.header
+        grasp.top_center = point.point
+        grasp.spine_yaw = float(spine_yaw)
+
+        # 0이면 책 치수를 확정하지 않습니다. 현재 5권 트레이에서는 manipulation이
+        # 관측 x로 슬롯을 고른 뒤 그 슬롯의 실제 교정 치수를 사용합니다.
+        grasp.thickness = self.default_book_thickness
+        grasp.width = self.default_book_width
+        grasp.height = self.default_book_height
+        grasp.confidence = float(target["confidence"])
+
         result.success = True
         result.error_code = 0
-        result.message = 'Book candidate converted to TargetSlot.'
-        # action의 마지막 변환 단계 feedback을 보냅니다.
+        result.message = "Book grasp observation detected."
+
         self._publish_action_feedback(
-            goal_handle, 'TRANSFORMING_FRAME', len(detected_targets),
-            slot.confidence)
-        # execute callback이 결과를 가져갈 수 있도록 저장하고 이벤트를 깨웁니다.
+            goal_handle,
+            "TRANSFORMING_FRAME",
+            len(detected_targets),
+            grasp.confidence,
+        )
+
         self._set_action_result(result)
 
     def _finish_action_with_failure(self, error_code, message):
-        # 실패 상태를 담은 action 결과 메시지를 생성합니다.
-        result = DetectTargetSlot.Result()
-        # 실패 코드와 설명을 기록합니다.
-        result.error_code = error_code
-        result.message = message
-        # 실행 중인 action에 실패 결과를 전달합니다.
+        with self._action_lock:
+            action_kind = self._active_kind
+
+        if action_kind is None:
+            return
+
+        result = self._new_action_result(action_kind)
+        result.success = False
+        result.error_code = int(error_code)
+        result.message = str(message)
+
         self._set_action_result(result)
+
 
     def _set_action_result(self, result):
         # action 상태를 센서 callback과 공유하므로 lock을 획득합니다.
@@ -1098,10 +1493,15 @@ class VisionManager(Node):
     #     )
 
     def _detect_books(self, rgb_image):
-        # confidence 필터를 통과한 책 검출 결과를 저장할 목록입니다.
+        # 보조 confidence 이상인 책 검출 결과를 저장합니다. 기본/보조 후보
+        # 선택은 Depth와 접근 가능한 ROI를 확인한 뒤 수행합니다.
         detections = []
         # 입력 RGB 이미지 한 장을 YOLO 모델로 추론합니다.
-        results = self.model(rgb_image, verbose=False)
+        results = self.model(
+            rgb_image,
+            verbose=False,
+            conf=self.fallback_confidence_threshold,
+        )
         # YOLO가 반환한 결과 묶음을 순회합니다.
         for result in results:
             # segmentation mask가 있으면 mask 텐서를 가져옵니다.
@@ -1110,9 +1510,6 @@ class VisionManager(Node):
             for index, box in enumerate(result.boxes):
                 # 현재 상자의 confidence를 실수형으로 변환합니다.
                 confidence = float(box.conf[0])
-                # 설정된 최소 confidence보다 낮으면 버립니다.
-                if confidence < self.confidence_threshold:
-                    continue
                 # 현재 상자의 class 번호를 읽습니다.
                 class_id = int(box.cls[0])
                 # class 번호를 모델의 class 이름으로 변환합니다.
@@ -1155,7 +1552,10 @@ def main(args=None):
     # vision_manager 노드를 생성합니다.
     node = VisionManager()
     # action과 센서 callback을 병렬 처리할 executor를 생성합니다.
-    executor = rclpy.executors.MultiThreadedExecutor(num_threads=2)
+    # 한 스레드는 action 결과를 기다리고, 나머지는 RGB/Depth/CameraInfo와
+    # TF·서비스를 처리합니다. 센서 세 스트림이 action 대기를 굶기지 않도록
+    # 최소 네 스레드를 둡니다.
+    executor = rclpy.executors.MultiThreadedExecutor(num_threads=4)
     # executor에 노드를 등록합니다.
     executor.add_node(node)
 
@@ -1168,9 +1568,6 @@ def main(args=None):
         node.get_logger().warn("강제 종료")
 
     finally:
-        # OpenCV 창이 있다면 모두 닫습니다.
-        cv2.destroyAllWindows()
-
         # executor를 종료하고 노드를 제거합니다.
         executor.shutdown()
         node.destroy_node()

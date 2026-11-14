@@ -2,116 +2,119 @@
 
 ## 1. 프로젝트 목표
 
-무인반납기에서 반환된 책 묶음을 트레이 단위로 인수하고, 책의 RFID·분류코드를 기준으로 목표 서가를 찾은 뒤 AMR과 로봇팔을 이용하여 빈 공간에 책을 배치한다.
+Isaac Sim의 무인반납기에서 반환된 트레이를 AMR이 인수하고, 분류코드에 맞는 서가로 자율주행한 뒤 RGB-D 비전과 Franka 로봇팔로 책을 빈 공간에 배치한다. 현재 시연 기준은 `book_001` 한 권의 전체 사이클이다.
 
-1차 개발에서는 마커를 사용하지 않는다. YAML은 책의 분류코드에 맞는 목표 서가와 AMR 접근 위치를 제공하고, 서가에 도착한 이후의 정확한 빈 공간 위치는 RGB-D 비전이 직접 탐지한다.
+목표 서가와 AMR 접근 경로는 YAML에서 읽고, 실제 빈 슬롯과 트레이 위 책은 손목 RGB-D 카메라로 판단한다. ArUco 마커는 사용하지 않는다.
 
-## 2. 1차 구현 범위
+## 2. 현재 구현 범위
 
-- 무인반납기 동작을 ROS2 노드로 가상 구현
-- RFID와 분류코드를 포함한 트레이 작업 생성
-- YAML에서 목표 서가와 접근 waypoint 조회
-- AMR의 무인반납기 및 서가 자율주행
-- 서가 앞 카메라 관측 위치 정렬
-- RGB-D 영상에서 서가 영역과 삽입 가능한 빈 공간 탐지
-- 트레이 위 책의 위치와 자세 탐지
-- 로봇팔의 책 파지, 사전 삽입, 저속 삽입, 해제와 후퇴
-- 배치 완료 확인 및 YAML 상태 갱신
-- AMR 주차 위치 복귀
+- Isaac Sim 5.1 기반 도서관, Ridgeback-Franka, LiDAR, RGB-D 카메라 시뮬레이션
+- 시나리오 `STOPPED/RESETTING/READY/RUNNING/FAILED` 상태와 Timeline 재시작 처리
+- 가상 반납기의 `TrayJob` 생성과 실제 트레이 적재 `LoadTray` 액션
+- 분류코드 기반 서가·경유점·책 프로파일 계획
+- Nav2 State Lattice/MPPI 기반 경유점 주행, AMCL, 정밀 위치·yaw 정렬
+- LiDAR PointCloud2를 `/scan`으로 변환하고 collision monitor를 거친 속도 명령 사용
+- 팔 스윕 중 YOLO 및 depth 기반 빈 슬롯 탐지
+- 선택 슬롯에 맞춘 AMR 횡정렬 후 트레이 책 재인식
+- 트레이 슬롯 교정값을 이용한 파지 목표 보정
+- Isaac 조작 실행기의 계획, 파지, 운반, 삽입, 해제, 후퇴, 배치 검증
+- 작업 완료 후 서가에서 직접 후퇴하고 HOME으로 복귀
+- PC A/B 준비 상태를 통합한 `/system/status`와 작업 시작 게이트
+- PC C 웹 대시보드의 상태·위치·지도 표시 및 작업 시작
+- PC B에서 Nav2 RViz 화면 자동 실행
 
-## 3. 1차에서 제한하는 조건
+## 3. 현재 시연 조건과 제한
 
-초기 구현의 성공 가능성을 높이기 위해 다음 조건을 둔다.
-
-- 한 종류의 책장 구조를 사용한다.
-- 책장은 카메라 정면에 가깝게 배치한다.
-- RGB-D 카메라를 사용한다.
-- 책은 세워서 삽입한다.
-- 기울어지거나 쓰러진 책은 자동 처리 대상에서 제외한다.
-- 빈 공간의 폭이 대상 책 두께와 안전 여유보다 큰 경우에만 삽입한다.
-- 여러 빈 공간이 있으면 정책에 따라 가장 넓거나 접근하기 쉬운 공간을 선택한다.
-- 인식 신뢰도가 낮으면 한 번 재촬영하고, 계속 실패하면 작업을 중단한다.
-- AMR 이동 중 로봇팔은 주행 안전 자세를 유지한다.
-- 로봇팔 작업 중에는 AMR의 이동 명령을 잠근다.
+- 기본 작업은 `book_001`, RFID `rfid_001`, 분류코드 `005.7` 한 권이다.
+- 분류코드 `0`~`4`는 `shelf_01`, `5`~`9`는 `shelf_02`로 계획하지만, 현재 검증 좌표와 조작 범위는 `shelf_01` 중심이다.
+- `shelf_map.yaml`의 `calibration_required`가 `true`이므로 좌표 변경 시 현장 재검증이 필요하다.
+- 책은 트레이의 교정된 슬롯에 세워져 있고 서가에도 세워서 삽입한다고 가정한다.
+- 조작 전체 자동 흐름은 `executor=sim`에서만 지원한다.
+- 성공 기록은 현재 실행 중 메모리에만 유지한다. YAML 점유 상태 갱신과 DB 영속화는 구현되어 있지 않다.
+- `shelf_02`, 다권 반복 성공률, 복구 후 자동 재개는 최종 검증 대상이다.
 
 ## 4. 팀 역할
 
 | 담당자 | 주 역할 | 담당 패키지 | 주요 책임 |
 | --- | --- | --- | --- |
-| A 이현민 | FSM·통합 | shelving_system, shelving_interfaces | 작업 순서, YAML, 무인반납기, 공통 통신, PC A/B 실행 |
-| B 윤재민 | 비전 | shelving_perception | 서가·빈 공간 탐지, 트레이 책 탐지, 좌표 변환 |
-| C 이동준 | AMR | shelving_navigation | Nav2, waypoint 이동, 서가·반납기 앞 정렬 |
-| D 김도윤 | 로봇팔 | shelving_manipulation | 파지 계획, 책 삽입, 그리퍼와 안전 후퇴 |
+| A 이현민 | FSM·통합 | `shelving_system`, `shelving_interfaces`, `shelving_web` | 작업 순서, 공통 계약, 시나리오/트레이 bridge, 준비 상태, 관제 통합 |
+| B 윤재민 | 비전 | `shelving_perception` | 트레이 책·서가 빈 슬롯 검출, depth와 TF 기반 3D 결과 |
+| C 이동준 | AMR | `shelving_navigation` | Nav2, 경유점 이동, 정밀 정렬, 서가 후퇴, PC B 실행 |
+| D 김도윤 | 로봇팔 | `shelving_manipulation`, `isaac_sim/lib/controllers` | 선반 스윕, 파지 계획, 삽입 실행, 검증과 안전 정지 |
 
-## 5. 저장소 구조 원칙
+팀원 역할은 초기 계획과 동일하며, 공통 launch·인터페이스·Isaac 통합 파일은 관련 담당자가 함께 검토한다.
 
-이 프로젝트는 하나의 Git 저장소와 하나의 ROS2 workspace를 사용한다. PC별로 소스 폴더를 나누지 않는다. 모든 팀원이 같은 저장소를 받고, PC A와 PC B에서 서로 다른 launch 파일을 실행한다.
+## 5. 저장소 구조
 
-~~~text
-book-shelving-system
-└── ros2_ws
-    └── src
-        ├── shelving_interfaces
-        ├── shelving_system
-        ├── shelving_perception
-        ├── shelving_navigation
-        └── shelving_manipulation
-~~~
+```text
+book-shelving-system/
+├── config/                 # PC 간 ROS 2 네트워크 설정
+├── docs/                   # 프로젝트 문서
+├── isaac_sim/              # 시뮬레이션, 센서·트레이·조작 실행기
+├── ros2_ws/src/
+│   ├── shelving_interfaces # 공통 msg/action
+│   ├── shelving_system     # FSM, planner, bridge, supervisor
+│   ├── shelving_perception # RGB-D/YOLO 인식
+│   ├── shelving_navigation # Nav2와 정밀 정렬
+│   ├── shelving_manipulation # PlaceBook 조정 계층
+│   └── shelving_web        # PC C 웹 관제
+├── scripts/                # 빌드·PC별 실행·비상 정지
+└── tests/                  # 보조 데이터와 시험 자료
+```
 
-패키지 분리는 별도 프로젝트를 의미하지 않는다. 각 패키지는 담당자가 독립적으로 개발할 수 있는 큰 기능 단위이며 전체 workspace는 colcon build 한 번으로 함께 빌드한다.
+하나의 Git 저장소와 ROS 2 workspace를 사용한다. PC별 소스 복사본을 만들지 않고 같은 commit을 배포한 뒤 PC별 실행 스크립트만 다르게 사용한다.
 
 ## 6. 패키지 책임
 
-### shelving_interfaces
+### `shelving_interfaces`
 
-모든 패키지가 함께 사용하는 ROS2 메시지와 액션을 정의한다. 인터페이스 변경은 네 명이 합의하고 이현민이 반영한다.
+6개 메시지(`TrayJob`, `RobotStatus`, `TargetSlot`, `GraspObservation`, `ScenarioState`, `SystemStatus`)와 5개 액션(`NavigateToTarget`, `LoadTray`, `DetectGraspPoint`, `DetectTargetSlot`, `PlaceBook`)을 정의한다.
 
-### shelving_system
+### `shelving_system`
 
-PC A의 핵심 패키지다. Task Manager, FSM, 작업 계획, YAML 데이터 관리, 무인반납기 가상 노드와 PC A/B launch 파일을 포함한다. 기존의 core, simulation, bringup 패키지를 하나로 합쳐 초보자가 실행 흐름을 한곳에서 확인할 수 있게 한다.
+Task Manager FSM, YAML 작업 계획, 가상 반납기, Isaac 상태·트레이 bridge, 전체 준비 상태 감독과 PC A/B 통합 launch를 제공한다.
 
-### shelving_perception
+### `shelving_perception`
 
-PC B에서 실행한다. 서가와 빈 공간을 함께 탐지하고, 트레이의 책 pose를 계산하며, 카메라 좌표를 로봇팔 기준 좌표로 변환한다.
+`/rgb`, `/depth`, `/camera_info`를 동기화하고 YOLO 모델과 depth를 이용해 트레이 책의 `GraspObservation`과 서가의 `TargetSlot`을 `arm_base_link` 기준으로 반환한다.
 
-### shelving_navigation
+### `shelving_navigation`
 
-PC B에서 실행한다. Nav2 기반 자율주행과 무인반납기·서가 앞 작업 위치 정렬을 담당한다. 서가 슬롯의 정확한 좌표는 결정하지 않고 카메라가 관측하기 좋은 위치까지만 AMR을 이동시킨다.
+map server, AMCL, pointcloud-to-laserscan, Nav2 서버와 `/navigate_to_target` 액션을 제공한다. 경유점이 있으면 `NavigateThroughPoses`, 없으면 `NavigateToPose`를 쓰며 마지막 구간은 저속 정밀 정렬한다.
 
-### shelving_manipulation
+### `shelving_manipulation`
 
-PC B에서 실행한다. 트레이의 책을 파지하고, 비전이 제공한 빈 공간 pose로 접근하여 책을 삽입한 뒤 그리퍼를 해제하고 후퇴한다.
+빈 goal의 `/place_book` 요청 한 번으로 선반 스윕, 슬롯 선택, AMR 횡정렬, 책 인식, 목표 검증, Isaac 조작 명령과 배치 검증까지 조정한다.
+
+### `shelving_web`
+
+`/system/status`와 `/amcl_pose`를 HTTP/WebSocket으로 전달하고 `/system/start_cycle`을 호출하는 PC C 대시보드를 제공한다.
 
 ## 7. 컴퓨터별 실행 책임
 
 | 컴퓨터 | 실행 내용 |
 | --- | --- |
-| PC A | Isaac Sim, shelving_system, Task Manager/FSM, YAML, 무인반납기 가상 노드 |
-| PC B | shelving_perception, shelving_navigation, shelving_manipulation |
-| 개인 PC | ROS2 상태·토픽·로그 확인 |
-| 3차 관제 PC | 웹 작업 명령, 상태, 재고와 이력 조회 |
+| PC A | Isaac Sim, scenario/tray/manipulation runtime, `simulation_bridge_node`, `task_manager_node`, `return_machine_node`, `system_supervisor_node` |
+| PC B | Nav2/AMCL, perception, manipulation 조정 노드, TF 별칭, RViz |
+| PC C | FastAPI 웹 게이트웨이와 운영자 대시보드 |
 
-## 8. 단계별 확장
+세 PC는 `ROS_DOMAIN_ID=130`, `rmw_fastrtps_cpp`와 동일한 유선 Fast DDS 설정을 사용한다.
 
-### 1차
+## 8. 현재 정상 완료 조건
 
-YAML과 RGB-D 기반의 정상 플로우를 완성한다. 목표 서가까지는 YAML waypoint를 사용하고 정확한 빈 공간은 비전으로 탐지한다.
-
-### 2차
-
-PostgreSQL, 대체 슬롯 선택, 재시도·복구 FSM, 다양한 서가와 책 배치 조건을 추가한다. 필요할 때만 database 코드를 생성한다.
-
-### 3차
-
-Control API와 HTML 관제 화면을 추가한다. 작업 시작·중지, 현재 상태, 재고, 오류와 과거 작업 이력을 제공한다. 1차 저장소에는 아직 사용하지 않는 DB·대시보드 빈 폴더를 미리 만들지 않는다.
+1. 시스템 상태가 `READY`다.
+2. 작업 시작 요청이 수락되고 `TrayJob`이 한 번 발행된다.
+3. AMR이 반납기에서 트레이를 인수하고 목표 서가에 도착한다.
+4. 스윕·비전·정렬 후 유효한 슬롯과 책을 선택한다.
+5. 조작 실행기가 책을 배치하고 `placement_verified=true`를 반환한다.
+6. Task Manager가 완료 책을 메모리에 기록한다.
+7. AMR이 서가에서 후퇴해 HOME으로 복귀하고 FSM과 시스템 상태가 다시 `IDLE/READY`가 된다.
 
 ## 9. 개발 원칙
 
-- 패키지 사이에서 다른 담당자의 Python 모듈을 직접 import하지 않는다.
-- 패키지 간 데이터는 shelving_interfaces의 ROS2 메시지와 액션으로 전달한다.
-- 파일 하나에는 이름으로 설명할 수 있는 하나의 책임만 둔다.
-- 1차에서 실제로 사용하는 파일만 만든다.
-- 설정값, 좌표와 제한값을 Python 코드에 하드코딩하지 않고 YAML에 둔다.
-- 모든 작업 로그에 job_id와 book_id를 포함한다.
-- 기능 구현보다 정상 플로우 연결과 반복 재현을 우선한다.
-
+- 패키지 간 계약은 `shelving_interfaces`를 사용한다.
+- 좌표에는 frame과 timestamp를 유지하고 길이는 m, 각도는 rad를 사용한다.
+- 시뮬레이터 raw JSON 토픽은 bridge 또는 manipulation 경계 안에서만 사용한다.
+- 안전 검증을 통과하기 전에 로봇팔 명령을 실행하지 않는다.
+- 실행 문서에는 구현된 기능과 계획 기능을 구분해서 적는다.
+- 영속화되지 않는 값을 YAML/DB에 저장됐다고 표현하지 않는다.

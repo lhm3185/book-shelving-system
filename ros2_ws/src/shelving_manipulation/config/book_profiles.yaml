@@ -1,30 +1,62 @@
-# 로봇팔이 쓰는 책 치수와 1차 트레이 칸 좌표.
-# 좌표 계약: arm_base_link, REP-103, m, **AABB 중심** (에셋 원점 아님)
+# 로봇팔이 쓰는 책 치수와 현재 5권 트레이의 슬롯별 교정값.
+# 좌표 계약: arm_base_link, REP-103, m, AABB 중심 (에셋 원점 아님)
 #
-# 값 출처: Isaac Sim 5.1.0, 레벨 ing_library_env_v3 + tray_v1, 2026-09-17
-#          (~/arm/isaac/multi_book.py --plan-only 의 FRAME 출력. panda_link0 = arm_base_link, 회전 없음)
+# 값 출처: isaac_sim/assets/props/tray/tray_set.usd의 실제 AABB와
+# isaac_sim/config/scenes.yaml의 Ridgeback-Franka handoff 배치, 2026-09-27.
+# perception은 어느 책인지 선택하고 실제 파지 중심·치수는 이 고정 지그 설정을 사용한다.
 
 profiles:
   default:
-    thickness: 0.0353   # 책등 폭
-    height: 0.2374      # 책등 길이 (세웠을 때 높이)
-    width: 0.1631       # 책등 → 앞마구리 (서가에서의 깊이)
-    mass: 0.5           # kg (Isaac 책 질량)
+    # 빈 선반 스캔은 집을 책을 고르기 전에 수행되므로 5권의 최대 외형을 사용한다.
+    thickness: 0.044274
+    height: 0.227518
+    width: 0.153560
+    mass: 0.5
 
 tray:
   frame_id: arm_base_link
-  # 트레이에 책등이 위로 선 책의 AABB 중심. 칸 간격 0.075 m
   slots:
-    - {index: 0, center: [-0.6623, 0.0788, 0.1119]}
-    - {index: 1, center: [-0.5873, 0.0788, 0.1118]}
-    - {index: 2, center: [-0.5123, 0.0788, 0.1118]}
-    - {index: 3, center: [-0.4373, 0.0788, 0.1117]}
-    - {index: 4, center: [-0.3623, 0.0788, 0.1116]}
-    - {index: 5, center: [-0.2873, 0.0788, 0.1116]}
-  # book_id → 칸 번호. 없는 book_id 는 아직 꺼내지 않은 첫 칸
+    - index: 0
+      asset: cover31
+      center: [-0.526487, -0.014704, 0.178021]
+      book: {thickness: 0.033644, height: 0.226389, width: 0.151620}
+    - index: 1
+      asset: cover41
+      center: [-0.435167, -0.015772, 0.195363]
+      book: {thickness: 0.044274, height: 0.226411, width: 0.153139}
+    - index: 2
+      asset: cover58
+      center: [-0.351134, -0.015748, 0.206752]
+      book: {thickness: 0.035165, height: 0.226495, width: 0.151699}
+    - index: 3
+      asset: cover64
+      center: [-0.256563, -0.015297, 0.192066]
+      book: {thickness: 0.043118, height: 0.227518, width: 0.152199}
+    - index: 4
+      asset: cover60
+      center: [-0.162005, -0.019663, 0.190243]
+      book: {thickness: 0.038157, height: 0.217685, width: 0.153560}
   assignments: {}
-
-# 참고: 검증된 꽂을 위치 (TargetSlot.position = 꽂힌 책 AABB 중심, 서가 1번 칸)
+# 참고: 검증된 꽂을 위치 (TargetSlot.position = 꽂힌 책 AABB 중심). 삽입 방향 arm_base_link +Y (yaw +90°)
+#
+# **로봇마다 다르다.** 좌표는 팔 기준인데 팔 베이스 높이가 로봇마다 달라서, 같은 선반 단이라도
+# 팔 기준 z 가 달라진다. 높이만 다르고 서가·단은 같은 것을 쓴다.
+#
+# Franka (팔 베이스 월드 z 0.28, 선반판 윗면 0.498)      2026-09-17 검증
 #   [-0.5097, 0.5495, 0.3400]  [-0.4297, 0.5495, 0.3400]
 #   [-0.3497, 0.5495, 0.3399]  [-0.2697, 0.5495, 0.3398]
-#   트레이 6칸 × 4곳 전부 계획 통과. 삽입 방향 arm_base_link +Y (yaw +90°)
+#
+# M0609 결합체 (팔 베이스 월드 z 0.655, 선반판 윗면 1.042)  2026-09-20
+#   [-0.4697, 0.5495, 0.5097]  [-0.3897, 0.5495, 0.5097]
+#   [-0.3097, 0.5495, 0.5097]  [-0.2297, 0.5495, 0.5097]
+#   - z 유도: 선반판 1.042 + 책높이/2 0.1187 + **삽입 여유 0.004** - 베이스 0.655 = 0.5097.
+#     마지막 4 mm 는 book_scene.plan_job 의 grip_z = floor_z + Lb/2 + 0.004 에서 온다.
+#     Franka 계약값 0.3399 도 같은 식으로 나온다 (0.497 + 0.1187 + 0.004 = 0.6197, 오차 0.2 mm).
+#     처음에 이 4 mm 를 빠뜨려 0.5056 을 썼다 — 허용 오차 8 mm 의 절반을 그냥 까먹는 값이었다.
+#     (웹 클로드 v20 회신이 두 로봇의 '선반판 위 띄움' 이 3.3 mm 다르다고 짚어서 찾았다)
+#   - 단: 팔 베이스가 37 cm 높아 Franka 가 쓰던 단(0.498)은 팔 기준 -0.04 가 된다.
+#     그 단은 받침판 윗면(0.655)보다 낮아 AMR 몸체가 서가에 먼저 닿는다 → 한 단 위(1.042)를 쓴다.
+#   - x: 원래 4칸을 그대로 쓰면 가장 먼 -0.5097 에 IK 해가 없다 (닿는 대역 -0.48~-0.18).
+#     간격 0.08 을 유지한 채 전체를 +0.04 옮겨 4/4 로 만들었다 (check_reach.py --scan-x).
+#   - 로봇 배치: 서가 shelf_brown__book_shelf_05 앞, 팔 베이스 월드 [2.922, -0.895, 0.655], yaw 0
+#     (place_robot_at_shelf.py. 받침판 모서리와 서가 앞면 사이 4.8 cm)

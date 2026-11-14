@@ -14,7 +14,7 @@ from shelving_interfaces.action import PlaceBook
 
 
 class MockManipulationServer(Node):
-    """Simulate grasping and placing a book."""
+    """Simulate the complete internal book-placement workflow."""
 
     def __init__(self) -> None:
         """Initialize the mock manipulation server."""
@@ -49,65 +49,17 @@ class MockManipulationServer(Node):
 
     def _goal_callback(
         self,
-        goal_request: PlaceBook.Goal,
+        _goal_request: PlaceBook.Goal,
     ) -> GoalResponse:
-        """Validate and accept a book-placement goal."""
-        if not goal_request.job_id.strip():
-            self.get_logger().warning(
-                "Rejected placement goal: "
-                "job_id is empty."
-            )
-            return GoalResponse.REJECT
-
-        if not goal_request.book_id.strip():
-            self.get_logger().warning(
-                "Rejected placement goal: "
-                "book_id is empty."
-            )
-            return GoalResponse.REJECT
-
-        if not goal_request.target_slot.header.frame_id:
-            self.get_logger().warning(
-                "Rejected placement goal: "
-                "target-slot frame_id is empty."
-            )
-            return GoalResponse.REJECT
-
-        dimensions = {
-            "book_width": goal_request.book_width,
-            "book_height": goal_request.book_height,
-            "book_thickness": goal_request.book_thickness,
-            "insertion_speed": goal_request.insertion_speed,
-        }
-
-        for field_name, value in dimensions.items():
-            if value <= 0.0:
-                self.get_logger().warning(
-                    "Rejected placement goal: "
-                    f"{field_name} must be positive."
-                )
-                return GoalResponse.REJECT
-
-        if goal_request.target_slot.confidence <= 0.0:
-            self.get_logger().warning(
-                "Rejected placement goal: "
-                "target-slot confidence must be positive."
-            )
-            return GoalResponse.REJECT
-
+        """Accept an empty book-placement command."""
         self.get_logger().info(
-            "Accepted placement goal: "
-            f"job_id={goal_request.job_id}, "
-            f"book_id={goal_request.book_id}, "
-            f"target_frame="
-            f"{goal_request.target_slot.header.frame_id}"
+            "Accepted book-placement command."
         )
-
         return GoalResponse.ACCEPT
 
     def _cancel_callback(
         self,
-        goal_handle,
+        _goal_handle,
     ) -> CancelResponse:
         """Accept a placement cancellation request."""
         self.get_logger().info(
@@ -119,37 +71,32 @@ class MockManipulationServer(Node):
         self,
         goal_handle,
     ) -> PlaceBook.Result:
-        """Simulate book placement feedback and success."""
-        request = goal_handle.request
+        """Simulate perception, grasping, insertion, and verification."""
         step_delay = float(
             self.get_parameter("step_delay_sec").value
         )
 
         phases = [
-            ("DETECTING_BOOK", 0.10),
-            ("PLANNING_GRASP", 0.20),
-            ("APPROACHING_BOOK", 0.35),
-            ("GRASPING", 0.45),
-            ("MOVING_TO_PRE_INSERT", 0.60),
-            ("INSERTING", 0.75),
-            ("RELEASING", 0.85),
-            ("RETREATING", 0.93),
-            ("VERIFYING", 1.00),
+            "MOVING_TO_TRAY_VIEW",
+            "DETECTING_TRAY_BOOK",
+            "MOVING_TO_SHELF_VIEW",
+            "DETECTING_EMPTY_SLOT",
+            "GRASPING_BOOK",
+            "PLANNING_INSERTION",
+            "MOVING_TO_PRE_INSERT",
+            "INSERTING_BOOK",
+            "RELEASING_BOOK",
+            "RETREATING",
+            "VERIFYING_PLACEMENT",
         ]
 
-        current_phase = ""
-
-        for phase, progress in phases:
-            current_phase = phase
-
+        for phase in phases:
             if goal_handle.is_cancel_requested:
                 goal_handle.canceled()
 
                 result = PlaceBook.Result()
                 result.success = False
-                result.failed_phase = current_phase
-                result.placement_verified = False
-                result.error_code = 4002
+                result.error_code = 4003
                 result.message = (
                     "Book placement was canceled."
                 )
@@ -158,14 +105,10 @@ class MockManipulationServer(Node):
 
             feedback = PlaceBook.Feedback()
             feedback.phase = phase
-            feedback.progress = progress
-
             goal_handle.publish_feedback(feedback)
 
             self.get_logger().info(
-                "Placement feedback: "
-                f"phase={phase}, "
-                f"progress={progress:.2f}"
+                f"Placement feedback: phase={phase}"
             )
 
             time.sleep(step_delay)
@@ -174,18 +117,13 @@ class MockManipulationServer(Node):
 
         result = PlaceBook.Result()
         result.success = True
-        result.failed_phase = ""
-        result.placement_verified = True
         result.error_code = 0
         result.message = (
-            f"Book '{request.book_id}' was placed "
-            "successfully."
+            "Mock book placement completed successfully."
         )
 
         self.get_logger().info(
-            "Mock book placement completed: "
-            f"job_id={request.job_id}, "
-            f"book_id={request.book_id}"
+            "Mock book placement completed."
         )
 
         return result

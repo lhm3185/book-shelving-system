@@ -2,24 +2,34 @@
 
 from pathlib import Path
 
+import math
+
 import rclpy
 from ament_index_python.packages import (
     get_package_share_directory,
 )
+from geometry_msgs.msg import PoseStamped
 from rclpy.action import ActionClient
 from rclpy.node import Node
+from rclpy.time import Time
+from tf2_ros import Buffer, TransformException, TransformListener
 from rclpy.qos import (
+    DurabilityPolicy,
     HistoryPolicy,
     QoSProfile,
     ReliabilityPolicy,
 )
 
 from shelving_interfaces.action import (
-    DetectTargetSlot,
+    LoadTray,
     NavigateToTarget,
     PlaceBook,
 )
-from shelving_interfaces.msg import RobotStatus, TrayJob
+from shelving_interfaces.msg import (
+    RobotStatus,
+    ScenarioState,
+    TrayJob,
+)
 from shelving_system.job_planner import (
     InvalidTrayJobError,
     JobPlan,
@@ -46,11 +56,10 @@ class TaskManagerNode(Node):
     ERROR_NAVIGATION_FAILED = 2003
     ERROR_NAVIGATION_RESULT = 2004
 
-    ERROR_PERCEPTION_SERVER = 3001
-    ERROR_PERCEPTION_REJECTED = 3002
-    ERROR_PERCEPTION_FAILED = 3003
-    ERROR_PERCEPTION_RESULT = 3004
-    ERROR_LOW_SLOT_CONFIDENCE = 3005
+    ERROR_TRAY_SERVER = 3001
+    ERROR_TRAY_REJECTED = 3002
+    ERROR_TRAY_TIMEOUT = 3003
+    ERROR_TRAY_FAILED = 3004
 
     ERROR_MANIPULATION_SERVER = 4001
     ERROR_MANIPULATION_REJECTED = 4002
@@ -66,27 +75,48 @@ class TaskManagerNode(Node):
 
         self.declare_parameter("tray_job_topic", "/return_machine/tray_job") 
         self.declare_parameter("status_topic", "/system/state")
+        self.declare_parameter(
+            "scenario_state_topic",
+            "/scenario/state",
+        )
 
         self.declare_parameter("navigation_action", "/navigate_to_target")
 
-        self.declare_parameter('perception_action', '/detect_target_slot')
-        self.declare_parameter('minimum_slot_confidence', 0.70)
-
         self.declare_parameter('manipulation_action', '/place_book')
-        self.declare_parameter('insertion_speed',0.03)
 
         self.declare_parameter(
             "navigation_server_timeout_sec",
             5.0,
         )
+
+        # 위치 허용오차 5cm를 고려하여 65cm 목표를 보내고,
+        # 실제로는 약 60cm 책장에서 후퇴하도록 한다.
         self.declare_parameter(
-            "position_tolerance",
-            0.1,
+            "shelf_retreat_goal_distance_m",
+            0.65,
         )
         self.declare_parameter(
-            "yaw_tolerance",
-            0.1,
+            "global_frame",
+            "map",
         )
+        self.declare_parameter(
+            "robot_base_frame",
+            "base_link",
+        )
+        self.declare_parameter(
+            "arm_base_frame",
+            "arm_base_link",
+        )
+
+        self.declare_parameter(
+            "load_tray_action",
+            "/load_tray",
+        )
+        self.declare_parameter(
+            "load_tray_server_timeout_sec",
+            5.0,
+        )
+
         self.declare_parameter(
             "shelf_map_path",
             str(default_config_dir / "shelf_map.yaml"),
@@ -110,7 +140,6 @@ class TaskManagerNode(Node):
             self.get_parameter("navigation_action").value
         )
 
-        perception_action = str(self.get_parameter('perception_action').value)
         manipulation_action = str(self.get_parameter('manipulation_action').value)
 
         qos_profile = QoSProfile(
@@ -134,6 +163,25 @@ class TaskManagerNode(Node):
             )
         )
 
+        scenario_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self._scenario_state_subscription = (
+            self.create_subscription(
+                ScenarioState,
+                str(
+                    self.get_parameter(
+                        "scenario_state_topic"
+                    ).value
+                ),
+                self._handle_scenario_state,
+                scenario_qos,
+            )
+        )
+
         self._navigation_client = ActionClient(
             self,
             NavigateToTarget,
@@ -141,9 +189,23 @@ class TaskManagerNode(Node):
         )
         self._navigation_goal_handle = None
 
-        self._perception_client = ActionClient(self, DetectTargetSlot, perception_action)
-        self._perception_goal_handle = None
-        self._detected_target_slot = None
+        self._tf_buffer = Buffer()
+        self._tf_listener = TransformListener(
+            self._tf_buffer,
+            self,
+            spin_thread=False,
+        )
+
+        self._load_tray_client = ActionClient(
+            self,
+            LoadTray,
+            str(
+                self.get_parameter(
+                    "load_tray_action"
+                ).value
+            ),
+        )
+        self._load_tray_goal_handle = None
 
         self._manipulation_client = ActionClient(self, PlaceBook, manipulation_action)
         self._manipulation_goal_handle = None
@@ -157,6 +219,9 @@ class TaskManagerNode(Node):
         self._accepted_job_ids: set[str] = set()
         self._active_navigation_target_type = ""
         self._active_navigation_target_id = ""
+        self._scenario_run_id = ""
+        self._scenario_reset_pending = False
+        self._action_generation = 0
 
         self._status_message = "Initializing task manager."
 
@@ -192,13 +257,108 @@ class TaskManagerNode(Node):
             f"'{navigation_action}'."
         )
         self.get_logger().info(
-            "Perception action client configured for "
-            f"'{perception_action}'."
-        )
-        self.get_logger().info(
             "Manipulation action client configured for "
             f"'{manipulation_action}'."
         )
+
+    def _handle_scenario_state(
+        self,
+        message: ScenarioState,
+    ) -> None:
+        """Stop 중인 작업을 폐기하고 다음 Play를 준비한다."""
+        if message.state in (
+            ScenarioState.STOPPED,
+            ScenarioState.RESETTING,
+        ):
+            if not self._scenario_reset_pending:
+                self._reset_for_scenario_restart()
+            return
+
+        if message.state != ScenarioState.READY:
+            return
+
+        run_id = message.run_id.strip()
+
+        if run_id:
+            self._scenario_run_id = run_id
+
+        if not self._scenario_reset_pending:
+            return
+
+        self._scenario_reset_pending = False
+        self._status_message = (
+            "Scenario reset completed. Waiting for a tray job."
+        )
+        self._publish_status()
+        self.get_logger().info(
+            "Scenario READY received. Task manager is ready "
+            f"for a new cycle: run_id={run_id or '<empty>'}"
+        )
+
+    def _reset_for_scenario_restart(self) -> None:
+        """현재 action과 FSM을 무효화하고 IDLE로 복원한다."""
+        previous_state = self._fsm.current_state.name
+        previous_job_id = self._active_job_id
+
+        self._scenario_reset_pending = True
+        self._action_generation += 1
+
+        self._cancel_active_goal(
+            self._navigation_goal_handle,
+            "navigation",
+        )
+        self._cancel_active_goal(
+            self._load_tray_goal_handle,
+            "load_tray",
+        )
+        self._cancel_active_goal(
+            self._manipulation_goal_handle,
+            "manipulation",
+        )
+
+        self._navigation_goal_handle = None
+        self._load_tray_goal_handle = None
+        self._manipulation_goal_handle = None
+
+        self._fsm.reset()
+        self._active_job_id = ""
+        self._current_plan = None
+        self._current_task_index = 0
+        self._completed_book_ids.clear()
+        self._accepted_job_ids.clear()
+        self._active_navigation_target_type = ""
+        self._active_navigation_target_id = ""
+
+        self._status_message = (
+            "Scenario stopped. Waiting for reset to complete."
+        )
+        self._publish_status()
+
+        self.get_logger().info(
+            "Task manager reset for scenario restart: "
+            f"previous_state={previous_state}, "
+            f"previous_job_id={previous_job_id or '<none>'}, "
+            f"generation={self._action_generation}"
+        )
+
+    def _cancel_active_goal(
+        self,
+        goal_handle,
+        label: str,
+    ) -> None:
+        """현재 ROS action goal을 best-effort로 취소한다."""
+        if goal_handle is None:
+            return
+
+        try:
+            goal_handle.cancel_goal_async()
+            self.get_logger().info(
+                f"Scenario reset requested {label} goal cancellation."
+            )
+        except Exception as error:
+            self.get_logger().warning(
+                f"Failed to request {label} goal cancellation: {error}"
+            )
 
     def _handle_tray_job(
         self,
@@ -255,7 +415,6 @@ class TaskManagerNode(Node):
         self._current_plan = plan
         self._current_task_index = 0
         self._completed_book_ids.clear()
-        self._detected_target_slot = None
         self._active_job_id = plan.job_id
         self._accepted_job_ids.add(plan.job_id)
 
@@ -293,6 +452,45 @@ class TaskManagerNode(Node):
 
         self._send_navigation_to_return()
 
+    def _build_waypoints(
+        self,
+        *,
+        frame_id: str,
+        waypoint_data: list[dict],
+    ) -> list[PoseStamped]:
+        """Convert YAML waypoint mappings to PoseStamped messages."""
+        waypoints: list[PoseStamped] = []
+        stamp = self.get_clock().now().to_msg()
+
+        for data in waypoint_data:
+            position = data["position"]
+            orientation = data["orientation"]
+
+            waypoint = PoseStamped()
+            waypoint.header.stamp = stamp
+            waypoint.header.frame_id = frame_id
+
+            waypoint.pose.position.x = float(position["x"])
+            waypoint.pose.position.y = float(position["y"])
+            waypoint.pose.position.z = float(position["z"])
+
+            waypoint.pose.orientation.x = float(
+                orientation["x"]
+            )
+            waypoint.pose.orientation.y = float(
+                orientation["y"]
+            )
+            waypoint.pose.orientation.z = float(
+                orientation["z"]
+            )
+            waypoint.pose.orientation.w = float(
+                orientation["w"]
+            )
+
+            waypoints.append(waypoint)
+
+        return waypoints
+
     def _send_navigation_to_return(self) -> None:
         """Send a navigation goal for the return station."""
         if self._current_plan is None:
@@ -302,11 +500,23 @@ class TaskManagerNode(Node):
             )
             return
 
+        return_pose = self._current_plan.return_station_pose
+        frame_id = str(return_pose["frame_id"])
+
+        waypoints = self._build_waypoints(
+            frame_id=frame_id,
+            waypoint_data=list(
+                return_pose.get("waypoints", [])
+            ),
+        )
+
         self._send_navigation_goal(
             target_type="return_station",
             target_id="return_station",
-            frame_id=str(self._current_plan.return_station_pose['frame_id']),
-            target_pose=self._current_plan.return_station_pose,
+            frame_id=frame_id,
+            target_pose=return_pose,
+            waypoints=waypoints,
+            enable_fine_alignment=True,
         )
 
     def _send_navigation_to_shelf(self) -> None:
@@ -331,12 +541,174 @@ class TaskManagerNode(Node):
             self._current_task_index
         ]
 
+        shelf_data = (
+            self._data_manager.get_shelf_for_classification(
+                task.classification_code
+            )
+        )
+
+        waypoints = self._build_waypoints(
+            frame_id=task.shelf_frame_id,
+            waypoint_data=list(
+                shelf_data.get("waypoints", [])
+            ),
+        )
+
         self._send_navigation_goal(
             target_type="shelf",
             target_id=task.shelf_id,
             frame_id=task.shelf_frame_id,
             target_pose=task.shelf_observation_pose,
+            waypoints=waypoints,
+            enable_fine_alignment=True,
         )
+
+    @staticmethod
+    def _yaw_from_quaternion(quaternion) -> float:
+        """Return planar yaw from a quaternion."""
+        sin_yaw = 2.0 * (
+            quaternion.w * quaternion.z
+            + quaternion.x * quaternion.y
+        )
+        cos_yaw = 1.0 - 2.0 * (
+            quaternion.y * quaternion.y
+            + quaternion.z * quaternion.z
+        )
+        return math.atan2(sin_yaw, cos_yaw)
+
+    def _send_shelf_retreat(self) -> None:
+        """Retreat from the shelf before requesting the home route."""
+        global_frame = str(
+            self.get_parameter("global_frame").value
+        )
+        robot_base_frame = str(
+            self.get_parameter("robot_base_frame").value
+        )
+        arm_base_frame = str(
+            self.get_parameter("arm_base_frame").value
+        )
+        retreat_distance = float(
+            self.get_parameter(
+                "shelf_retreat_goal_distance_m"
+            ).value
+        )
+
+        # 최대 직접 이동거리 검증은 navigation_controller가 담당한다.
+        if retreat_distance <= 0.0:
+            self._fail_navigation(
+                error_code=self.ERROR_NAVIGATION_RESULT,
+                message=(
+                    "Shelf retreat distance must be positive: "
+                    f"{retreat_distance:.3f}"
+                ),
+            )
+            return
+
+        try:
+            base_transform = self._tf_buffer.lookup_transform(
+                global_frame,
+                robot_base_frame,
+                Time(),
+            )
+            arm_transform = self._tf_buffer.lookup_transform(
+                global_frame,
+                arm_base_frame,
+                Time(),
+            )
+        except TransformException as error:
+            self._fail_navigation(
+                error_code=self.ERROR_NAVIGATION_RESULT,
+                message=(
+                    "Failed to obtain TF for shelf retreat: "
+                    f"{error}"
+                ),
+            )
+            return
+
+        base_translation = (
+            base_transform.transform.translation
+        )
+        base_rotation = (
+            base_transform.transform.rotation
+        )
+        arm_rotation = (
+            arm_transform.transform.rotation
+        )
+
+        arm_yaw = self._yaw_from_quaternion(
+            arm_rotation
+        )
+
+        # arm_base_link +Y가 책장 방향이므로 -Y가 후퇴 방향이다.
+        target_x = (
+            base_translation.x
+            + math.sin(arm_yaw) * retreat_distance
+        )
+        target_y = (
+            base_translation.y
+            - math.cos(arm_yaw) * retreat_distance
+        )
+
+        retreat_pose = {
+            "position": {
+                "x": target_x,
+                "y": target_y,
+                "z": base_translation.z,
+            },
+            "orientation": {
+                "x": base_rotation.x,
+                "y": base_rotation.y,
+                "z": base_rotation.z,
+                "w": base_rotation.w,
+            },
+        }
+
+        self._status_message = (
+            "Retreating from the shelf before returning home."
+        )
+        self._publish_status()
+
+        self.get_logger().info(
+            "Sending shelf-retreat navigation goal: "
+            f"goal_distance={retreat_distance:.2f}m, "
+            f"target_map=({target_x:+.3f}, {target_y:+.3f})"
+        )
+
+        self._send_navigation_goal(
+            target_type="shelf_retreat",
+            target_id="shelf_retreat",
+            frame_id=global_frame,
+            target_pose=retreat_pose,
+            waypoints=[],
+            enable_fine_alignment=True,
+        )
+
+    def _handle_shelf_retreat_arrival(self) -> None:
+        """Send the normal home goal after clearing the shelf."""
+        if (
+            self._fsm.current_state
+            is not SystemState.RETURN_HOME
+        ):
+            self._fail_navigation(
+                error_code=self.ERROR_NAVIGATION_RESULT,
+                message=(
+                    "Shelf-retreat result received in "
+                    f"state '{self._fsm.current_state.name}'."
+                ),
+            )
+            return
+
+        self.get_logger().info(
+            "Shelf retreat completed. "
+            "Sending the home navigation goal."
+        )
+
+        self._status_message = (
+            "Shelf retreat completed. Returning home."
+        )
+        self._publish_status()
+
+        self._send_navigation_home()
 
     def _send_navigation_home(self) -> None:
         """Send a navigation goal for the home position."""
@@ -347,21 +719,33 @@ class TaskManagerNode(Node):
             )
             return
 
+        home_pose = self._current_plan.home_pose
+        frame_id = str(home_pose["frame_id"])
+
+        waypoints = self._build_waypoints(
+            frame_id=frame_id,
+            waypoint_data=list(
+                home_pose.get("waypoints", [])
+            ),
+        )
+
         self._send_navigation_goal(
             target_type="home",
             target_id="home",
-            frame_id=str(
-                self._current_plan.home_pose["frame_id"]
-            ),
-            target_pose=self._current_plan.home_pose,
+            frame_id=frame_id,
+            target_pose=home_pose,
+            waypoints=waypoints,
+            enable_fine_alignment=True,
         )
 
     def _send_navigation_goal(
         self,
         target_type: str,
         target_id: str,
-        frame_id:str,
+        frame_id: str,
         target_pose: dict,
+        waypoints: list[PoseStamped],
+        enable_fine_alignment: bool,
     ) -> None:
         """Send one navigation goal to the AMR."""
         timeout_sec = float(
@@ -390,6 +774,8 @@ class TaskManagerNode(Node):
         goal.job_id = self._active_job_id
         goal.target_type = target_type
         goal.target_id = target_id
+        goal.waypoints = list(waypoints)
+        goal.enable_fine_alignment = bool(enable_fine_alignment)
 
         position = target_pose["position"]
         orientation = target_pose["orientation"]
@@ -422,17 +808,6 @@ class TaskManagerNode(Node):
             orientation["w"]
         )
 
-        goal.position_tolerance = float(
-            self.get_parameter(
-                "position_tolerance"
-            ).value
-        )
-        goal.yaw_tolerance = float(
-            self.get_parameter(
-                "yaw_tolerance"
-            ).value
-        )
-
         self._active_navigation_target_type = target_type
         self._active_navigation_target_id = target_id
 
@@ -441,30 +816,46 @@ class TaskManagerNode(Node):
             f"job_id={goal.job_id}, "
             f"target_type={goal.target_type}, "
             f"target_id={goal.target_id}, "
+            f"waypoints={len(goal.waypoints)}, "
+            f"fine_alignment={goal.enable_fine_alignment}, "
             f"x={goal.target_pose.pose.position.x:.2f}, "
             f"y={goal.target_pose.pose.position.y:.2f}"
         )
+
+        generation = self._action_generation
 
         send_goal_future = (
             self._navigation_client.send_goal_async(
                 goal,
                 feedback_callback=(
-                    self._handle_navigation_feedback
+                    lambda feedback_message,
+                    generation=generation:
+                    self._handle_navigation_feedback(
+                        feedback_message,
+                        generation,
+                    )
                 ),
             )
         )
         send_goal_future.add_done_callback(
-            self._handle_navigation_goal_response
+            lambda future, generation=generation:
+            self._handle_navigation_goal_response(
+                future,
+                generation,
+            )
         )
 
     def _handle_navigation_goal_response(
         self,
         future,
+        generation: int,
     ) -> None:
         """Handle acceptance or rejection of a goal."""
         try:
             goal_handle = future.result()
         except Exception as error:
+            if generation != self._action_generation:
+                return
             self._fail_navigation(
                 error_code=self.ERROR_NAVIGATION_RESULT,
                 message=(
@@ -472,6 +863,11 @@ class TaskManagerNode(Node):
                     f"{error}"
                 ),
             )
+            return
+
+        if generation != self._action_generation:
+            if goal_handle is not None and goal_handle.accepted:
+                goal_handle.cancel_goal_async()
             return
 
         if goal_handle is None or not goal_handle.accepted:
@@ -492,20 +888,38 @@ class TaskManagerNode(Node):
 
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(
-            self._handle_navigation_result
+            lambda future, generation=generation:
+            self._handle_navigation_result(
+                future,
+                generation,
+            )
         )
 
     def _handle_navigation_feedback(
         self,
         feedback_message,
+        generation: int,
     ) -> None:
         """Handle navigation progress feedback."""
+        if generation != self._action_generation:
+            return
+
         feedback = feedback_message.feedback
+
+        if feedback.total_waypoints > 0:
+            waypoint_status = (
+                f", waypoint="
+                f"{feedback.current_waypoint_index + 1}"
+                f"/{feedback.total_waypoints}"
+            )
+        else:
+            waypoint_status = ""
 
         self._status_message = (
             f"Navigating to "
             f"'{self._active_navigation_target_id}': "
-            f"phase={feedback.phase}, "
+            f"phase={feedback.phase}"
+            f"{waypoint_status}, "
             f"remaining={feedback.remaining_distance:.2f} m"
         )
         self._publish_status()
@@ -514,7 +928,8 @@ class TaskManagerNode(Node):
             "Navigation feedback: "
             f"target_id="
             f"{self._active_navigation_target_id}, "
-            f"phase={feedback.phase}, "
+            f"phase={feedback.phase}"
+            f"{waypoint_status}, "
             f"remaining_distance="
             f"{feedback.remaining_distance:.2f}, "
             f"position_error="
@@ -525,8 +940,12 @@ class TaskManagerNode(Node):
     def _handle_navigation_result(
         self,
         future,
+        generation: int,
     ) -> None:
         """Handle the completed navigation result."""
+        if generation != self._action_generation:
+            return
+
         try:
             wrapped_result = future.result()
             result = wrapped_result.result
@@ -570,6 +989,13 @@ class TaskManagerNode(Node):
             == "return_station"
         ):
             self._handle_return_station_arrival()
+            return
+
+        if (
+            self._active_navigation_target_type
+            == "shelf_retreat"
+        ):
+            self._handle_shelf_retreat_arrival()
             return
 
         if self._active_navigation_target_type == "shelf":
@@ -616,6 +1042,190 @@ class TaskManagerNode(Node):
         self.get_logger().info(
             "FSM transition completed: "
             "NAV_TO_RETURN -> RECEIVE_TRAY"
+        )
+
+        self._send_load_tray_goal()
+
+    def _send_load_tray_goal(self) -> None:
+        """Request tray transfer from the return machine."""
+        if self._current_plan is None:
+            self._fail_tray_loading(
+                error_code=self.ERROR_TRAY_FAILED,
+                message="Current job plan does not exist.",
+            )
+            return
+
+        timeout_sec = float(
+            self.get_parameter(
+                "load_tray_server_timeout_sec"
+            ).value
+        )
+
+        self.get_logger().info(
+            "Waiting for LoadTray action server."
+        )
+
+        if not self._load_tray_client.wait_for_server(
+            timeout_sec=timeout_sec
+        ):
+            self._fail_tray_loading(
+                error_code=self.ERROR_TRAY_SERVER,
+                message=(
+                    "LoadTray action server is not "
+                    "available."
+                ),
+            )
+            return
+
+        goal = LoadTray.Goal()
+        goal.job_id = self._current_plan.job_id
+        goal.tray_id = self._current_plan.tray_id
+
+        generation = self._action_generation
+
+        send_goal_future = (
+            self._load_tray_client.send_goal_async(
+                goal,
+                feedback_callback=(
+                    lambda feedback_message,
+                    generation=generation:
+                    self._handle_load_tray_feedback(
+                        feedback_message,
+                        generation,
+                    )
+                ),
+            )
+        )
+        send_goal_future.add_done_callback(
+            lambda future, generation=generation:
+            self._handle_load_tray_goal_response(
+                future,
+                generation,
+            )
+        )
+
+    def _handle_load_tray_goal_response(
+        self,
+        future,
+        generation: int,
+    ) -> None:
+        try:
+            goal_handle = future.result()
+        except Exception as error:
+            if generation != self._action_generation:
+                return
+            self._fail_tray_loading(
+                error_code=self.ERROR_TRAY_FAILED,
+                message=(
+                    "Failed to send LoadTray goal: "
+                    f"{error}"
+                ),
+            )
+            return
+
+        if generation != self._action_generation:
+            if goal_handle is not None and goal_handle.accepted:
+                goal_handle.cancel_goal_async()
+            return
+
+        if goal_handle is None or not goal_handle.accepted:
+            self._fail_tray_loading(
+                error_code=self.ERROR_TRAY_REJECTED,
+                message="LoadTray goal was rejected.",
+            )
+            return
+
+        self._load_tray_goal_handle = goal_handle
+
+        self.get_logger().info(
+            "LoadTray goal was accepted."
+        )
+
+        result_future = goal_handle.get_result_async()
+        result_future.add_done_callback(
+            lambda future, generation=generation:
+            self._handle_load_tray_result(
+                future,
+                generation,
+            )
+        )
+
+    def _handle_load_tray_feedback(
+        self,
+        feedback_message,
+        generation: int,
+    ) -> None:
+        if generation != self._action_generation:
+            return
+
+        feedback = feedback_message.feedback
+
+        self._status_message = (
+            "Receiving tray: "
+            f"phase={feedback.phase}, "
+            f"progress={feedback.progress:.0%}"
+        )
+        self._publish_status()
+
+        self.get_logger().info(
+            "LoadTray feedback: "
+            f"phase={feedback.phase}, "
+            f"progress={feedback.progress:.2f}"
+        )
+
+    def _handle_load_tray_result(
+        self,
+        future,
+        generation: int,
+    ) -> None:
+        if generation != self._action_generation:
+            return
+
+        try:
+            wrapped_result = future.result()
+            result = wrapped_result.result
+        except Exception as error:
+            self._fail_tray_loading(
+                error_code=self.ERROR_TRAY_FAILED,
+                message=(
+                    "Failed to receive LoadTray result: "
+                    f"{error}"
+                ),
+            )
+            return
+
+        if not result.success:
+            error_code = int(result.error_code)
+
+            if error_code == 0:
+                error_code = self.ERROR_TRAY_FAILED
+
+            self._fail_tray_loading(
+                error_code=error_code,
+                message=(
+                    result.message
+                    or "Tray loading failed."
+                ),
+            )
+            return
+
+        if (
+            self._fsm.current_state
+            is not SystemState.RECEIVE_TRAY
+        ):
+            self._fail_tray_loading(
+                error_code=self.ERROR_TRAY_FAILED,
+                message=(
+                    "LoadTray result received in state "
+                    f"'{self._fsm.current_state.name}'."
+                ),
+            )
+            return
+
+        self._load_tray_goal_handle = None
+
+        self.get_logger().info(
+            f"Tray loading succeeded: {result.message}"
         )
 
         self._start_first_book_task()
@@ -669,6 +1279,41 @@ class TaskManagerNode(Node):
             f"{len(self._current_plan.tasks)}, "
             f"target_shelf={task.shelf_id}"
         )
+
+        same_shelf_as_previous = False
+
+        if self._current_task_index > 0:
+            previous_task = self._current_plan.tasks[
+                self._current_task_index - 1
+            ]
+            same_shelf_as_previous = (
+                previous_task.shelf_id == task.shelf_id
+                and previous_task.shelf_frame_id
+                == task.shelf_frame_id
+            )
+
+        if same_shelf_as_previous:
+            self._fsm.transition(
+                SystemState.PLACE_BOOK
+            )
+            self._status_message = (
+                f"Already at shelf '{task.shelf_id}'. "
+                "Starting the next book placement."
+            )
+            self._publish_status()
+
+            self.get_logger().info(
+                "Same shelf as previous task; "
+                "skipping redundant shelf navigation: "
+                f"shelf_id={task.shelf_id}"
+            )
+            self.get_logger().info(
+                "FSM transition completed: "
+                "SELECT_BOOK -> PLACE_BOOK"
+            )
+
+            self._send_place_book_goal()
+            return
 
         self._fsm.transition(
             SystemState.NAV_TO_SHELF
@@ -731,7 +1376,6 @@ class TaskManagerNode(Node):
         self._current_plan = None
         self._current_task_index = 0
         self._completed_book_ids.clear()
-        self._detected_target_slot = None
         self._active_navigation_target_type = ""
         self._active_navigation_target_id = ""
 
@@ -760,266 +1404,19 @@ class TaskManagerNode(Node):
             )
             return
 
-        self._fsm.transition(
-            SystemState.DETECT_TARGET_SLOT
-        )
+        self._fsm.transition(SystemState.PLACE_BOOK)
         self._status_message = (
             f"Arrived at shelf "
             f"'{self._active_navigation_target_id}'. "
-            "Waiting for empty-slot detection."
+            "Starting book placement."
         )
         self._publish_status()
 
         self.get_logger().info(
             "FSM transition completed: "
-            "NAV_TO_SHELF -> DETECT_TARGET_SLOT"
+            "NAV_TO_SHELF -> PLACE_BOOK"
         )
 
-        self._send_detect_target_slot_goal()
-
-    def _send_detect_target_slot_goal(self) -> None:
-        """Request empty-slot detection for the current book."""
-        if self._current_plan is None:
-            self._fail_perception(
-                error_code=self.ERROR_PERCEPTION_RESULT,
-                message="Current job plan does not exist.",
-            )
-            return
-
-        if self._current_task_index >= len(
-            self._current_plan.tasks
-        ):
-            self._fail_perception(
-                error_code=self.ERROR_PERCEPTION_RESULT,
-                message="No current book task is available.",
-            )
-            return
-
-        timeout_sec = self._data_manager.get_timeout(
-            "perception"
-        )
-
-        self.get_logger().info(
-            "Waiting for perception action server."
-        )
-
-        if not self._perception_client.wait_for_server(
-            timeout_sec=timeout_sec
-        ):
-            self._fail_perception(
-                error_code=self.ERROR_PERCEPTION_SERVER,
-                message=(
-                    "Perception action server is not "
-                    "available."
-                ),
-            )
-            return
-
-        task = self._current_plan.tasks[
-            self._current_task_index
-        ]
-        profile = task.book_profile
-
-        goal = DetectTargetSlot.Goal()
-        goal.job_id = task.job_id
-        goal.book_id = task.book_id
-        goal.shelf_id = task.shelf_id
-        goal.book_width = float(profile["width"])
-        goal.book_height = float(profile["height"])
-        goal.book_thickness = float(
-            profile["thickness"]
-        )
-        goal.safety_margin = float(
-            profile["safety_margin"]
-        )
-        goal.max_recaptures = (
-            self._data_manager.get_retry_limit(
-                "perception"
-            )
-        )
-
-        self.get_logger().info(
-            "Sending empty-slot detection goal: "
-            f"job_id={goal.job_id}, "
-            f"book_id={goal.book_id}, "
-            f"shelf_id={goal.shelf_id}, "
-            f"book_width={goal.book_width:.3f}, "
-            f"book_height={goal.book_height:.3f}, "
-            f"book_thickness={goal.book_thickness:.3f}"
-        )
-
-        send_goal_future = (
-            self._perception_client.send_goal_async(
-                goal,
-                feedback_callback=(
-                    self._handle_perception_feedback
-                ),
-            )
-        )
-        send_goal_future.add_done_callback(
-            self._handle_perception_goal_response
-        )
-
-    def _handle_perception_goal_response(
-        self,
-        future,
-    ) -> None:
-        """Handle acceptance of an empty-slot goal."""
-        try:
-            goal_handle = future.result()
-        except Exception as error:
-            self._fail_perception(
-                error_code=self.ERROR_PERCEPTION_RESULT,
-                message=(
-                    "Failed to send perception goal: "
-                    f"{error}"
-                ),
-            )
-            return
-
-        if goal_handle is None or not goal_handle.accepted:
-            self._fail_perception(
-                error_code=self.ERROR_PERCEPTION_REJECTED,
-                message=(
-                    "Perception action server rejected "
-                    "the goal."
-                ),
-            )
-            return
-
-        self._perception_goal_handle = goal_handle
-
-        self.get_logger().info(
-            "Empty-slot detection goal was accepted."
-        )
-
-        result_future = goal_handle.get_result_async()
-        result_future.add_done_callback(
-            self._handle_perception_result
-        )
-
-    def _handle_perception_feedback(
-        self,
-        feedback_message,
-    ) -> None:
-        """Handle empty-slot detection feedback."""
-        feedback = feedback_message.feedback
-
-        self._status_message = (
-            "Detecting empty slot: "
-            f"phase={feedback.phase}, "
-            f"candidates={feedback.candidate_count}, "
-            f"confidence={feedback.best_confidence:.2f}"
-        )
-        self._publish_status()
-
-        self.get_logger().info(
-            "Perception feedback: "
-            f"phase={feedback.phase}, "
-            f"candidate_count="
-            f"{feedback.candidate_count}, "
-            f"best_confidence="
-            f"{feedback.best_confidence:.2f}"
-        )
-
-    def _handle_perception_result(
-        self,
-        future,
-    ) -> None:
-        """Handle the detected target-slot result."""
-        try:
-            wrapped_result = future.result()
-            result = wrapped_result.result
-        except Exception as error:
-            self._fail_perception(
-                error_code=self.ERROR_PERCEPTION_RESULT,
-                message=(
-                    "Failed to receive perception result: "
-                    f"{error}"
-                ),
-            )
-            return
-
-        if not result.success:
-            error_code = int(result.error_code)
-
-            if error_code == 0:
-                error_code = self.ERROR_PERCEPTION_FAILED
-
-            self._fail_perception(
-                error_code=error_code,
-                message=(
-                    result.message
-                    or "Empty-slot detection failed."
-                ),
-            )
-            return
-
-        minimum_confidence = float(
-            self.get_parameter(
-                "minimum_slot_confidence"
-            ).value
-        )
-        confidence = float(
-            result.target_slot.confidence
-        )
-
-        if confidence < minimum_confidence:
-            self._fail_perception(
-                error_code=(
-                    self.ERROR_LOW_SLOT_CONFIDENCE
-                ),
-                message=(
-                    "Detected slot confidence is too low: "
-                    f"{confidence:.2f} < "
-                    f"{minimum_confidence:.2f}"
-                ),
-            )
-            return
-
-        if (
-            self._fsm.current_state
-            is not SystemState.DETECT_TARGET_SLOT
-        ):
-            self._fail_perception(
-                error_code=self.ERROR_PERCEPTION_RESULT,
-                message=(
-                    "Perception result received in "
-                    f"state '{self._fsm.current_state.name}'."
-                ),
-            )
-            return
-
-        self._perception_goal_handle = None
-        self._detected_target_slot = (
-            result.target_slot
-        )
-
-        target_slot = self._detected_target_slot
-
-        self.get_logger().info(
-            "Empty slot detected: "
-            f"frame_id={target_slot.header.frame_id}, "
-            f"x={target_slot.pose.position.x:.3f}, "
-            f"y={target_slot.pose.position.y:.3f}, "
-            f"z={target_slot.pose.position.z:.3f}, "
-            f"confidence={target_slot.confidence:.2f}, "
-            f"candidate_count={result.candidate_count}"
-        )
-
-        self._fsm.transition(
-            SystemState.PLACE_BOOK
-        )
-        self._status_message = (
-            "Empty slot detected. "
-            "Waiting to start book placement."
-        )
-        self._publish_status()
-
-        self.get_logger().info(
-            "FSM transition completed: "
-            "DETECT_TARGET_SLOT -> PLACE_BOOK"
-        )
         self._send_place_book_goal()
 
     def _send_place_book_goal(self) -> None:
@@ -1037,13 +1434,6 @@ class TaskManagerNode(Node):
             self._fail_manipulation(
                 error_code=self.ERROR_MANIPULATION_RESULT,
                 message="No current book task is available.",
-            )
-            return
-
-        if self._detected_target_slot is None:
-            self._fail_manipulation(
-                error_code=self.ERROR_MANIPULATION_RESULT,
-                message="Detected target slot does not exist.",
             )
             return
 
@@ -1070,55 +1460,49 @@ class TaskManagerNode(Node):
         task = self._current_plan.tasks[
             self._current_task_index
         ]
-        profile = task.book_profile
 
         goal = PlaceBook.Goal()
-        goal.job_id = task.job_id
-        goal.book_id = task.book_id
-        goal.target_slot = self._detected_target_slot
-        goal.book_width = float(profile["width"])
-        goal.book_height = float(profile["height"])
-        goal.book_thickness = float(
-            profile["thickness"]
-        )
-        goal.insertion_speed = float(
-            self.get_parameter(
-                "insertion_speed"
-            ).value
-        )
 
         self.get_logger().info(
-            "Sending book-placement goal: "
-            f"job_id={goal.job_id}, "
-            f"book_id={goal.book_id}, "
-            f"target_frame="
-            f"{goal.target_slot.header.frame_id}, "
-            f"insertion_depth="
-            f"{goal.target_slot.insertion_depth:.3f}, "
-            f"insertion_speed="
-            f"{goal.insertion_speed:.3f}"
+            "Sending book-placement command: "
+            f"book_id={task.book_id}, "
+            f"task_index={self._current_task_index}"
         )
+
+        generation = self._action_generation
 
         send_goal_future = (
             self._manipulation_client.send_goal_async(
                 goal,
                 feedback_callback=(
-                    self._handle_manipulation_feedback
+                    lambda feedback_message,
+                    generation=generation:
+                    self._handle_manipulation_feedback(
+                        feedback_message,
+                        generation,
+                    )
                 ),
             )
         )
         send_goal_future.add_done_callback(
-            self._handle_manipulation_goal_response
+            lambda future, generation=generation:
+            self._handle_manipulation_goal_response(
+                future,
+                generation,
+            )
         )
 
     def _handle_manipulation_goal_response(
         self,
         future,
+        generation: int,
     ) -> None:
         """Handle acceptance of a placement goal."""
         try:
             goal_handle = future.result()
         except Exception as error:
+            if generation != self._action_generation:
+                return
             self._fail_manipulation(
                 error_code=self.ERROR_MANIPULATION_RESULT,
                 message=(
@@ -1126,6 +1510,11 @@ class TaskManagerNode(Node):
                     f"{error}"
                 ),
             )
+            return
+
+        if generation != self._action_generation:
+            if goal_handle is not None and goal_handle.accepted:
+                goal_handle.cancel_goal_async()
             return
 
         if goal_handle is None or not goal_handle.accepted:
@@ -1148,34 +1537,44 @@ class TaskManagerNode(Node):
 
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(
-            self._handle_manipulation_result
+            lambda future, generation=generation:
+            self._handle_manipulation_result(
+                future,
+                generation,
+            )
         )
 
     def _handle_manipulation_feedback(
         self,
         feedback_message,
+        generation: int,
     ) -> None:
-        """Handle book-placement progress feedback."""
+        """Handle book-placement phase feedback."""
+        if generation != self._action_generation:
+            return
+
         feedback = feedback_message.feedback
 
         self._status_message = (
             "Placing book: "
-            f"phase={feedback.phase}, "
-            f"progress={feedback.progress:.2f}"
+            f"phase={feedback.phase}"
         )
         self._publish_status()
 
         self.get_logger().info(
             "Manipulation feedback: "
-            f"phase={feedback.phase}, "
-            f"progress={feedback.progress:.2f}"
+            f"phase={feedback.phase}"
         )
 
     def _handle_manipulation_result(
         self,
         future,
+        generation: int,
     ) -> None:
         """Handle the completed book-placement result."""
+        if generation != self._action_generation:
+            return
+
         try:
             wrapped_result = future.result()
             result = wrapped_result.result
@@ -1189,10 +1588,7 @@ class TaskManagerNode(Node):
             )
             return
 
-        if not (
-            result.success
-            and result.placement_verified
-        ):
+        if not result.success:
             error_code = int(result.error_code)
 
             if error_code == 0:
@@ -1202,12 +1598,6 @@ class TaskManagerNode(Node):
                 result.message
                 or "Book placement failed."
             )
-
-            if result.failed_phase:
-                failure_description = (
-                    f"{failure_description} "
-                    f"failed_phase={result.failed_phase}"
-                )
 
             self._fail_manipulation(
                 error_code=error_code,
@@ -1296,8 +1686,6 @@ class TaskManagerNode(Node):
             f"{len(self._current_plan.tasks)}"
         )
 
-        self._detected_target_slot = None
-
         self._fsm.transition(
             SystemState.NEXT_BOOK
         )
@@ -1339,7 +1727,7 @@ class TaskManagerNode(Node):
             "NEXT_BOOK -> RETURN_HOME"
         )
 
-        self._send_navigation_home()
+        self._send_shelf_retreat()
 
     def _fail_manipulation(
         self,
@@ -1347,21 +1735,6 @@ class TaskManagerNode(Node):
         message: str,
     ) -> None:
         """Move the FSM to FAILED after manipulation failure."""
-        self._fsm.fail(
-            error_code=error_code,
-            message=message,
-        )
-        self._status_message = message
-        self._publish_status()
-
-        self.get_logger().error(message)
-
-    def _fail_perception(
-        self,
-        error_code: int,
-        message: str,
-    ) -> None:
-        """Move the FSM to FAILED after perception failure."""
         self._fsm.fail(
             error_code=error_code,
             message=message,
@@ -1389,6 +1762,20 @@ class TaskManagerNode(Node):
             "Job planning failed: "
             f"{error_message}"
         )
+
+    def _fail_tray_loading(
+        self,
+        *,
+        error_code: int,
+        message: str,
+    ) -> None:
+        self._fsm.fail(
+            error_code=error_code,
+            message=message,
+        )
+        self._status_message = message
+        self._publish_status()
+        self.get_logger().error(message)
 
     def _fail_navigation(
         self,
@@ -1431,7 +1818,6 @@ class TaskManagerNode(Node):
             SystemState.RECEIVE_TRAY: 0.20,
             SystemState.SELECT_BOOK: 0.25,
             SystemState.NAV_TO_SHELF: 0.35,
-            SystemState.DETECT_TARGET_SLOT: 0.45,
             SystemState.PLACE_BOOK: 0.60,
             SystemState.UPDATE_DATA: 0.75,
             SystemState.NEXT_BOOK: 0.80,
@@ -1448,7 +1834,7 @@ class TaskManagerNode(Node):
     def destroy_node(self) -> None:
         """Destroy the action client and node."""
         self._navigation_client.destroy()
-        self._perception_client.destroy()
+        self._load_tray_client.destroy()
         self._manipulation_client.destroy()
         super().destroy_node()
 

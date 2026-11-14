@@ -3,7 +3,36 @@ ros2_ws/install/
 ros2_ws/log/
 
 __pycache__/
-*.pyc
+*.py[cod]
 .env
+isaac_sim/config/sim_local.env
 .venv/
 .vscode/
+scripts/demo/demo_local.env
+
+# 웹 클로드 왕복 등 팀 내부 소통 문서 — 공개 저장소에 두지 않는다 (로컬에는 남긴다)
+docs/doyoon-kim/web_claude/
+
+isaac_sim/cache/
+isaac_sim/logs/
+isaac_sim/generated/
+.venv/
+venv/
+__pycache__/
+build/
+install/
+log/
+*.usd
+*.usda
+*.usdc
+
+# Runtime-critical Ridgeback-Franka layers are part of the project.
+!isaac_sim/assets/robots/
+!isaac_sim/assets/robots/franka_nav.usda
+!isaac_sim/assets/worlds/
+# Runtime scene assets
+!isaac_sim/assets/worlds/library/
+!isaac_sim/assets/worlds/library/library_environment.usd
+!isaac_sim/assets/props/
+!isaac_sim/assets/props/tray/
+!isaac_sim/assets/props/tray/tray_set.usd
